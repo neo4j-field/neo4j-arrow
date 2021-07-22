@@ -6,7 +6,7 @@ from time import time
 
 pa.enable_signal_handlers(True)
 
-location = ("192.168.1.42", 9999)
+location = ("localhost", 9999)
 client = flight.FlightClient(location)
 print(f"Trying to connect to location {location}")
 
@@ -32,8 +32,7 @@ else:
     for action in actions:
         print(f"action {action}")
 
-#schema = pa.schema([('n', pa.string())])
-action = ("cypherRead", "UNWIND range(1, 1000000) AS n RETURN n".encode('utf8'))
+action = ("cypherRead", "UNWIND range(1, toInteger(1e7)) AS n RETURN n".encode('utf8'))
 try:
     for row in client.do_action(action, options=options):
         print(f"row: {row.body.to_pybytes()}")
@@ -51,6 +50,7 @@ else:
         print(f"flight: [cmd={flight.descriptor.command}, ticket={ticket}")
         result = client.do_get(ticket, options=options)
         start = time()
+        cnt = 0
         for chunk, metadata in result:
             pass
             #if metadata is None:
@@ -59,7 +59,10 @@ else:
             #    meta = metadata.to_pybytes()
             #print(f"chunk: {chunk}, metadata: {meta}")
             #print(f"num rows: {chunk.num_rows}")
-            #for col in chunk:
-            #    print(f"col: {col}")
+            for col in chunk:
+                #print(f"col: {col}")
+                cnt = cnt + len(col.tolist())
         finish = time()
-        print(f"done! time delta: {finish - start}")
+        print(f"Done! Time Delta: {round(finish - start, 1):,}s")
+        print(f"Count: {cnt:,} rows, Rate: {round(cnt / (finish - start)):,} rows/s")
+        break
