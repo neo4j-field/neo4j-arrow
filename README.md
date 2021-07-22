@@ -1,4 +1,4 @@
-# `neo4j-arrow` OR _how to go 100x faster with Neo4j and Python_
+# `neo4j-arrow` OR _how to go >10x faster with Neo4j and Python_
 
 This is some tire kicking of the [Apache Arrow](https://arrow.apache.org/) project to see if Arrow can help solve a few rough spots for us:
 
@@ -71,13 +71,13 @@ with neo4j.GraphDatabase.driver('neo4j://localhost:7687', auth=auth) as d:
 
 ### Using PyArrow
 
-PyArrow can't talk Bolt...but it can talk to an Apache Arrow Flight service. IF one existed that has it's own way to talk to Neo4j, THEN it could proxy the Cypher transaction and facilitate rendering the Arrow stream back to the PyArrow client.
+PyArrow can't talk Bolt...but, it can talk to an Apache Arrow Flight service. IF one existed that has it's own way to talk to Neo4j, THEN it could proxy the Cypher transaction and facilitate rendering the Arrow stream back to the PyArrow client.
 
 IF the Neo4j Java Driver is _measurably faster than_ the Neo4j Python driver, THEN it's possible the overhead of using it as a proxy is negligible.
 
-What's the performance with PyArrow and a Java Arrow Flight service? On my laptop with local db...it's **0.17s** to stream all the data back to the client.
+What's the performance with PyArrow and a Java Arrow Flight service? On my laptop with local db...it's **1.7s** to stream all the data back to the client.
 
-> That's **~100x faster**, btw
+> That's **~13x faster**, btw
 
 What's the client code look like? Well...this is a bit verbose as it handles some client/server auth, has to submit the query, then it needs to take the Ticket and get the stream...but it's not that bad:
 
