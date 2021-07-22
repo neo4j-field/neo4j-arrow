@@ -12,20 +12,21 @@ import java.util.Optional;
 public class Neo4jBasicAuthValidator implements BasicServerAuthHandler.BasicAuthValidator, BasicCallHeaderAuthenticator.CredentialValidator {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jBasicAuthValidator.class);
 
+    // XXX
     private static final String HARDCODED_TOKEN = "neo4j:password";
 
     @Override
     public byte[] getToken(String username, String password) {
-        logger.info("getToken called: username={}, password={}", username, password);
+        logger.debug("getToken called: username={}, password={}", username, password);
         final String token = Base64.getEncoder()
                 .encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
-        logger.info("token = {}", token);
+        logger.debug("token = {}", token);
         return token.getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
     public Optional<String> isValid(byte[] token) {
-        logger.info("isValid called: token={}", token);
+        logger.debug("isValid called: token={}", token);
 
         if (Arrays.equals(HARDCODED_TOKEN.getBytes(StandardCharsets.UTF_8), token))
             return Optional.of(HARDCODED_TOKEN);
@@ -35,7 +36,7 @@ public class Neo4jBasicAuthValidator implements BasicServerAuthHandler.BasicAuth
 
     @Override
     public CallHeaderAuthenticator.AuthResult validate(String username, String password) throws Exception {
-        logger.info("validate called: username={}, password={}", username, password);
+        logger.debug("validate called for username={}", username);
         if (username.equals("neo4j") && password.equals("password"))
             return () -> username;
         else

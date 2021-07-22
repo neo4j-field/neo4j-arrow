@@ -4,10 +4,7 @@ import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.FieldVector;
-import org.apache.arrow.vector.UInt4Vector;
-import org.apache.arrow.vector.VectorLoader;
-import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -25,12 +22,13 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class Neo4jProducer implements FlightProducer, AutoCloseable {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jProducer.class);
-
-    final static int MAX_BATCH_SIZE = 10_000;
+    final static int MAX_BATCH_SIZE = 1_000;
 
     final static String CYPHER_READ_ACTION = "cypherRead";
     final static String CYPHER_WRITE_ACTION = "cypherWrite";
+
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jProducer.class);
+
     final ActionType cypherRead = new ActionType(CYPHER_READ_ACTION, "Submit a READ transaction");
     final ActionType cypherWrite = new ActionType(CYPHER_WRITE_ACTION, "Submit a WRITE transaction");
 
@@ -53,7 +51,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     @Override
     public void getStream(CallContext context, Ticket ticket, ServerStreamListener listener) {
-        logger.info("getStream called: context={}, ticket={}", context, ticket.getBytes());
+        logger.debug("getStream called: context={}, ticket={}", context, ticket.getBytes());
 
         final Neo4jJob job = jobMap.get(ticket);
         if (job == null) {
@@ -72,43 +70,24 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
             listener.start(root);
             final VectorLoader loader = new VectorLoader(root);
 
-            int currentSize = 0;
             org.neo4j.driver.Result result = job.getResult();
-            Map<String, FieldVector> vectorMap = null;
+            Map<String, FieldVector> vectorMap = new HashMap<>();
 
             /*
                 Do things synchronously for now while figuring out the API. This should either be
                 adapted to use the AsyncSession or RsSession
              */
-            int cnt = 0;
+            int batchCnt = 0, currentPos = -1;
             while (result.hasNext()) {
+                currentPos++;
+
                 final Record record = result.next();
-                final int idx = currentSize % MAX_BATCH_SIZE;
+                final int idx = currentPos % MAX_BATCH_SIZE;
 
-                if (idx == 0) {
-                    // New batch
-                    if (vectorMap != null) {
-                        // flush old
-                        final List<ArrowFieldNode> nodes = new ArrayList<>();
-                        vectorMap.values().stream().forEach(vector -> {
-                            vector.setValueCount(MAX_BATCH_SIZE);
-                            nodes.add(new ArrowFieldNode(MAX_BATCH_SIZE, 0));
-                        });
-
-                        try (ArrowRecordBatch batch = new ArrowRecordBatch(MAX_BATCH_SIZE, nodes,
-                                vectorMap.values().stream()
-                                        .map(vector -> vector.getBuffers(true))
-                                        .flatMap(Stream::of).collect(Collectors.toList()))) {
-                            loader.load(batch);
-                            final byte[] metaMsg = String.format("batch %d", ++cnt).getBytes(StandardCharsets.UTF_8);
-                            final ArrowBuf metaBuf = allocator.buffer(metaMsg.length);
-                            metaBuf.writeBytes(metaMsg);
-                            listener.putNext(metaBuf);
-                            logger.info("put batch (pos={}, sz={})", currentSize, currentSize % MAX_BATCH_SIZE);
-                        }
-                    }
-
-                    vectorMap = new HashMap<>();
+                // Are we starting a new batch?
+                if (currentPos % MAX_BATCH_SIZE == 0) {
+                    vectorMap.values().forEach(ValueVector::close);
+                    vectorMap.clear();
                     for (String key : record.keys()) {
                         UInt4Vector vector = new UInt4Vector(key, allocator);
                         vector.allocateNew(MAX_BATCH_SIZE);
@@ -116,35 +95,69 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     }
                 }
 
+                // Process Fields in the Record
+                // XXX: for now use 4-byte uints for all fields
                 for (Pair<String, Value> field : record.fields()) {
                     UInt4Vector vector = (UInt4Vector) vectorMap.get(field.key());
-                    vector.set(idx, field.value().asInt());
+                    vector.setSafe(idx, field.value().asInt());
                 }
-                currentSize++;
+
+                // Flush a full buffer!
+                final int batchSize = (currentPos % MAX_BATCH_SIZE) + 1;
+                if (batchSize == MAX_BATCH_SIZE) {
+                    final List<ArrowFieldNode> nodes = new ArrayList<>();
+                    logger.info("flushing batch of size = {}", batchSize);
+
+                    // We need to tell the vectors how big they are...they don't know this!
+                    vectorMap.values().stream().forEach(vector -> {
+                        vector.setValueCount(batchSize);
+                        nodes.add(new ArrowFieldNode(batchSize, 0));
+                    });
+
+                    // Build and put our Batch. Throw in some metadata about which batch # this is
+                    try (ArrowRecordBatch batch = new ArrowRecordBatch(batchSize, nodes,
+                            vectorMap.values().stream()
+                                    .map(vector -> vector.getBuffers(true))
+                                    .flatMap(Stream::of).collect(Collectors.toList()))) {
+                        loader.load(batch);
+
+                        final byte[] metaMsg = String.format("batch %d", ++batchCnt).getBytes(StandardCharsets.UTF_8);
+                        final ArrowBuf metaBuf = allocator.buffer(metaMsg.length);
+                        metaBuf.writeBytes(metaMsg);
+                        listener.putNext(metaBuf);
+                        logger.debug("put batch (location={}, batchSize={})", currentPos + 1, batchSize);
+                    }
+                }
             }
 
-            // flush remainder
-            // logger.info("flushing vector {}...", vector);
-            if (currentSize % MAX_BATCH_SIZE > 0) {
+            // If our current batch isn't "full" at this point, it wasn't flushed.
+            final int batchSize = (currentPos % MAX_BATCH_SIZE) + 1;
+            if (batchSize < MAX_BATCH_SIZE) {
+                logger.info("flushing final batch, location={}, batchSize={}...", currentPos + 1, batchSize);
                 final List<ArrowFieldNode> nodes = new ArrayList<>();
-                for (FieldVector vector : vectorMap.values()) {
-                    vector.setValueCount(currentSize % MAX_BATCH_SIZE);
-                    nodes.add(new ArrowFieldNode(currentSize % MAX_BATCH_SIZE, 0));
-                }
-                try (ArrowRecordBatch batch = new ArrowRecordBatch(currentSize % MAX_BATCH_SIZE, nodes,
+
+                // We need to tell the vectors how big they are...they don't know this!
+                vectorMap.values().stream().forEach(vector -> {
+                    vector.setValueCount(batchSize);
+                    nodes.add(new ArrowFieldNode(batchSize, 0));
+                });
+
+                try (ArrowRecordBatch batch = new ArrowRecordBatch(batchSize, nodes,
                         vectorMap.values().stream()
                                 .map(vector -> vector.getBuffers(true))
                                 .flatMap(Stream::of).collect(Collectors.toList()))) {
                     loader.load(batch);
-                    final byte[] metaMsg = String.format("batch %d", ++cnt).getBytes(StandardCharsets.UTF_8);
+
+                    final byte[] metaMsg = String.format("batch %d", ++batchCnt).getBytes(StandardCharsets.UTF_8);
                     final ArrowBuf metaBuf = allocator.buffer(metaMsg.length);
                     metaBuf.writeBytes(metaMsg);
                     listener.putNext(metaBuf);
-                    logger.info("put batch (pos={}, sz={})", currentSize, currentSize % MAX_BATCH_SIZE);
+                    logger.debug("put batch (location={}, batchSize={})", currentPos + 1, batchSize);
                 }
             }
 
             listener.completed();
+            logger.info("completed sending {} batches for ticket {}", batchCnt, ticket);
         } catch (Exception e) {
             logger.error("error producing stream", e);
             listener.error(e);
@@ -157,36 +170,27 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     @Override
     public void listFlights(CallContext context, Criteria criteria, StreamListener<FlightInfo> listener) {
-        logger.info("listFlights called: context={}, criteria={}", context, criteria);
+        logger.debug("listFlights called: context={}, criteria={}", context, criteria);
         flightMap.values().stream().forEach(listener::onNext);
         listener.onCompleted();
     }
 
     @Override
     public FlightInfo getFlightInfo(CallContext context, FlightDescriptor descriptor) {
-        logger.info("getFlightInfo called: context={}, descriptor={}", context, descriptor);
+        logger.debug("getFlightInfo called: context={}, descriptor={}", context, descriptor);
         FlightInfo info = flightMap.values().stream().findFirst().get();
         return info;
     }
 
     @Override
     public Runnable acceptPut(CallContext context, FlightStream flightStream, StreamListener<PutResult> ackStream) {
-        logger.info("acceptPut called");
+        logger.debug("acceptPut called");
         return ackStream::onCompleted;
-    }
-
-    private static void safeSleep(long millis) {
-        try {
-            logger.info("sleeping {}ms", millis);
-            Thread.sleep(millis);
-        } catch (Exception e) {
-            return;
-        }
     }
 
     @Override
     public void doAction(CallContext context, Action action, StreamListener<Result> listener) {
-        logger.info("doAction called: action.type={}, peer={}", action.getType(), context.peerIdentity());
+        logger.debug("doAction called: action.type={}, peer={}", action.getType(), context.peerIdentity());
 
         if (action.getBody().length < 1) {
             logger.warn("missing body in action {}", action.getType());
@@ -205,10 +209,10 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                 String query = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(action.getBody())).toString();
 
                 org.neo4j.driver.Result result = session.run(query);
-                logger.info("XXXXX asking for keys");
+
+                // TODO: we need to build a Schema instance from inspecting the result's keys
                 // XXX does this block? does this consume the full stream?
                 List<String> keys = result.keys();
-                logger.info("XXXXXX got keys {}", keys);
                 Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
                 jobMap.put(ticket, new Neo4jJob(session, result));
 
@@ -237,7 +241,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     @Override
     public void listActions(CallContext context, StreamListener<ActionType> listener) {
-        logger.info("listActions called: context={}", context);
+        logger.debug("listActions called: context={}", context);
         listener.onNext(cypherRead);
         listener.onNext(cypherWrite);
         listener.onCompleted();

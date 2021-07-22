@@ -20,7 +20,6 @@ public class SillyBenchmark {
                 try (Session session = driver.session(SessionConfig.builder()
                         .withDefaultAccessMode(AccessMode.READ).build())) {
                     try {
-                        logger.info("Starting iteration {}", i);
                         long start = System.currentTimeMillis();
                         Result result = session.run("UNWIND range(1, 1000000) AS n RETURN n");
                         while (result.hasNext()) {
