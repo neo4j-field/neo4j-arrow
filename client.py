@@ -1,7 +1,8 @@
 import pyarrow as pa
 import pyarrow.flight as flight
-import sys
 import base64
+import sys
+from time import time
 
 pa.enable_signal_handlers(True)
 
@@ -32,7 +33,7 @@ else:
         print(f"action {action}")
 
 schema = pa.schema([('n', pa.string())])
-action = ("cypherRead", "UNWIND range(1, 23) AS n RETURN n".encode('utf8'))
+action = ("cypherRead", "UNWIND range(1, 1000000) AS n RETURN n".encode('utf8'))
 try:
     for row in client.do_action(action, options=options):
         print(f"row: {row.body.to_pybytes()}")
@@ -49,8 +50,16 @@ else:
         ticket = flight.endpoints[0].ticket
         print(f"flight: [cmd={flight.descriptor.command}, ticket={ticket}")
         result = client.do_get(ticket, options=options)
+        start = time()
         for chunk, metadata in result:
-            print(f"chunk: {chunk}, metadata: {metadata}")
+            pass
+            #if metadata is None:
+            #    meta = b""
+            #else:
+            #    meta = metadata.to_pybytes()
+            #print(f"chunk: {chunk}, metadata: {meta}")
             #print(f"num rows: {chunk.num_rows}")
-            for col in chunk:
-                print(f"col: {col}")
+            #for col in chunk:
+            #    print(f"col: {col}")
+        finish = time()
+        print(f"done! time delta: {finish - start}")
