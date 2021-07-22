@@ -32,7 +32,7 @@ else:
     for action in actions:
         print(f"action {action}")
 
-schema = pa.schema([('n', pa.string())])
+#schema = pa.schema([('n', pa.string())])
 action = ("cypherRead", "UNWIND range(1, 1000000) AS n RETURN n".encode('utf8'))
 try:
     for row in client.do_action(action, options=options):
