@@ -1,11 +1,13 @@
 package org.neo4j.arrow;
 
+import org.apache.arrow.flatbuf.Utf8;
 import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.*;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.UInt8Vector;
-import org.apache.arrow.vector.VectorLoader;
-import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -13,18 +15,19 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.driver.*;
+import org.neo4j.driver.util.Pair;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Neo4jProducer implements FlightProducer, AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jProducer.class);
+
+    final static int MAX_BATCH_SIZE = 10_000;
 
     final static String CYPHER_READ_ACTION = "cypherRead";
     final static String CYPHER_WRITE_ACTION = "cypherWrite";
@@ -69,54 +72,79 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
             listener.start(root);
             final VectorLoader loader = new VectorLoader(root);
 
-            final int maxBatchSize = 5;
             int currentSize = 0;
-
             org.neo4j.driver.Result result = job.getResult();
-            UInt8Vector vector = null;
+            Map<String, FieldVector> vectorMap = null;
 
+            /*
+                Do things synchronously for now while figuring out the API. This should either be
+                adapted to use the AsyncSession or Reac
+             */
+            int cnt = 0;
             while (result.hasNext()) {
                 final Record record = result.next();
-                final Value value = record.get("n");
-
-                final int idx = currentSize % maxBatchSize;
+                final int idx = currentSize % MAX_BATCH_SIZE;
 
                 if (idx == 0) {
                     // New batch
-                    if (vector != null) {
+                    if (vectorMap != null) {
                         // flush old
-                        vector.setValueCount(maxBatchSize);
-                        logger.info("flushing vector {}...", vector);
-                        final ArrowFieldNode node = new ArrowFieldNode(maxBatchSize, 0);
-                        final ArrowRecordBatch batch = new ArrowRecordBatch(maxBatchSize, Arrays.asList(node),
-                                Arrays.asList(vector.getBuffers(false)));
-                        logger.info("loading batch {}", batch);
-                        loader.load(batch);
-                        listener.putNext();
-                        safeSleep(2000);
+                        vectorMap.values().stream().forEach(vector -> vector.setValueCount(MAX_BATCH_SIZE));
+                        final List<ArrowFieldNode> nodes = new ArrayList<>();
+                        vectorMap.values().stream().forEach(vector -> {
+                            vector.setValueCount(MAX_BATCH_SIZE);
+                            nodes.add(new ArrowFieldNode(MAX_BATCH_SIZE, 0));
+                        });
+
+                        try (ArrowRecordBatch batch = new ArrowRecordBatch(MAX_BATCH_SIZE, nodes,
+                                vectorMap.values().stream()
+                                        .map(vector -> vector.getBuffers(true))
+                                        .flatMap(Stream::of).collect(Collectors.toList()))) {
+                            loader.load(batch);
+                            final byte[] metaMsg = String.format("batch %d", ++cnt).getBytes(StandardCharsets.UTF_8);
+                            final ArrowBuf metaBuf = allocator.buffer(metaMsg.length);
+                            metaBuf.writeBytes(metaMsg);
+                            listener.putNext(metaBuf);
+                            vectorMap.values().forEach(vector -> vector.close());
+                            logger.info("put batch (pos={}, sz={})", currentSize, currentSize % MAX_BATCH_SIZE);
+                        }
                     }
 
-                    vector = new UInt8Vector("n", allocator);
-                    vector.allocateNew(maxBatchSize);
-                    logger.info("allocated new vector {}", vector);
+                    vectorMap = new HashMap<>();
+                    for (String key : record.keys()) {
+                        UInt4Vector vector = new UInt4Vector(key, allocator);
+                        vector.allocateNew();
+                        vectorMap.put(key, vector);
+                    }
                 }
-                vector.set(idx, value.asLong());
-                logger.info("added {} to vector @ idx {} (currentSize = {})", value.asLong(), idx, currentSize);
 
+                for (Pair<String, Value> field : record.fields()) {
+                    UInt4Vector vector = (UInt4Vector) vectorMap.get(field.key());
+                    vector.set(idx, field.value().asInt());
+                }
                 currentSize++;
             }
 
             // flush remainder
-            if (vector != null) {
-                // flush old
-                vector.setValueCount(currentSize % maxBatchSize);
-                logger.info("flushing vector {}...", vector);
-                final ArrowFieldNode node = new ArrowFieldNode(currentSize % maxBatchSize, 0);
-                final ArrowRecordBatch batch = new ArrowRecordBatch(currentSize % maxBatchSize, Arrays.asList(node),
-                        Arrays.asList(vector.getBuffers(false)));
-                logger.info("loading batch {}", batch);
-                loader.load(batch);
-                listener.putNext();
+            // logger.info("flushing vector {}...", vector);
+            if (currentSize % MAX_BATCH_SIZE > 0) {
+                final List<ArrowFieldNode> nodes = new ArrayList<>();
+                for (FieldVector vector : vectorMap.values()) {
+                    vector.setValueCount(currentSize % MAX_BATCH_SIZE);
+                    nodes.add(new ArrowFieldNode(currentSize % MAX_BATCH_SIZE, 0));
+                }
+                try (ArrowRecordBatch batch = new ArrowRecordBatch(currentSize % MAX_BATCH_SIZE, nodes,
+                        vectorMap.values().stream()
+                                .map(vector -> vector.getBuffers(true))
+                                .flatMap(Stream::of).collect(Collectors.toList()))) {
+                    loader.load(batch);
+                    final byte[] metaMsg = String.format("batch %d", ++cnt).getBytes(StandardCharsets.UTF_8);
+                    final ArrowBuf metaBuf = allocator.buffer(metaMsg.length);
+                    metaBuf.writeBytes(metaMsg);
+                    listener.putNext(metaBuf);
+                    vectorMap.values().forEach(vector -> vector.close());
+                    logger.info("put batch (pos={}, sz={})", currentSize, currentSize % MAX_BATCH_SIZE);
+                }
             }
 
             listener.completed();
@@ -171,6 +199,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
         switch (action.getType()) {
             case CYPHER_READ_ACTION:
+                // XXX use a simple for now, adapt to async or rx session later to by stream friendly
                 Session session = driver.session(SessionConfig.builder()
                         .withDatabase("neo4j")
                         .withDefaultAccessMode(AccessMode.READ)
@@ -179,16 +208,19 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                 String query = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(action.getBody())).toString();
 
                 org.neo4j.driver.Result result = session.run(query);
+                logger.info("XXXXX asking for keys");
                 // XXX does this block? does this consume the full stream?
                 List<String> keys = result.keys();
+                logger.info("XXXXXX got keys {}", keys);
                 Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
                 jobMap.put(ticket, new Neo4jJob(session, result));
 
-                FlightInfo info = new FlightInfo(new Schema(keys.stream()
-                            .map(key -> new Field(key,
-                                    FieldType.nullable(new ArrowType.Int(Long.SIZE, true)),
-                                    null))
-                            .collect(Collectors.toList()), null),
+                final List<Field> fields = keys.stream()
+                        .map(key -> new Field(key,
+                                FieldType.nullable(new ArrowType.Int(32, true)),
+                                null))
+                        .collect(Collectors.toList());
+                final FlightInfo info = new FlightInfo(new Schema(fields, null),
                         FlightDescriptor.command(action.getBody()),
                         Arrays.asList(new FlightEndpoint(ticket, location)), -1, -1);
                 flightMap.put(ticket, info);

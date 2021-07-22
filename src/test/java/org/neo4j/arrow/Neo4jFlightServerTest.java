@@ -19,8 +19,8 @@ public class Neo4jFlightServerTest {
     }
 
     public static void main(String[] args) throws Exception {
-        long timeout = 15;
-        TimeUnit unit = TimeUnit.MINUTES;
+        long timeout = 30;
+        TimeUnit unit = TimeUnit.SECONDS;
 
         final BufferAllocator bufferAllocator = new RootAllocator(Long.MAX_VALUE);
         final Neo4jFlightServer neo4jFlightServer = new Neo4jFlightServer(

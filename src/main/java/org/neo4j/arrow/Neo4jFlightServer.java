@@ -22,7 +22,9 @@ public class Neo4jFlightServer implements AutoCloseable {
         this.location = location;
         this.producer = new Neo4jProducer(allocator, location);
         this.server = FlightServer.builder(allocator, location, this.producer)
+                // XXX header auth expects basic HTTP headers in the GRPC calls
                 .headerAuthenticator(new BasicCallHeaderAuthenticator(new Neo4jBasicAuthValidator()))
+                // XXX this approach for some reason didn't work for me in python :-(
                 //.authHandler(new BasicServerAuthHandler(new Neo4jBasicAuthValidator()))
                 .build();
     }
