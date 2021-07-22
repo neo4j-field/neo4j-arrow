@@ -1,13 +1,13 @@
 package org.neo4j.arrow;
 
-import org.apache.arrow.flatbuf.Utf8;
 import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.*;
-import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.impl.UnionListWriter;
+import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.UInt4Vector;
+import org.apache.arrow.vector.VectorLoader;
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -78,7 +78,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
             /*
                 Do things synchronously for now while figuring out the API. This should either be
-                adapted to use the AsyncSession or Reac
+                adapted to use the AsyncSession or RsSession
              */
             int cnt = 0;
             while (result.hasNext()) {
@@ -89,7 +89,6 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     // New batch
                     if (vectorMap != null) {
                         // flush old
-                        vectorMap.values().stream().forEach(vector -> vector.setValueCount(MAX_BATCH_SIZE));
                         final List<ArrowFieldNode> nodes = new ArrayList<>();
                         vectorMap.values().stream().forEach(vector -> {
                             vector.setValueCount(MAX_BATCH_SIZE);
@@ -105,7 +104,6 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                             final ArrowBuf metaBuf = allocator.buffer(metaMsg.length);
                             metaBuf.writeBytes(metaMsg);
                             listener.putNext(metaBuf);
-                            vectorMap.values().forEach(vector -> vector.close());
                             logger.info("put batch (pos={}, sz={})", currentSize, currentSize % MAX_BATCH_SIZE);
                         }
                     }
@@ -113,7 +111,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     vectorMap = new HashMap<>();
                     for (String key : record.keys()) {
                         UInt4Vector vector = new UInt4Vector(key, allocator);
-                        vector.allocateNew();
+                        vector.allocateNew(MAX_BATCH_SIZE);
                         vectorMap.put(key, vector);
                     }
                 }
@@ -142,7 +140,6 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     final ArrowBuf metaBuf = allocator.buffer(metaMsg.length);
                     metaBuf.writeBytes(metaMsg);
                     listener.putNext(metaBuf);
-                    vectorMap.values().forEach(vector -> vector.close());
                     logger.info("put batch (pos={}, sz={})", currentSize, currentSize % MAX_BATCH_SIZE);
                 }
             }
@@ -248,6 +245,10 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     @Override
     public void close() throws Exception {
+        driver.close();
 
+        for (Neo4jJob job : jobMap.values()) {
+            job.close();
+        }
     }
 }
