@@ -3,9 +3,7 @@ package org.neo4j.arrow;
 import org.neo4j.driver.Result;
 import org.neo4j.driver.Session;
 
-import java.io.Closeable;
-
-public class Neo4jJob implements Closeable {
+public class Neo4jJob implements AutoCloseable {
 
     private Session session;
     private Result result;

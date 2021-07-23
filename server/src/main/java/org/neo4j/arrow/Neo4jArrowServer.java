@@ -20,8 +20,8 @@ public class Neo4jArrowServer {
     }
 
     public static void main(String[] args) throws Exception {
-        long timeout = 3;
-        TimeUnit unit = TimeUnit.MINUTES;
+        long timeout = 30;
+        TimeUnit unit = TimeUnit.SECONDS;
 
         final BufferAllocator bufferAllocator = new RootAllocator(Long.MAX_VALUE);
         final Neo4jFlightApp app = new Neo4jFlightApp(

@@ -6,12 +6,21 @@ import org.apache.arrow.flight.grpc.CredentialCallOption;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
-import org.apache.arrow.vector.VectorUnloader;
+import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.impl.IntReaderImpl;
+import org.apache.arrow.vector.complex.reader.BaseReader;
+import org.apache.arrow.vector.complex.reader.IntReader;
+import org.apache.arrow.vector.ipc.ArrowStreamReader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
+import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -31,7 +40,6 @@ public class Neo4jArrowClient implements AutoCloseable {
     final private BufferAllocator allocator;
     final private Location location;
     final private FlightClient client;
-    //final private HeaderCallOption options;
     final private CredentialCallOption option;
 
     public Neo4jArrowClient(BufferAllocator allocator, Location location) {
@@ -47,7 +55,6 @@ public class Neo4jArrowClient implements AutoCloseable {
         headers.insert("authorization",
                 String.format("Basic %s", Base64.getEncoder()
                         .encodeToString("neo4j:password".getBytes(StandardCharsets.UTF_8))));
-        // options = new HeaderCallOption(headers);
         option = new CredentialCallOption(new BasicAuthCredentialWriter("neo4j", "password"));
     }
 
@@ -55,16 +62,35 @@ public class Neo4jArrowClient implements AutoCloseable {
         logger.info("Fetching stream for ticket: {}",
                 StandardCharsets.UTF_8.decode(ByteBuffer.wrap(ticket.getBytes())));
 
-        try (FlightStream stream = client.getStream(ticket, option)) {
+        Field field = new Field("n",
+                FieldType.nullable(new ArrowType.Int(32, true)), null);
+        Schema schema = new Schema(Arrays.asList(field));
+
+        long start = System.currentTimeMillis();
+        long cnt = 0;
+        try (
+                FlightStream stream = client.getStream(ticket, option);
+                VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
+
+            final VectorLoader loader = new VectorLoader(root);
             final VectorUnloader unloader = new VectorUnloader(stream.getRoot());
+
             while (stream.next()) {
-                ArrowRecordBatch batch = unloader.getRecordBatch();
-                logger.info("got batch, sized: {}", batch.getLength());
-                batch.close();
+                try (ArrowRecordBatch batch = unloader.getRecordBatch()) {
+                    // logger.info("got batch, sized: {}", batch.getLength());
+                    loader.load(batch);
+                    FieldVector fv = root.getVector("n");
+                    IntVector v = (IntVector) fv;
+                    logger.info(String.format("vector: len=%,d", v.getValueCount()));
+                    cnt += v.getValueCount();
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
+        long delta = System.currentTimeMillis() - start;
+        logger.info(String.format("Finished. Count=%,d rows, Time Delta=%,d ms, Rate=%,d rows/s",
+                cnt, delta, 1000 * (cnt / delta) ));
     }
 
     public void run() {
@@ -72,7 +98,7 @@ public class Neo4jArrowClient implements AutoCloseable {
                 .forEach(action -> logger.info("found action: {}", action.getType()));
 
         Action action = new Action("cypherRead",
-                "UNWIND range(1, 100) AS n RETURN n".getBytes(StandardCharsets.UTF_8));
+                "UNWIND range(1, toInteger(1e7)) AS n RETURN n".getBytes(StandardCharsets.UTF_8));
         client.doAction(action, option).forEachRemaining(System.out::println);
 
         List<FlightInfo> flights = new ArrayList<>();

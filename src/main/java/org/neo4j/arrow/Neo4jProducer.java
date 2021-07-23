@@ -4,6 +4,7 @@ import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
@@ -22,7 +23,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class Neo4jProducer implements FlightProducer, AutoCloseable {
-    final static int MAX_BATCH_SIZE = 1_000;
+    final static int MAX_BATCH_SIZE = 50_000;
 
     final static String CYPHER_READ_ACTION = "cypherRead";
     final static String CYPHER_WRITE_ACTION = "cypherWrite";
@@ -41,7 +42,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     public Neo4jProducer(BufferAllocator allocator, Location location) {
         this.location = location;
-        this.allocator = allocator;
+        this.allocator = allocator.newChildAllocator("neo4j-producer", 0, Long.MAX_VALUE);
         this.flightMap = new ConcurrentHashMap<>();
 
         this.driver = GraphDatabase.driver("neo4j://localhost:7687",
@@ -86,7 +87,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
                 // Are we starting a new batch?
                 if (currentPos % MAX_BATCH_SIZE == 0) {
-                    vectorMap.values().forEach(ValueVector::close);
+                    // vectorMap.values().forEach(ValueVector::close);
                     vectorMap.clear();
                     for (String key : record.keys()) {
                         UInt4Vector vector = new UInt4Vector(key, allocator);
@@ -249,10 +250,11 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        driver.close();
+        logger.info("XXX closing");
 
         for (Neo4jJob job : jobMap.values()) {
             job.close();
         }
+        AutoCloseables.close(allocator, driver);
     }
 }
