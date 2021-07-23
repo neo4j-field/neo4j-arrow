@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'application'
+    id 'com.github.johnrengelman.shadow' version '7.0.0'
 }
 
 group 'org.neo4j'
@@ -15,13 +15,69 @@ dependencies {
     implementation 'org.neo4j.driver:neo4j-java-driver:4.3.3'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
-    runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
-}
-
-application {
-    mainClass.set("org.neo4j.arrow.Neo4jArrow")
 }
 
 test {
     useJUnitPlatform()
+}
+
+project(':client') {
+    apply plugin: 'com.github.johnrengelman.shadow'
+    apply plugin: 'java'
+    apply plugin: 'application'
+    sourceCompatibility = 11
+    targetCompatibility = 11
+
+    group = 'org.neo4j.arrow'
+    version = parent.version
+
+    application {
+        mainClass.set("org.neo4j.arrow.Neo4jArrowClient")
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        implementation rootProject
+        implementation 'org.apache.arrow:flight-grpc:4.0.1'
+        implementation 'org.neo4j.driver:neo4j-java-driver:4.3.3'
+        runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
+    }
+
+    jar {
+        manifest {
+            attributes 'Description': 'An Apache Arrow client for experimenting with neo4j-arrow'
+        }
+    }
+}
+
+project(':server') {
+    apply plugin: 'com.github.johnrengelman.shadow'
+    apply plugin: 'java'
+    apply plugin: 'application'
+
+    sourceCompatibility = 11
+    targetCompatibility = 11
+
+    group = 'org.neo4j.arrow'
+    version = parent.version
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        implementation rootProject
+        implementation 'org.apache.arrow:flight-grpc:4.0.1'
+        implementation 'org.neo4j.driver:neo4j-java-driver:4.3.3'
+        runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
+    }
+
+    jar {
+        manifest {
+            attributes 'Description': 'An Apache Arrow server for fun and profit(?)'
+        }
+    }
 }

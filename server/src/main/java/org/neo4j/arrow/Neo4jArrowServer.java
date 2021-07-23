@@ -7,7 +7,7 @@ import org.apache.arrow.util.AutoCloseables;
 
 import java.util.concurrent.TimeUnit;
 
-public class Neo4jArrow {
+public class Neo4jArrowServer {
     private static final org.slf4j.Logger logger;
 
     static {
@@ -15,7 +15,8 @@ public class Neo4jArrow {
         System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[yyyy-MM-dd'T'HH:mm:ss:SSS]");
         System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
-        logger = org.slf4j.LoggerFactory.getLogger(Neo4jArrow.class);
+        System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "debug");
+        logger = org.slf4j.LoggerFactory.getLogger(Neo4jArrowServer.class);
     }
 
     public static void main(String[] args) throws Exception {
@@ -23,15 +24,15 @@ public class Neo4jArrow {
         TimeUnit unit = TimeUnit.MINUTES;
 
         final BufferAllocator bufferAllocator = new RootAllocator(Long.MAX_VALUE);
-        final Neo4jFlightServer neo4jFlightServer = new Neo4jFlightServer(
+        final Neo4jFlightApp app = new Neo4jFlightApp(
                 bufferAllocator,
                 Location.forGrpcInsecure("0.0.0.0", 9999));
-        neo4jFlightServer.start();
+        app.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 logger.info("Shutting down...");
-                AutoCloseables.close(neo4jFlightServer, bufferAllocator);
+                AutoCloseables.close(app, bufferAllocator);
                 logger.info("Stopped.");
             } catch (Exception e) {
                 logger.error("Failure during shutdown!", e);
@@ -39,6 +40,6 @@ public class Neo4jArrow {
         }));
 
         logger.info("Will terminate after timeout of {} {}", timeout, unit);
-        neo4jFlightServer.awaitTermination(timeout, unit);
+        app.awaitTermination(timeout, unit);
     }
 }

@@ -23,7 +23,7 @@ public class Neo4jFlightServerTest {
         TimeUnit unit = TimeUnit.SECONDS;
 
         final BufferAllocator bufferAllocator = new RootAllocator(Long.MAX_VALUE);
-        final Neo4jFlightServer neo4jFlightServer = new Neo4jFlightServer(
+        final Neo4jFlightApp neo4jFlightServer = new Neo4jFlightApp(
                 bufferAllocator,
                 Location.forGrpcInsecure("0.0.0.0", 9999));
         neo4jFlightServer.start();

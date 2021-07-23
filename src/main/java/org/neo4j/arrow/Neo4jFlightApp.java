@@ -9,15 +9,15 @@ import org.apache.arrow.util.AutoCloseables;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-public class Neo4jFlightServer implements AutoCloseable {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jFlightServer.class);
+public class Neo4jFlightApp implements AutoCloseable {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jFlightApp.class);
 
     private final FlightServer server;
     private final Location location;
     private final Neo4jProducer producer;
     private final BufferAllocator allocator;
 
-    public Neo4jFlightServer(BufferAllocator allocator, Location location) {
+    public Neo4jFlightApp(BufferAllocator allocator, Location location) {
         this.allocator = allocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
         this.location = location;
         this.producer = new Neo4jProducer(allocator, location);
