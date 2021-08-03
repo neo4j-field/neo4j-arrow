@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.neo4j.driver.*;
 
@@ -12,7 +13,9 @@ public class SillyBenchmark {
         System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
         logger = org.slf4j.LoggerFactory.getLogger(SillyBenchmark.class);
     }
+
     @Test
+    @Disabled
     public void testSilly1MInts() {
         try (Driver driver = GraphDatabase.driver("neo4j://localhost:7687",
                 AuthTokens.basic("neo4j", "password"))) {

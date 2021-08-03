@@ -29,22 +29,27 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Neo4jProducer implements FlightProducer, AutoCloseable {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jProducer.class);
+
     final static int MAX_BATCH_SIZE = 100_000;
 
+    // TODO: enum?
     final static String CYPHER_READ_ACTION = "cypherRead";
     final static String CYPHER_WRITE_ACTION = "cypherWrite";
     final static String CYPHER_STATUS_ACTION = "cypherStatus";
-
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jProducer.class);
-
     final ActionType cypherRead = new ActionType(CYPHER_READ_ACTION, "Submit a READ transaction");
     final ActionType cypherWrite = new ActionType(CYPHER_WRITE_ACTION, "Submit a WRITE transaction");
     final ActionType cypherStatus = new ActionType(CYPHER_STATUS_ACTION, "Check status of a Cypher transaction");
 
     final Location location;
     final BufferAllocator allocator;
+
+    /* Holds all known current streams based on their tickets */
     final Map<Ticket, FlightInfo> flightMap;
+    /* Holds all existing jobs based on their tickets */
     final Map<Ticket, Neo4jJob> jobMap;
+
+    /* Global Neo4j Driver instance */
     final Driver driver;
 
     public Neo4jProducer(BufferAllocator allocator, Location location) {
@@ -52,8 +57,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
         this.allocator = allocator;
         this.flightMap = new ConcurrentHashMap<>();
 
-        this.driver = GraphDatabase.driver("neo4j://localhost:7687",
-                AuthTokens.basic("neo4j", "password"));
+        this.driver = GraphDatabase.driver(Config.neo4jUrl, AuthTokens.basic(Config.username, Config.password));
         this.jobMap = new ConcurrentHashMap<>();
     }
 
@@ -75,9 +79,9 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
         logger.info("producing stream for ticket {}", ticket);
         BufferAllocator streamAllocator = allocator.newChildAllocator(
                 String.format("stream-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                1024*1024, Long.MAX_VALUE);
+                1024*1024, Config.maxStreamMemory);
         if (streamAllocator == null) {
-            logger.error("shit", new Exception("couldn't create child allocator!"));
+            logger.error("oh no", new Exception("couldn't create child allocator!"));
         }
         try {
             final VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), streamAllocator);
@@ -219,8 +223,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        logger.info("XXX closing");
-
+        logger.debug("closing");
         for (Neo4jJob job : jobMap.values()) {
             job.close();
         }

@@ -13,6 +13,7 @@ import java.util.function.Consumer;
 
 public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jJob.class);
+    private static final int DEFAULT_FETCH_SIZE = 10_000;
 
     public enum Status {
         PENDING,
@@ -45,9 +46,9 @@ public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
 
     public Neo4jJob(Driver driver, CypherMessage msg, AccessMode mode) {
         session = driver.asyncSession(SessionConfig.builder()
-                .withDatabase("neo4j")
+                .withDatabase(Config.database)
                 .withDefaultAccessMode(mode)
-                //.withFetchSize(5000)
+                .withFetchSize(DEFAULT_FETCH_SIZE)
                 .build());
 
         future = session.runAsync(msg.getCypher(), msg.getParams())

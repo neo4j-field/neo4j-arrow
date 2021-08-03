@@ -7,11 +7,13 @@ import org.apache.arrow.util.AutoCloseables;
 
 import java.util.concurrent.TimeUnit;
 
+/**
+ * A simple implementation of a Neo4jArrow service.
+ */
 public class Neo4jArrowServer {
     private static final org.slf4j.Logger logger;
 
     static {
-        // Set up nicer logging output.
         System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[yyyy-MM-dd'T'HH:mm:ss:SSS]");
         System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
@@ -20,13 +22,13 @@ public class Neo4jArrowServer {
     }
 
     public static void main(String[] args) throws Exception {
-        long timeout = 30;
+        long timeout = 60;
         TimeUnit unit = TimeUnit.SECONDS;
 
-        final BufferAllocator bufferAllocator = new RootAllocator(Long.MAX_VALUE);
+        final BufferAllocator bufferAllocator = new RootAllocator(Config.maxGlobalMemory);
         final Neo4jFlightApp app = new Neo4jFlightApp(
                 bufferAllocator,
-                Location.forGrpcInsecure("0.0.0.0", 9999));
+                Location.forGrpcInsecure(Config.host, Config.port));
         app.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
