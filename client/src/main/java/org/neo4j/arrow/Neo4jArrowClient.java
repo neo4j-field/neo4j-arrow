@@ -19,10 +19,7 @@ import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.List;
+import java.util.*;
 
 public class Neo4jArrowClient implements AutoCloseable {
 
@@ -58,13 +55,9 @@ public class Neo4jArrowClient implements AutoCloseable {
         option = new CredentialCallOption(new BasicAuthCredentialWriter("neo4j", "password"));
     }
 
-    private void getStream(Ticket ticket) {
+    private void getStream(Ticket ticket, Schema schema) {
         logger.info("Fetching stream for ticket: {}",
                 StandardCharsets.UTF_8.decode(ByteBuffer.wrap(ticket.getBytes())));
-
-        Field field = new Field("n",
-                FieldType.nullable(new ArrowType.Int(32, true)), null);
-        Schema schema = new Schema(Arrays.asList(field));
 
         long start = System.currentTimeMillis();
         long cnt = 0;
@@ -80,9 +73,9 @@ public class Neo4jArrowClient implements AutoCloseable {
                     // logger.info("got batch, sized: {}", batch.getLength());
                     loader.load(batch);
                     FieldVector fv = root.getVector("n");
-                    IntVector v = (IntVector) fv;
-                    logger.info(String.format("vector: len=%,d", v.getValueCount()));
-                    cnt += v.getValueCount();
+                    logger.info(String.format("vector: len=%,d", fv.getValueCount()));
+                    logger.info("fieldVector: {}", fv);
+                    cnt += fv.getValueCount();
                 }
             }
         } catch (Exception e) {
@@ -97,9 +90,21 @@ public class Neo4jArrowClient implements AutoCloseable {
         client.listActions(option)
                 .forEach(action -> logger.info("found action: {}", action.getType()));
 
-        Action action = new Action("cypherRead",
-                "UNWIND range(1, toInteger(1e7)) AS n RETURN n".getBytes(StandardCharsets.UTF_8));
-        client.doAction(action, option).forEachRemaining(System.out::println);
+        Schema schema = new Schema(Arrays.asList(
+                new Field("n", FieldType.nullable(new ArrowType.Int(32, true)), null)),
+                null);
+        CypherMessage msg = new CypherMessage("UNWIND range(1, toInteger(1e7)) AS n RETURN n;",
+                new HashMap<>());
+
+        Action action = new Action("cypherRead", msg.serialize());
+        Result result = client.doAction(action, option).next();
+        String ticketId = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())).toString();
+        logger.info("ticketId: {}", ticketId);
+
+        Action check = new Action("cypherStatus", ticketId.getBytes(StandardCharsets.UTF_8));
+        result = client.doAction(check, option).next();
+
+        logger.info("status: {}", StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())));
 
         List<FlightInfo> flights = new ArrayList<>();
         client.listFlights(Criteria.ALL, option).forEach(flights::add);
@@ -108,7 +113,7 @@ public class Neo4jArrowClient implements AutoCloseable {
             final FlightDescriptor descriptor = info.getDescriptor();
             logger.info("processing FlightInfo for flight '{}'",
                     StandardCharsets.UTF_8.decode(ByteBuffer.wrap(descriptor.getCommand())));
-            getStream(info.getEndpoints().get(0).getTicket());
+            getStream(info.getEndpoints().get(0).getTicket(), info.getSchema());
         });
     }
 

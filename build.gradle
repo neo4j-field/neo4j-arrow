@@ -13,7 +13,9 @@ repositories {
 dependencies {
     implementation 'org.apache.arrow:flight-grpc:4.0.1'
     implementation 'org.neo4j.driver:neo4j-java-driver:4.3.3'
+    implementation 'org.neo4j:neo4j-parser:4.3.2'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
+    testRuntimeOnly 'org.slf4j:slf4j-simple:1.7.31'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 }
 
@@ -42,7 +44,6 @@ project(':client') {
     dependencies {
         implementation rootProject
         implementation 'org.apache.arrow:flight-grpc:4.0.1'
-        implementation 'org.neo4j.driver:neo4j-java-driver:4.3.3'
         runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
     }
 

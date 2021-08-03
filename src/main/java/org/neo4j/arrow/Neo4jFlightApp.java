@@ -40,7 +40,7 @@ public class Neo4jFlightApp implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        logger.info("XXX closing");
+        logger.debug("closing");
         AutoCloseables.close(producer, server, allocator);
     }
 }
