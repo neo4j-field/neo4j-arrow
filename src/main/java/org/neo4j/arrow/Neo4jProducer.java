@@ -1,6 +1,7 @@
 package org.neo4j.arrow;
 
 import org.apache.arrow.flight.*;
+import org.apache.arrow.flight.Result;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.IntVector;
@@ -12,10 +13,7 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.neo4j.driver.AccessMode;
-import org.neo4j.driver.AuthTokens;
-import org.neo4j.driver.Driver;
-import org.neo4j.driver.GraphDatabase;
+import org.neo4j.driver.*;
 import org.neo4j.driver.summary.ResultSummary;
 
 import java.io.IOException;
@@ -24,8 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Neo4jProducer implements FlightProducer, AutoCloseable {
@@ -143,8 +140,21 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
     @Override
     public FlightInfo getFlightInfo(CallContext context, FlightDescriptor descriptor) {
         logger.debug("getFlightInfo called: context={}, descriptor={}", context, descriptor);
-        FlightInfo info = flightMap.values().stream().findFirst().get();
-        return info;
+
+        // We assume for now that our "commands" are just a serialized ticket
+        try {
+            Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(descriptor.getCommand()));
+            FlightInfo info = flightMap.get(ticket);
+
+            if (info == null) {
+                logger.info("no flight found for ticket {}", ticket);
+                throw CallStatus.NOT_FOUND.withDescription("no flight found").toRuntimeException();
+            }
+            return info;
+        } catch (IOException e) {
+            logger.error("failed to get flight info", e);
+            throw CallStatus.INVALID_ARGUMENT.withDescription("failed to interpret ticket").toRuntimeException();
+        }
     }
 
     @Override
@@ -184,20 +194,34 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                 try {
                     msg = CypherMessage.deserialize(action.getBody());
                 } catch (IOException e) {
-                    listener.onError(e);
-                    e.printStackTrace();
+                    listener.onError(CallStatus.INVALID_ARGUMENT.withDescription("invalid CypherMessage").toRuntimeException());
                     return;
                 }
 
+                /* Ticket this job */
                 final Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
                 final Neo4jJob job = new Neo4jJob(driver, msg, AccessMode.READ);
                 jobMap.put(ticket, job);
 
-                final FlightInfo info = new FlightInfo(new Schema(Arrays.asList(new Field("n", FieldType.nullable(new ArrowType.Int(32, true)), null))),
-                        FlightDescriptor.command(action.getBody()),
-                        Arrays.asList(new FlightEndpoint(ticket, location)), -1, -1);
-                flightMap.put(ticket, info);
+                /* We need to wait for the first record to discern our final schema */
+                final Future<Record> futureRecord = job.getFirstRecord();
+                CompletableFuture.runAsync(() -> {
+                    Record record;
+                    try {
+                        record = futureRecord.get();
+                    } catch (InterruptedException e) {
+                        logger.error(String.format("flight info task for job %s interrupted", job), e);
+                    } catch (ExecutionException e) {
+                        logger.error(String.format("flight info task for job %s failed", job), e);
+                    }
+                    final FlightInfo info = new FlightInfo(new Schema(Arrays.asList(new Field("n", FieldType.nullable(new ArrowType.Int(32, true)), null))),
+                            FlightDescriptor.command(ticket.getBytes()),
+                            Arrays.asList(new FlightEndpoint(ticket, location)), -1, -1);
+                    flightMap.put(ticket, info);
+                    logger.info("finished ticketing flight {}", info);
+                });
 
+                /* We're taking off, so hand the ticket back to our client. */
                 listener.onNext(new Result(ticket.serialize().array()));
                 listener.onCompleted();
                 break;

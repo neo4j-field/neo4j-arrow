@@ -41,6 +41,7 @@ public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
     private AtomicReference<Status> status = new AtomicReference<>(Status.PENDING);
 
     private final Future<ResultSummary> future;
+    private final CompletableFuture<Record> firstRecordFuture = new CompletableFuture<>();
     private CompletableFuture<Consumer<Record>> futureConsumer = new CompletableFuture<>();
     private CompletableFuture<Void> done = new CompletableFuture<>();
 
@@ -58,6 +59,7 @@ public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
 
                     Record firstRecord = resultCursor.peekAsync().toCompletableFuture().join();
                     logger.info("First record received {}", firstRecord);
+                    firstRecordFuture.complete(firstRecord);
 
                     Consumer<Record> consumer = futureConsumer.join();
                     logger.info("Consuming!");
@@ -113,6 +115,9 @@ public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
         return future.get(timeout, unit);
     }
 
+    public Future<Record> getFirstRecord() {
+        return firstRecordFuture;
+    }
 
     @Override
     public void close() throws Exception {
