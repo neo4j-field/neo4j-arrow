@@ -120,9 +120,9 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                         ((Float4Vector)vector).set(idx, (float)value.asDouble());
                         logger.info("set {} @ idx {} in {}", ((Float4Vector) vector).get(idx), idx, vector.getName());
                     } else if (vector instanceof Float8Vector) {
-                        ((Float8Vector)vector).set(idx,value.asDouble());
+                        ((Float8Vector)vector).set(idx, value.asDouble());
                     } else if (vector instanceof VarCharVector) {
-                        ((VarCharVector)vector).set(idx,value.asByteArray());
+                        ((VarCharVector)vector).set(idx, value.asString().getBytes(StandardCharsets.UTF_8));
                     } else if (vector instanceof ListVector) {
                         UnionListWriter writer = (UnionListWriter) writerMap.get(field.getName());
                         if (writer == null) {
