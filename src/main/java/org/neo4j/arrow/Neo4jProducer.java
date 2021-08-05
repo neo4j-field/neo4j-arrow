@@ -8,7 +8,6 @@ import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
-import org.apache.arrow.vector.complex.writer.FieldWriter;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
@@ -28,8 +27,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class Neo4jProducer implements FlightProducer, AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jProducer.class);
-
-    final static int MAX_BATCH_SIZE = 10;
 
     // TODO: enum?
     final static String CYPHER_READ_ACTION = "cypherRead";
@@ -77,7 +74,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
         logger.info("producing stream for ticket {}", ticket);
         BufferAllocator streamAllocator = allocator.newChildAllocator(
                 String.format("stream-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                1024*1024, Config.maxStreamMemory);
+                1024L, Config.maxStreamMemory);
         if (streamAllocator == null) {
             logger.error("oh no", new Exception("couldn't create child allocator!"));
         }
@@ -89,16 +86,16 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
             // We need to dynamically build out our vectors based on the identified schema
             final HashMap<String, FieldVector> vectorMap = new HashMap<>();
             // Complex things like Lists need special writers to fill them :-(
-            final HashMap<String, FieldWriter> writerMap = new HashMap<>();
+            final HashMap<String, UnionListWriter> writerMap = new HashMap<>();
 
             final List<Field> fieldList = info.getSchema().getFields();
 
             logger.info("using schema: {}", info.getSchema().toJson());
             for (Field field : fieldList) {
                 FieldVector fieldVector = root.getVector(field);
+                fieldVector.setInitialCapacity(Config.arrowBatchSize);
                 fieldVector.allocateNew();
                 vectorMap.put(field.getName(), fieldVector);
-                logger.info("created fieldvector {} for field {}", fieldVector.getName(), field);
             }
 
             // Signal the client that we're about to start the stream
@@ -113,36 +110,43 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     final FieldVector vector = vectorMap.get(field.getName());
                     if (vector instanceof IntVector) {
                         ((IntVector) vector).set(idx, value.asInt());
-                        logger.info("set {} @ idx {} in {}", ((IntVector) vector).get(idx), idx, vector.getName());
                     } else if (vector instanceof BigIntVector) {
                         ((BigIntVector) vector).set(idx, value.asLong());
                     } else if (vector instanceof Float4Vector) {
-                        ((Float4Vector)vector).set(idx, (float)value.asDouble());
-                        logger.info("set {} @ idx {} in {}", ((Float4Vector) vector).get(idx), idx, vector.getName());
+                        ((Float4Vector)vector).set(idx, value.asFloat());
                     } else if (vector instanceof Float8Vector) {
                         ((Float8Vector)vector).set(idx, value.asDouble());
                     } else if (vector instanceof VarCharVector) {
                         ((VarCharVector)vector).set(idx, value.asString().getBytes(StandardCharsets.UTF_8));
                     } else if (vector instanceof ListVector) {
-                        UnionListWriter writer = (UnionListWriter) writerMap.get(field.getName());
+                        UnionListWriter writer = writerMap.get(field.getName());
                         if (writer == null) {
                             writer = ((ListVector)vector).getWriter();
-                            writer.allocate();
                             writerMap.put(field.getName(), writer);
                         }
                         writer.startList();
+                        //writer.setPosition(idx);
                         // TODO: support type mapping here...for now we assume numbers
-                        for (Double d : value.asList(item -> item.asDouble(0.0))) {
-                            logger.info("writing to list {} @ idx {} element {}", vector.getName(), idx, d);
-                            writer.float8().writeFloat8(d);
+                        for (Double d: value.asList(Value::asDouble)) {
+                            writer.writeFloat8(d);
                         }
+                        writer.setValueCount(value.asList().size());
                         writer.endList();
                     }
                 }
 
-                if ((idx + 1) == MAX_BATCH_SIZE) {
-                    flush(listener, streamAllocator, loader, vectorMap, fieldList, idx);
+                if ((idx + 1) == Config.arrowBatchSize) {
+                    flush(listener, streamAllocator, loader, vectorMap, writerMap, fieldList, idx);
                     cnt.set(0);
+                    writerMap.clear();
+                    vectorMap.values().clear();
+
+                    for (Field field : fieldList) {
+                        FieldVector fieldVector = root.getVector(field);
+                        fieldVector.setInitialCapacity(Config.arrowBatchSize);
+                        fieldVector.allocateNew();
+                        vectorMap.put(field.getName(), fieldVector);
+                    }
                 }
             });
 
@@ -150,11 +154,11 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
             listener.setOnCancelHandler(() -> job.cancel(true));
 
             // For now, we just block until the job finishes and then tell the client we're complete
-            ResultSummary summary = job.get(5, TimeUnit.MINUTES);
+            ResultSummary summary = job.get(15, TimeUnit.MINUTES);
 
             // Final flush
             if (cnt.get() > 0)
-                flush(listener, streamAllocator, loader, vectorMap, fieldList, cnt.decrementAndGet());
+                flush(listener, streamAllocator, loader, vectorMap, writerMap, fieldList, cnt.decrementAndGet());
 
             logger.info("finished get_stream, summary: {}", summary);
 
@@ -177,41 +181,47 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
     }
 
     private void flush(ServerStreamListener listener, BufferAllocator streamAllocator, VectorLoader loader,
-                       Map<String, FieldVector> vectorMap, List<Field> fieldList, int idx) {
+                       Map<String, FieldVector> vectorMap, HashMap<String, UnionListWriter> writerMap,
+                       List<Field> fieldList, int idx) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
         for (Field field : fieldList) {
             final FieldVector vector = vectorMap.get(field.getName());
-            logger.info("batching vector {}", field.getName());
+            logger.debug("batching vector {}: {}", field.getName(), vector.toString());
             vector.setValueCount(idx + 1);
 
             nodes.add(new ArrowFieldNode(idx + 1, 0));
-            for (ArrowBuf buf : vector.getBuffers(false)) {
-                logger.info("adding buf {} for vector {}", buf, vector.getName());
-                buffers.add(buf);
-            }
 
             if (vector instanceof ListVector) {
                 ((ListVector) vector).setLastSet(idx + 1);
+
+                buffers.add(vector.getValidityBuffer());
+                buffers.add(vector.getOffsetBuffer());
+
                 for (FieldVector child : vector.getChildrenFromFields()) {
-                    logger.info("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
+                    logger.debug("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
                     nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
+                    buffers.addAll(List.of(child.getBuffers(false)));
+                }
+
+            } else {
+                for (ArrowBuf buf : vector.getBuffers(false)) {
+                    logger.debug("adding buf {} for vector {}", buf, vector.getName());
+                    buffers.add(buf);
                 }
             }
         }
 
-        logger.info("ready to batch {} nodes with {} buffers", nodes.size(), buffers.size());
+        logger.debug("ready to batch {} nodes with {} buffers", nodes.size(), buffers.size());
 
         // The actual data transmission...
         try (ArrowRecordBatch batch = new ArrowRecordBatch(idx + 1, nodes, buffers)) {
             loader.load(batch);
             listener.putNext();
-            logger.info("put batch of {} rows", batch.getLength());
+            logger.info(String.format("put batch of %,d rows", batch.getLength()));
             logger.debug("{}", streamAllocator);
         }
-
-        vectorMap.values().forEach(ValueVector::reset);
     }
 
     @Override

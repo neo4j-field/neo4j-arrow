@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.neo4j.driver.*;
 
+import java.util.Map;
+
 public class SillyBenchmark {
     private static final org.slf4j.Logger logger;
     static {
@@ -16,17 +18,24 @@ public class SillyBenchmark {
 
     @Test
     @Disabled
-    public void testSilly1MInts() {
+    public void testSilly1MillionEmbeddings() {
         try (Driver driver = GraphDatabase.driver("neo4j://localhost:7687",
                 AuthTokens.basic("neo4j", "password"))) {
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 1; i++) {
                 try (Session session = driver.session(SessionConfig.builder()
                         .withDefaultAccessMode(AccessMode.READ).build())) {
                     try {
                         long start = System.currentTimeMillis();
-                        Result result = session.run("UNWIND range(1, 1000000) AS n RETURN n");
+                        Result result = session.run(
+                                "UNWIND range(1, $rows) AS row\n" +
+                                "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
+                                Map.of("rows", 1_000_000, "dimension", 128));
+                        int cnt = 0;
                         while (result.hasNext()) {
                             result.next();
+                            cnt++;
+                            if (cnt % 25_000 == 0)
+                                logger.info("Current Row @ {} [fields: {}]", cnt, result.keys());
                         }
                         long finish = System.currentTimeMillis();
                         logger.info("finished in {}ms", finish - start);

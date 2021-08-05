@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import com.google.flatbuffers.Table;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.auth2.BasicAuthCredentialWriter;
 import org.apache.arrow.flight.grpc.CredentialCallOption;
@@ -10,12 +11,17 @@ import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.impl.UnionListReader;
+import org.apache.arrow.vector.complex.reader.FieldReader;
+import org.apache.arrow.vector.complex.reader.Float8Reader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -54,27 +60,30 @@ public class Neo4jArrowClient implements AutoCloseable {
         option = new CredentialCallOption(new BasicAuthCredentialWriter("neo4j", "password"));
     }
 
-    private void getStream(Ticket ticket, Schema schema) {
+    private void getStream(Ticket ticket) {
         logger.info("Fetching stream for ticket: {}",
                 StandardCharsets.UTF_8.decode(ByteBuffer.wrap(ticket.getBytes())));
 
         long start = System.currentTimeMillis();
         long cnt = 0;
-        try (
-                FlightStream stream = client.getStream(ticket, option);
-                VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
 
-            final VectorLoader loader = new VectorLoader(root);
-            final VectorUnloader unloader = new VectorUnloader(stream.getRoot());
+        try (FlightStream stream = client.getStream(ticket, option);
+                VectorSchemaRoot root = stream.getRoot();
+                VectorSchemaRoot downloadedRoot = VectorSchemaRoot.create(root.getSchema(), allocator)) {
+            final VectorLoader loader = new VectorLoader(downloadedRoot);
+            final VectorUnloader unloader = new VectorUnloader(root);
 
+            logger.info("got schema: {}", root.getSchema().toJson());
+
+            int row = -1;
             while (stream.next()) {
+                row++;
                 try (ArrowRecordBatch batch = unloader.getRecordBatch()) {
-                    // logger.info("got batch, sized: {}", batch.getLength());
+                    logger.info("got batch, sized: {}", batch.getLength());
                     loader.load(batch);
-                    FieldVector fv = root.getVector("n");
-                    logger.info(String.format("vector: len=%,d", fv.getValueCount()));
-                    logger.info("fieldVector: {}", fv);
-                    cnt += fv.getValueCount();
+                    cnt += batch.getLength();
+                    if (cnt % 25_000 == 0)
+                        logger.info("Curren Row @ {}: [fields:{}, batchLen: {}]", cnt, root.getSchema().getFields(), batch.getLength());
                 }
             }
         } catch (Exception e) {
@@ -85,35 +94,32 @@ public class Neo4jArrowClient implements AutoCloseable {
                 cnt, delta, 1000 * (cnt / delta) ));
     }
 
-    public void run() {
+    public void run() throws InterruptedException, IOException {
         client.listActions(option)
                 .forEach(action -> logger.info("found action: {}", action.getType()));
 
-        Schema schema = new Schema(Arrays.asList(
-                new Field("n", FieldType.nullable(new ArrowType.Int(32, true)), null)),
-                null);
-        CypherMessage msg = new CypherMessage("UNWIND range(1, toInteger(1e7)) AS n RETURN n;",
-                new HashMap<>());
+        CypherMessage msg = new CypherMessage("UNWIND range(1, $rows) AS row\n" +
+                "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
+                Map.of("rows", 1_000_000, "dimension", 128));
 
         Action action = new Action("cypherRead", msg.serialize());
         Result result = client.doAction(action, option).next();
-        String ticketId = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())).toString();
-        logger.info("ticketId: {}", ticketId);
+        Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(result.getBody()));
+        logger.info("ticketId: {}", StandardCharsets.UTF_8.decode(ticket.serialize()));
 
-        Action check = new Action("cypherStatus", ticketId.getBytes(StandardCharsets.UTF_8));
-        result = client.doAction(check, option).next();
+        boolean ready = false;
+        while (!ready) {
+            Action check = new Action("cypherStatus", ticket.serialize().array());
+            result = client.doAction(check, option).next();
+            String status = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())).toString();
+            logger.info("status: {}", status);
+            if (status.equalsIgnoreCase(Neo4jJob.Status.PRODUCING.toString()))
+                ready = true;
+            else
+                Thread.sleep(2000);
+        }
 
-        logger.info("status: {}", StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())));
-
-        List<FlightInfo> flights = new ArrayList<>();
-        client.listFlights(Criteria.ALL, option).forEach(flights::add);
-
-        flights.forEach(info -> {
-            final FlightDescriptor descriptor = info.getDescriptor();
-            logger.info("processing FlightInfo for flight '{}'",
-                    StandardCharsets.UTF_8.decode(ByteBuffer.wrap(descriptor.getCommand())));
-            getStream(info.getEndpoints().get(0).getTicket(), info.getSchema());
-        });
+        getStream(ticket);
     }
 
     public static void main(String[] args) throws Exception {

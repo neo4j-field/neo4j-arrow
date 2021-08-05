@@ -29,118 +29,69 @@ The concept of Arrow Flight RPC "actions" along with the basic "get"/"set" strea
 
 People love Py2neo because it's less hoops and hurdles to weave Python driver code into their data engineering or analytics code in platforms like Databricks, Dataiku, etc.
 
-PyArrow natively integrates wiht both NumPy and Pandas...allowing for simple conversions to/from their respective data formats like DataFrames.
+PyArrow natively integrates with both NumPy and Pandas...allowing for simple conversions to/from their respective data formats like DataFrames.
 
-The built in integration in PyArrow should reduce the steps required to go from "cypher query" to "data frame", sort of like how the Neo4j Spark Connector expedites that as well.
+The built-in integration in PyArrow should reduce the steps required to go from "cypher query" to "data frame", sort of like how the Neo4j Spark Connector expedites that as well.
+
+Plus, Apache Arrow seems to be incorporated into Databricks (via Apache Spark) and other platforms these days either internally or potentially externally. Amazon is even using it for some of their data services.
 
 ## My Experiments
 
-Given the silly query:
+Given the silly query that generates fake embeddings with row "numbers":
 
 ```
-// Return the numbers from 1 to 1M
-UNWIND range(1, 1000000) as n RETURN n
+UNWIND range(1, $rows) AS row
+RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding
 ```
 
 How long does it take to get ALL the results to a Neo4j Python driver? (Or any driver for that matter?)
 
 ### Neo4j Python Performance
-Given my measurements, in pure Python it can take **20s** on my laptop to stream the results back using something trivial like:
+Given my measurements, in pure Python it can take **>200s** on my laptop to stream the results back using something trivial like:
 
 ```python
 #!/usr/bin/env python
 import neo4j
 from time import time
 
-query = "UNWIND range(1, 1000000) as n RETURN n"
+query = """
+        UNWIND range(1, $rows) AS row
+        RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding
+    """
+params = {"rows": 1_000_000, "dimension": 128}
+
 auth = ('neo4j', 'password')
 with neo4j.GraphDatabase.driver('neo4j://localhost:7687', auth=auth) as d:
-    with d.session() as s:
-        print(f"starting query {query}")
-        result = s.run(query)
+    with d.session(fetch_size=10_000) as s:
+        print(f"Starting query {query}")
+        result = s.run(query, params)
+        cnt = 0
         start = time()
         for row in result:
-            pass
+            cnt = cnt + 1
+            if cnt % 50_000 == 0:
+                print(f"Current Row @ {cnt:,}:\t[fields: {row.keys()}]")
         finish = time()
-        print(f"done! summary: {result.consume()}")
-        print(f"time delta: {finish - start}")
+        print(f"Done! Time Delta: {round(finish - start, 2):,}s")
+        print(f"Count: {cnt:,}, Rate: {round(cnt / (finish - start)):,} rows/s")
 
 ```
-
-> See `direct.py`
+> See [direct.py](./direct.py) for the code
 
 ### Using PyArrow
 
-PyArrow can't talk Bolt...but, it can talk to an Apache Arrow Flight service. IF one existed that has it's own way to talk to Neo4j, THEN it could proxy the Cypher transaction and facilitate rendering the Arrow stream back to the PyArrow client.
+PyArrow can't talk Bolt...**but**, it can talk to an Apache Arrow Flight service. IF one existed that has it's own way to talk to Neo4j, THEN it could proxy the Cypher transaction and facilitate rendering the Arrow stream back to the PyArrow client.
 
 IF the Neo4j Java Driver is _measurably faster than_ the Neo4j Python driver, THEN it's possible the overhead of using it as a proxy is negligible.
 
-What's the performance with PyArrow and a Java Arrow Flight service? On my laptop with local db...it's **1.7s** to stream all the data back to the client.
+What's the performance with PyArrow and a Java-Driver-Based Arrow Flight service? On my laptop with local db...it's **28s** to stream all the data back to the client.
 
-> That's **~13x faster**, btw
+> That's **~7x faster**, btw...and in other workloads with smaller row sizes I've alreayd seen **>10x** improvements.
 
-What's the client code look like? Well...this is a bit verbose as it handles some client/server auth, has to submit the query, then it needs to take the Ticket and get the stream...but it's not that bad:
-
-```python
-#!/usr/bin/env python
-import pyarrow as pa
-import pyarrow.flight as flight
-import base64
-import sys
-from time import time
-
-pa.enable_signal_handlers(True)
-
-location = ("192.168.1.42", 9999)
-client = flight.FlightClient(location)
-print(f"Trying to connect to location {location}")
-
-try:
-    client.wait_for_available(5)
-    print(f"Connected")
-except Exception as e:
-    if type(e) is not flight.FlightUnauthenticatedError:
-        print(f"⁉ Failed to connect to {location}: {e.args}")
-        sys.exit(1)
-    else:
-        print("Server requires auth, but connection possible")
-
-options = flight.FlightCallOptions(headers=[
-    (b'authorization', b'Basic ' + base64.b64encode(b'neo4j:password'))
-])
-
-actions = list(client.list_actions(options=options))
-if len(actions) == 0:
-    print("Found zero actions 😕")
-else:
-    print(f"💥 Found {len(actions)} actions!")
-    for action in actions:
-        print(f"action {action}")
-
-action = ("cypherRead", "UNWIND range(1, 1000000) AS n RETURN n".encode('utf8'))
-try:
-    for row in client.do_action(action, options=options):
-        print(f"row: {row.body.to_pybytes()}")
-except Exception as e:
-    print(f"⚠ {e}")
-    sys.exit(1)
-
-flights = list(client.list_flights(options=options))
-if len(flights) == 0:
-    print("Found zero flights 😕")
-else:
-    print(f"Found {len(flights)} flights")
-    for flight in flights:
-        ticket = flight.endpoints[0].ticket
-        print(f"flight: [cmd={flight.descriptor.command}, ticket={ticket}")
-        result = client.do_get(ticket, options=options)
-        start = time()
-        for chunk, metadata in result:
-            pass
-        finish = time()
-        print(f"done! time delta: {finish - start}")
-```
+What's the client code look like? Take a look at [client.py](./client.py).
 
 ## Sooooo...
 
-The above PyArrow client stuff can be cleaned up and made friendlier...and the server side code can use some work. But this _feels_ promising. A **100x speedup** on my laptop gives me some hope!
+The above PyArrow client stuff can be cleaned up and made friendlier...and the server side code can use some work. But this _feels_ promising. A **10x speedup** on my laptop gives me some hope!
+
+If we can remove the Bolt proxy from the equation, it _might get even faster!_
