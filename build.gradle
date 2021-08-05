@@ -86,3 +86,45 @@ project(':server') {
         }
     }
 }
+
+
+project(':plugin') {
+    apply plugin: 'com.github.johnrengelman.shadow'
+    apply plugin: 'java'
+
+    sourceCompatibility = 11
+    targetCompatibility = 11
+
+    group = 'org.neo4j.arrow'
+    version = parent.version
+
+    repositories {
+        maven {
+            url "https://neo4j.bintray.com/enterprise-sources"
+            credentials {
+                // define user and password in your $HOME/.gradle/gradle.properties
+                username neo4j_enterprise_source_user
+                password neo4j_enterprise_source_password
+            }
+            authentication {
+                basic(BasicAuthentication)
+            }
+            content {
+                includeGroup 'com.neo4j'
+            }
+        }
+        mavenCentral()
+    }
+
+    dependencies {
+        compileOnly 'org.neo4j:neo4j-configuration:4.3.2'
+        compileOnly 'org.neo4j:neo4j-kernel:4.2.3'
+        runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
+    }
+
+    jar {
+        manifest {
+            attributes 'Description': 'TBD'
+        }
+    }
+}
