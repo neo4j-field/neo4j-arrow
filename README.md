@@ -1,4 +1,4 @@
-# `neo4j-arrow` OR _how to go >10x faster with Neo4j and Python_
+# `neo4j-arrow` OR _how to go >10x faster than with Neo4j and Python_
 
 This is some tire kicking of the [Apache Arrow](https://arrow.apache.org/) project to see if Arrow can help solve a few rough spots for us:
 

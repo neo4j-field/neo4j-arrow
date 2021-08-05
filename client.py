@@ -114,9 +114,8 @@ def stream_flight(client, ticket, options):
     start = time()
     cnt = 0
     for chunk, metadata in result:
-        for col in chunk:
-            print(f"col: {col}")
-            cnt = cnt + len(col)
+        cnt = cnt + chunk.num_rows
+        print(f"Current Row @ {cnt:,}:\t[fields: {chunk.schema.names}, rows: {chunk.num_rows:,}]")
     finish = time()
     print(f"Done! Time Delta: {round(finish - start, 1):,}s")
     print(f"Count: {cnt:,} rows, Rate: {round(cnt / (finish - start)):,} rows/s")
@@ -141,8 +140,11 @@ if __name__ == "__main__":
 
     # TODO: user-supplied cypher/params
     print("Submitting a read cypher action/job using:")
-    cypher = "UNWIND range($i, $j) AS n RETURN n"
-    params = {"i": 1, "j": 10_000_000}
+    cypher = """
+        UNWIND range(1, $rows) AS row
+        RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding
+    """
+    params = {"rows": 1_000_000, "dimension": 128}
     print(f"  cypher: {cypher}")
     print(f"  params: {params}")
     ticket = submit_read(client, cypher, params, options)
