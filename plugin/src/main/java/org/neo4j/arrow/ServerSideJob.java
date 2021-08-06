@@ -43,7 +43,7 @@ public class ServerSideJob extends Neo4jJob {
                         futureConsumer.join().accept(record);
                         return true;
                     });
-                    log.info("(arrow) reached end of stream at row " + cnt.get());
+                    log.info("(arrow) reached end of stream at row " + cnt.decrementAndGet());
                 } finally {
                     tx.commit();
                 }
