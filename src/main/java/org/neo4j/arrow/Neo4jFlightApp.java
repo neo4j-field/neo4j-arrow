@@ -17,10 +17,10 @@ public class Neo4jFlightApp implements AutoCloseable {
     private final Neo4jProducer producer;
     private final BufferAllocator allocator;
 
-    public Neo4jFlightApp(BufferAllocator rootAllocator, Location location) {
+    public Neo4jFlightApp(BufferAllocator rootAllocator, Location location, JobCreator jobCreator) {
         allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
         this.location = location;
-        this.producer = new Neo4jProducer(allocator, location);
+        this.producer = new Neo4jProducer(allocator, location, jobCreator);
         this.server = FlightServer.builder(rootAllocator, location, this.producer)
                 // XXX header auth expects basic HTTP headers in the GRPC calls
                 .headerAuthenticator(new BasicCallHeaderAuthenticator(new Neo4jBasicAuthValidator()))

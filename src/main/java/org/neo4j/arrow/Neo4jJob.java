@@ -1,18 +1,18 @@
 package org.neo4j.arrow;
 
-import org.neo4j.driver.AccessMode;
-import org.neo4j.driver.Driver;
-import org.neo4j.driver.Record;
-import org.neo4j.driver.SessionConfig;
-import org.neo4j.driver.async.AsyncSession;
-import org.neo4j.driver.summary.ResultSummary;
-
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
+public abstract class Neo4jJob implements AutoCloseable, Future<JobSummary> {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jJob.class);
+    private static final AtomicLong jobCounter = new AtomicLong(0);
+
+    public enum Mode {
+        READ,
+        WRITE
+    }
 
     public enum Status {
         PENDING,
@@ -36,52 +36,37 @@ public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
         }
     }
 
-    private final AsyncSession session;
-    private AtomicReference<Status> status = new AtomicReference<>(Status.PENDING);
+    private final AtomicReference<Status> jobStatus = new AtomicReference<>(Status.PENDING);
+    private final CompletableFuture<JobSummary> jobSummary = new CompletableFuture<>();
+    private final CompletableFuture<Neo4jRecord> firstRecord = new CompletableFuture<>();
+    protected final CompletableFuture<Consumer<Neo4jRecord>> futureConsumer = new CompletableFuture<>();
+    private final String jobId;
 
-    private final Future<ResultSummary> future;
-    private final CompletableFuture<Record> firstRecordFuture = new CompletableFuture<>();
-    private CompletableFuture<Consumer<Record>> futureConsumer = new CompletableFuture<>();
-    private CompletableFuture<Void> done = new CompletableFuture<>();
-
-    public Neo4jJob(Driver driver, CypherMessage msg, AccessMode mode) {
-        session = driver.asyncSession(SessionConfig.builder()
-                .withDatabase(Config.database)
-                .withDefaultAccessMode(mode)
-                .withFetchSize(Config.boltFetchSize)
-                .build());
-
-        future = session.runAsync(msg.getCypher(), msg.getParams())
-                .thenComposeAsync(resultCursor -> {
-                    logger.info("Job {} producing", session);
-                    status.set(Status.PRODUCING);
-
-                    Record firstRecord = resultCursor.peekAsync().toCompletableFuture().join();
-                    logger.info("First record received {}", firstRecord);
-                    firstRecordFuture.complete(firstRecord);
-
-                    Consumer<Record> consumer = futureConsumer.join();
-                    logger.info("Consuming!");
-                    return resultCursor.forEachAsync(consumer);
-                }).whenCompleteAsync((resultSummary, throwable) -> {
-                    if (throwable != null) {
-                        status.set(Status.ERROR);
-                        logger.error("job failure", throwable);
-                    } else {
-                        logger.info("job {} complete", session);
-                        status.set(Status.COMPLETE);
-                    }
-                    done.complete(null);
-
-                    session.closeAsync().toCompletableFuture().join();
-                }).toCompletableFuture();
+    protected Neo4jJob(CypherMessage msg, Mode mode) {
+        jobId = String.format("job-%d", jobCounter.getAndIncrement());
     }
 
     public Status getStatus() {
-        return status.get();
+        return jobStatus.get();
     }
 
-    public void consume(Consumer<Record> consumer) {
+    protected void setStatus(Status status) {
+        jobStatus.set(status);
+    }
+
+    protected void onFirstRecord(Neo4jRecord record) {
+        logger.info("First record received {}", firstRecord);
+        setStatus(Status.PRODUCING);
+        firstRecord.complete(record);
+    }
+
+    protected void onCompletion(JobSummary summary) {
+        logger.info("Completed job {}", firstRecord);
+        setStatus(Status.COMPLETE);
+        jobSummary.complete(summary);
+    }
+
+    public void consume(Consumer<Neo4jRecord> consumer) {
         if (!futureConsumer.isDone())
             futureConsumer.complete(consumer);
         else
@@ -90,36 +75,40 @@ public class Neo4jJob implements AutoCloseable, Future<ResultSummary> {
 
 
     @Override
-    public boolean cancel(boolean mayInterruptIfRunning) {
-        return future.cancel(mayInterruptIfRunning);
-    }
+    public abstract boolean cancel(boolean mayInterruptIfRunning);
 
     @Override
     public boolean isCancelled() {
-        return future.isCancelled();
+        return jobSummary.isCancelled();
     }
 
     @Override
     public boolean isDone() {
-        return future.isDone();
+        return jobSummary.isDone();
     }
 
     @Override
-    public ResultSummary get() throws InterruptedException, ExecutionException {
-        return future.get();
+    public JobSummary get() throws InterruptedException, ExecutionException {
+        return jobSummary.get();
     }
 
     @Override
-    public ResultSummary get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
-        return future.get(timeout, unit);
+    public JobSummary get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+        return jobSummary.get(timeout, unit);
     }
 
-    public Future<Record> getFirstRecord() {
-        return firstRecordFuture;
+    public Future<Neo4jRecord> getFirstRecord() {
+        return firstRecord;
     }
 
     @Override
-    public void close() throws Exception {
-        future.cancel(true);
+    public abstract void close() throws Exception;
+
+    @Override
+    public String toString() {
+        return "Neo4jJob{" +
+                "status=" + jobStatus +
+                ", id='" + jobId + '\'' +
+                '}';
     }
 }

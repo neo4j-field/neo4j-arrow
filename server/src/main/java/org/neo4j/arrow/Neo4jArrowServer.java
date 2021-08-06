@@ -4,6 +4,7 @@ import org.apache.arrow.flight.Location;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
+import org.neo4j.driver.AuthTokens;
 
 import java.util.concurrent.TimeUnit;
 
@@ -28,7 +29,10 @@ public class Neo4jArrowServer {
         final BufferAllocator bufferAllocator = new RootAllocator(Config.maxGlobalMemory);
         final Neo4jFlightApp app = new Neo4jFlightApp(
                 bufferAllocator,
-                Location.forGrpcInsecure(Config.host, Config.port));
+                Location.forGrpcInsecure(Config.host, Config.port),
+                (cypher, mode, username, password) ->
+                        new AsyncDriverJob(cypher, mode,
+                                AuthTokens.basic(username.get(), password.get())));
         app.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

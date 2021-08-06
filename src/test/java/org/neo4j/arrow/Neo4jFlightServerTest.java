@@ -25,7 +25,8 @@ public class Neo4jFlightServerTest {
         final BufferAllocator bufferAllocator = new RootAllocator(Long.MAX_VALUE);
         final Neo4jFlightApp neo4jFlightServer = new Neo4jFlightApp(
                 bufferAllocator,
-                Location.forGrpcInsecure("0.0.0.0", 9999));
+                Location.forGrpcInsecure("0.0.0.0", 9999),
+                (message, mode, username, password) -> { return null; });
         neo4jFlightServer.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

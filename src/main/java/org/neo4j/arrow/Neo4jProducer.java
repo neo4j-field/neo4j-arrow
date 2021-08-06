@@ -1,6 +1,5 @@
 package org.neo4j.arrow;
 
-import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
@@ -15,8 +14,6 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.neo4j.driver.*;
-import org.neo4j.driver.summary.ResultSummary;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -38,21 +35,19 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
     final Location location;
     final BufferAllocator allocator;
+    final JobCreator jobCreator;
 
     /* Holds all known current streams based on their tickets */
     final Map<Ticket, FlightInfo> flightMap;
     /* Holds all existing jobs based on their tickets */
     final Map<Ticket, Neo4jJob> jobMap;
 
-    /* Global Neo4j Driver instance */
-    final Driver driver;
-
-    public Neo4jProducer(BufferAllocator allocator, Location location) {
+    public Neo4jProducer(BufferAllocator allocator, Location location, JobCreator jobCreator) {
         this.location = location;
         this.allocator = allocator;
+        this.jobCreator = jobCreator;
         this.flightMap = new ConcurrentHashMap<>();
 
-        this.driver = GraphDatabase.driver(Config.neo4jUrl, AuthTokens.basic(Config.username, Config.password));
         this.jobMap = new ConcurrentHashMap<>();
     }
 
@@ -77,6 +72,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                 1024L, Config.maxStreamMemory);
         if (streamAllocator == null) {
             logger.error("oh no", new Exception("couldn't create child allocator!"));
+            listener.error(CallStatus.INTERNAL.withDescription("failed to create child allocator").toRuntimeException());
         }
         try {
             final VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), streamAllocator);
@@ -106,7 +102,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                 int idx = cnt.getAndIncrement();
 
                 for (Field field : fieldList) {
-                    final Value value = record.get(field.getName());
+                    final Neo4jRecord.Value value = record.get(field.getName());
                     final FieldVector vector = vectorMap.get(field.getName());
                     if (vector instanceof IntVector) {
                         ((IntVector) vector).set(idx, value.asInt());
@@ -127,8 +123,8 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                         writer.startList();
                         //writer.setPosition(idx);
                         // TODO: support type mapping here...for now we assume numbers
-                        for (Double d: value.asList(Value::asDouble)) {
-                            writer.writeFloat8(d);
+                        for (Neo4jRecord.Value entry: value.asList()) {
+                            writer.writeFloat8(entry.asDouble());
                         }
                         writer.setValueCount(value.asList().size());
                         writer.endList();
@@ -136,7 +132,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                 }
 
                 if ((idx + 1) == Config.arrowBatchSize) {
-                    flush(listener, streamAllocator, loader, vectorMap, writerMap, fieldList, idx);
+                    flush(listener, streamAllocator, loader, vectorMap, fieldList, idx);
                     cnt.set(0);
                     writerMap.clear();
                     vectorMap.values().clear();
@@ -154,11 +150,11 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
             listener.setOnCancelHandler(() -> job.cancel(true));
 
             // For now, we just block until the job finishes and then tell the client we're complete
-            ResultSummary summary = job.get(15, TimeUnit.MINUTES);
+            JobSummary summary = job.get(15, TimeUnit.MINUTES);
 
             // Final flush
             if (cnt.get() > 0)
-                flush(listener, streamAllocator, loader, vectorMap, writerMap, fieldList, cnt.decrementAndGet());
+                flush(listener, streamAllocator, loader, vectorMap, fieldList, cnt.decrementAndGet());
 
             logger.info("finished get_stream, summary: {}", summary);
 
@@ -180,9 +176,18 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
         }
     }
 
+    /**
+     * Flush out our vectors into the stream. At this point, all data is Arrow-based.
+     *
+     * @param listener
+     * @param streamAllocator
+     * @param loader
+     * @param vectorMap
+     * @param fieldList
+     * @param idx
+     */
     private void flush(ServerStreamListener listener, BufferAllocator streamAllocator, VectorLoader loader,
-                       Map<String, FieldVector> vectorMap, HashMap<String, UnionListWriter> writerMap,
-                       List<Field> fieldList, int idx) {
+                       Map<String, FieldVector> vectorMap, List<Field> fieldList, int idx) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
@@ -294,13 +299,15 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
                 /* Ticket this job */
                 final Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
-                final Neo4jJob job = new Neo4jJob(driver, msg, AccessMode.READ);
+                final Neo4jJob job = jobCreator.newJob(msg, Neo4jJob.Mode.READ,
+                        // TODO: get from context?
+                        Optional.of("neo4j"), Optional.of("password"));
                 jobMap.put(ticket, job);
 
                 /* We need to wait for the first record to discern our final schema */
-                final Future<Record> futureRecord = job.getFirstRecord();
+                final Future<Neo4jRecord> futureRecord = job.getFirstRecord();
                 CompletableFuture.runAsync(() -> {
-                    Record record;
+                    Neo4jRecord record;
                     try {
                         record = futureRecord.get();
                     } catch (InterruptedException e) {
@@ -311,33 +318,32 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                         return;
                     }
                     final List<Field> fields = new ArrayList<>();
-                    record.fields().stream().forEach(pair -> {
-                        final String fieldName = pair.key();
-                        final Value value = pair.value();
+                    record.keys().stream().forEach(fieldName -> {
+                        final Neo4jRecord.Value value = record.get(fieldName);
                         // TODO: better mapping support?
-                        logger.info("Translating Neo4j value {}", value.type().name());
-                        switch (value.type().name()) {
-                            case "INTEGER":
+                        logger.info("Translating Neo4j value {}", fieldName);
+                        switch (value.type()) {
+                            case INT:
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.Int(32, true)), null));
                                 break;
-                            case "LONG":
+                            case LONG:
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.Int(64, true)), null));
                                 break;
-                            case "FLOAT":
+                            case FLOAT:
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)), null));
                                 break;
-                            case "DOUBLE":
+                            case DOUBLE:
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)), null));
                                 break;
-                            case "STRING":
+                            case STRING:
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.Utf8()), null));
                                 break;
-                            case "LIST OF ANY?":
+                            case LIST:
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.List()),
                                         // TODO: inspect inner type...assume doubles for now.
@@ -345,6 +351,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                                                 FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)), null))));
                                 break;
                             default:
+                                // TODO: fallback to raw bytes?
                                 logger.info("not sure how to translate field {} with type {}",
                                         fieldName, value.type().name());
                                 break;
@@ -387,6 +394,6 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
         for (Neo4jJob job : jobMap.values()) {
             job.close();
         }
-        AutoCloseables.close(allocator, driver);
+        AutoCloseables.close(allocator);
     }
 }

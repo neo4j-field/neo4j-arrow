@@ -1,30 +1,21 @@
 package org.neo4j.arrow;
 
-import com.google.flatbuffers.Table;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.auth2.BasicAuthCredentialWriter;
 import org.apache.arrow.flight.grpc.CredentialCallOption;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
-import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
-import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.impl.UnionListReader;
-import org.apache.arrow.vector.complex.reader.FieldReader;
-import org.apache.arrow.vector.complex.reader.Float8Reader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
-import org.apache.arrow.vector.types.pojo.ArrowType;
-import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.types.pojo.FieldType;
-import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Base64;
+import java.util.Map;
 
 public class Neo4jArrowClient implements AutoCloseable {
 
@@ -75,15 +66,13 @@ public class Neo4jArrowClient implements AutoCloseable {
 
             logger.info("got schema: {}", root.getSchema().toJson());
 
-            int row = -1;
             while (stream.next()) {
-                row++;
                 try (ArrowRecordBatch batch = unloader.getRecordBatch()) {
                     logger.info("got batch, sized: {}", batch.getLength());
                     loader.load(batch);
                     cnt += batch.getLength();
                     if (cnt % 25_000 == 0)
-                        logger.info("Curren Row @ {}: [fields:{}, batchLen: {}]", cnt, root.getSchema().getFields(), batch.getLength());
+                        logger.info("Current Row @ {}: [fields:{}, batchLen: {}]", cnt, root.getSchema().getFields(), batch.getLength());
                 }
             }
         } catch (Exception e) {
