@@ -6,6 +6,7 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.configuration.GraphDatabaseSettings;
 import org.neo4j.dbms.api.DatabaseManagementService;
+import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.internal.LogService;
@@ -27,9 +28,10 @@ public class ArrowCypherService extends LifecycleAdapter {
         this.log = logService.getUserLog(ArrowCypherService.class);
 
         // TODO: integrate a Settings thing
-        this.jobCreator = (message, mode, username, password) ->
-                new ServerSideJob(message, mode,
-                        dbms.database(GraphDatabaseSettings.DEFAULT_DATABASE_NAME), this.log);
+        this.jobCreator = (message, mode, username, password) -> {
+            log.info("creating GdsJob...");
+            return new GdsJob(message, mode, this.log);
+        };
     }
 
     @Override

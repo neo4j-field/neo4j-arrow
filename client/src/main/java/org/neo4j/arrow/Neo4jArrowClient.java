@@ -51,7 +51,7 @@ public class Neo4jArrowClient implements AutoCloseable {
         option = new CredentialCallOption(new BasicAuthCredentialWriter("neo4j", "password"));
     }
 
-    private void getStream(Ticket ticket) {
+    private void getStream(Ticket ticket) throws Exception {
         logger.info("Fetching stream for ticket: {}",
                 StandardCharsets.UTF_8.decode(ByteBuffer.wrap(ticket.getBytes())));
 
@@ -76,14 +76,15 @@ public class Neo4jArrowClient implements AutoCloseable {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error(e.getMessage(), e);
+            throw e;
         }
         long delta = System.currentTimeMillis() - start;
         logger.info(String.format("Finished. Count=%,d rows, Time Delta=%,d ms, Rate=%,d rows/s",
                 cnt, delta, 1000 * (cnt / delta) ));
     }
 
-    public void run() throws InterruptedException, IOException {
+    public void run() throws Exception {
         client.listActions(option)
                 .forEach(action -> logger.info("found action: {}", action.getType()));
 
@@ -96,19 +97,38 @@ public class Neo4jArrowClient implements AutoCloseable {
         Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(result.getBody()));
         logger.info("ticketId: {}", StandardCharsets.UTF_8.decode(ticket.serialize()));
 
+        int retries = 100;
         boolean ready = false;
-        while (!ready) {
+        while (!ready && retries > 0) {
             Action check = new Action("cypherStatus", ticket.serialize().array());
-            result = client.doAction(check, option).next();
-            String status = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())).toString();
-            logger.info("status: {}", status);
-            if (status.equalsIgnoreCase(Neo4jJob.Status.PRODUCING.toString()))
-                ready = true;
-            else
-                Thread.sleep(2000);
+            try {
+                result = client.doAction(check, option).next();
+                String status = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())).toString();
+                logger.info("status: {}", status);
+                if (status.equalsIgnoreCase(Neo4jJob.Status.PRODUCING.toString()))
+                    ready = true;
+                Thread.sleep(10);
+            } catch (FlightRuntimeException runtimeException) {
+                if (runtimeException.status().code() != FlightStatusCode.NOT_FOUND)
+                    throw runtimeException;
+                Thread.sleep(10);
+            }
+            retries--;
         }
 
-        getStream(ticket);
+        retries = 100;
+        while (retries > 0) {
+            try {
+                // XXX Might throw other exceptions
+                getStream(ticket);
+                break;
+            } catch (FlightRuntimeException runtimeException) {
+                if (runtimeException.status().code() != FlightStatusCode.NOT_FOUND)
+                    throw runtimeException;
+                Thread.sleep(10);
+            }
+            retries--;
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -133,6 +153,6 @@ public class Neo4jArrowClient implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        AutoCloseables.close(allocator, client);
+        AutoCloseables.close(client, allocator);
     }
 }

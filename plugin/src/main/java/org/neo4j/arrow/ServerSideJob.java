@@ -7,11 +7,9 @@ import org.neo4j.logging.Log;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public class ServerSideJob extends Neo4jJob {

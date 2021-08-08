@@ -7,11 +7,13 @@ import java.util.stream.Collectors;
 
 public class ServerGenericRecord implements Neo4jRecord {
 
-    private final Map<String, Object> map;
+    private final Map<String, Value> map;
     private final ArrayList<String> keys;
 
     protected ServerGenericRecord(Map<String, Object> map) {
-        this.map = map;
+
+        this.map = new HashMap<>();
+        map.forEach((s, o) -> map.put(s, wrapObject(o)));
         this.keys = new ArrayList<>();
         this.keys.addAll(map.keySet());
     }

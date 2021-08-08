@@ -26,7 +26,10 @@ dependencies {
             [group: 'org.neo4j', name: 'neo4j-parser', version: project.ext.neo4j.serverVersion],
             project.ext.arrowFlightGrpc
     )
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: project.ext.jupiterVersion
+    testImplementation (
+            [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: project.ext.jupiterVersion],
+            project(':client')
+    )
     testRuntimeOnly (
             [group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: project.ext.jupiterVersion],
             [group: 'org.slf4j', name: 'slf4j-simple', version: project.ext.sl4jVersion],
@@ -132,10 +135,12 @@ project(':plugin') {
 
     dependencies {
         implementation rootProject
+        compileOnly 'org.neo4j.gds:proc-catalog:1.6.4'
         compileOnly rootProject.ext.arrowFlightGrpc
         compileOnly 'org.neo4j:neo4j-configuration:4.3.2'
         compileOnly 'org.neo4j:neo4j-kernel:4.3.2'
     }
+
 
     jar {
         manifest {
