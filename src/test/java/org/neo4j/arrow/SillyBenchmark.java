@@ -29,8 +29,8 @@ public class SillyBenchmark {
                         Result result = session.run(
                                /* "UNWIND range(1, $rows) AS row\n" +
                                 "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",*/
-                                "call gds.graph.streamNodeProperty('mygraph', 'n') yield propertyValue\n" +
-                                        "return propertyValue as n",
+                                "call gds.graph.streamNodeProperty('mygraph', 'n') yield nodeId, propertyValue\n" +
+                                        "return nodeId, propertyValue as value",
                                 Map.of("rows", 1_000_000, "dimension", 128));
                         long cnt = 0;
                         while (result.hasNext()) {

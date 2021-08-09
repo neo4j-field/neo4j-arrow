@@ -38,15 +38,16 @@ public class GdsJob extends Neo4jJob {
             final NodeProperties properties = graph.nodeProperties("n");
             // get first node
             long nodeId = iterator.next();
-            onFirstRecord(GdsRecord.wrap(properties.doubleValue(nodeId)));
+            onFirstRecord(GdsRecord.wrap(nodeId, properties.getObject(nodeId)));
             log.info("got first record");
 
             final Consumer<Neo4jRecord> consumer = futureConsumer.join();
             log.info("consuming...");
-            consumer.accept(GdsRecord.wrap(properties.doubleValue(nodeId)));
+            consumer.accept(GdsRecord.wrap(nodeId, properties.getObject(nodeId)));
 
             while (iterator.hasNext()) {
-                consumer.accept(GdsRecord.wrap(properties.doubleValue(iterator.next())));
+                nodeId = iterator.next();
+                consumer.accept(GdsRecord.wrap(nodeId, properties.getObject(nodeId)));
             }
             log.info("finishing stream");
             onCompletion(new JobSummary() {

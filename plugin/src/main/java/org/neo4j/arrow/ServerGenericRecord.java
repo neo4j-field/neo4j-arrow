@@ -11,7 +11,6 @@ public class ServerGenericRecord implements Neo4jRecord {
     private final ArrayList<String> keys;
 
     protected ServerGenericRecord(Map<String, Object> map) {
-
         this.map = new HashMap<>();
         map.forEach((s, o) -> map.put(s, wrapObject(o)));
         this.keys = new ArrayList<>();
