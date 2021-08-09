@@ -1,4 +1,6 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.job;
+
+import org.neo4j.arrow.Neo4jRecord;
 
 import java.util.List;
 

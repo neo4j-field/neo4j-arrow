@@ -4,6 +4,8 @@ import org.apache.arrow.flight.Location;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
+import org.neo4j.arrow.job.CypherJob;
+import org.neo4j.arrow.job.GdsJob;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;

@@ -197,7 +197,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
         for (Field field : fieldList) {
             final FieldVector vector = vectorMap.get(field.getName());
-            logger.debug("batching vector {}: {}", field.getName(), vector.toString());
+            logger.debug(String.format("batching vector %s: %s", field.getName(), vector.toString()));
             vector.setValueCount(idx + 1);
 
             nodes.add(new ArrowFieldNode(idx + 1, 0));

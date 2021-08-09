@@ -24,6 +24,7 @@ dependencies {
     implementation (
             [group: 'org.neo4j.driver', name: 'neo4j-java-driver', version: project.ext.neo4j.driverVersion],
             [group: 'org.neo4j', name: 'neo4j-parser', version: project.ext.neo4j.serverVersion],
+            [group: 'org.slf4j', name: 'slf4j-api', version: project.ext.sl4jVersion],
             project.ext.arrowFlightGrpc
     )
     testImplementation (
@@ -38,6 +39,9 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    filter {
+        includeTestsMatching "org.neo4j.arrow.*"
+    }
 }
 
 project(':client') {
@@ -91,6 +95,14 @@ project(':server') {
         implementation 'org.apache.arrow:flight-grpc:5.0.0'
         implementation 'org.neo4j.driver:neo4j-java-driver:4.3.3'
         runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
+        testImplementation (
+                [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
+                // project(':client')
+        )
+        testRuntimeOnly (
+                [group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: rootProject.ext.jupiterVersion],
+                [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion],
+        )
     }
 
     application {
@@ -115,6 +127,13 @@ project(':plugin') {
     group = 'org.neo4j.arrow'
     version = parent.version
 
+    test {
+        useJUnitPlatform()
+        filter {
+            includeTestsMatching "org.neo4j.arrow.*"
+        }
+    }
+
     repositories {
         maven {
             url "https://neo4j.bintray.com/enterprise-sources"
@@ -135,10 +154,21 @@ project(':plugin') {
 
     dependencies {
         implementation rootProject
+        implementation group: 'org.slf4j', name: 'slf4j-api', version: rootProject.ext.sl4jVersion
+
         compileOnly 'org.neo4j.gds:proc-catalog:1.6.4'
         compileOnly rootProject.ext.arrowFlightGrpc
         compileOnly 'org.neo4j:neo4j-configuration:4.3.2'
         compileOnly 'org.neo4j:neo4j-kernel:4.3.2'
+        testImplementation (
+                [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
+                'org.neo4j:neo4j-kernel:4.3.2',
+                project(':client')
+        )
+        testRuntimeOnly (
+                [group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: rootProject.ext.jupiterVersion],
+                [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion],
+        )
     }
 
 

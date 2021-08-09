@@ -1,5 +1,6 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.job;
 
+import org.neo4j.arrow.Neo4jRecord;
 import org.neo4j.graphdb.Result;
 
 import java.util.*;
@@ -10,28 +11,29 @@ public class CypherRecord implements Neo4jRecord {
     private final Map<String, Value> map;
     private final ArrayList<String> keys;
 
-    protected CypherRecord(Map<String, Object> map) {
+    protected CypherRecord(Map<String, Object> m) {
         this.map = new HashMap<>();
-        map.forEach((s, o) -> map.put(s, wrapObject(o)));
+        m.forEach((s, o) -> this.map.put(s, wrapObject(o)));
         this.keys = new ArrayList<>();
-        this.keys.addAll(map.keySet());
+        this.keys.addAll(this.map.keySet());
     }
 
-    protected static Neo4jRecord wrap(Map<String, Object> map) {
+    protected static CypherRecord wrap(Map<String, Object> map) {
         return new CypherRecord(map);
     }
 
-    protected static Neo4jRecord wrap(Result.ResultRow row, Collection<String> columns) {
+    protected static CypherRecord wrap(Result.ResultRow row, Collection<String> columns) {
         final Map<String, Object> map = new HashMap<>();
         for (String column : columns) {
             map.put(column, row.get(column));
         }
-        return wrap(map);
+        return new CypherRecord(map);
     }
 
-    protected static Value wrapObject(Object obj) {
+    protected static Value wrapObject(Object o) {
         // Best effort translation.
         return new Value() {
+            private final Object obj = o;
             @Override
             public int asInt() {
                 if (obj instanceof Integer)
@@ -104,12 +106,12 @@ public class CypherRecord implements Neo4jRecord {
 
     @Override
     public Value get(int index) {
-        return wrapObject(map.get(keys.get(index)));
+        return map.get(keys.get(index));
     }
 
     @Override
     public Value get(String field) {
-        return wrapObject(map.get(field));
+        return map.get(field);
     }
 
     @Override

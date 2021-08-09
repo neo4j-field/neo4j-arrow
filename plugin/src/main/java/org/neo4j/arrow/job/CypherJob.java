@@ -1,19 +1,14 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.job.CypherMessage;
-import org.neo4j.arrow.job.Job;
-import org.neo4j.arrow.job.JobSummary;
+import org.neo4j.arrow.Neo4jRecord;
 import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
 import org.neo4j.logging.Log;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
 public class CypherJob extends Job {
 
@@ -35,7 +30,10 @@ public class CypherJob extends Job {
                         long i = cnt.getAndIncrement();
                         Neo4jRecord record = CypherRecord.wrap(row, fields);
                         if (i == 1) {
-                            log.info("(arrow) first record seen for stream with fields " + fields);
+                            log.info("(arrow) first record seen for stream with fields " + record.keys());
+                            for (String field : record.keys()) {
+                                log.info(String.format("(arrow)  %s -> %s", field, record.get(field).type()));
+                            }
                             onFirstRecord(record);
                         }
                         if (i % 25_000 == 0)
@@ -55,38 +53,6 @@ public class CypherJob extends Job {
             return summary;
         }).toCompletableFuture();
         log.info("(arrow) job kicking off...");
-    }
-
-    class Visitor implements Result.ResultVisitor {
-        final ArrayList<String> fields;
-        Consumer<Neo4jRecord> consumer;
-        long rows = 0;
-
-        public Visitor(Collection<String> fields) {
-            this.fields = new ArrayList(fields);
-        }
-
-        @Override
-        public boolean visit(Result.ResultRow row) throws Exception {
-            final Neo4jRecord record = CypherRecord.wrap(row, fields);
-
-            if (rows == 0) {
-                log.info("(arrow) got first row");
-                onFirstRecord(record);
-            } else if (rows % 25_000 == 0) {
-                log.info(String.format("(arrow) feed %d, rows"), rows);
-            }
-            rows++;
-
-            if (consumer == null) {
-                log.info("(arrow) trying to get consumer");
-                consumer = futureConsumer.get(15, TimeUnit.SECONDS);
-                log.info("(arrow) got consumer");
-            }
-
-            consumer.accept(CypherRecord.wrap(row, fields));
-            return true;
-        }
     }
 
     private JobSummary summarize() {

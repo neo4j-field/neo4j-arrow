@@ -17,20 +17,18 @@ public class SillyBenchmark {
     }
 
     @Test
-    //@Disabled
+    @Disabled
     public void testSilly1MillionEmbeddings() {
-        try (Driver driver = GraphDatabase.driver("neo4j://localhost:7687",
-                AuthTokens.basic("neo4j", "password"))) {
+        try (Driver driver = GraphDatabase.driver(Config.neo4jUrl,
+                AuthTokens.basic(Config.username, Config.password))) {
             for (int i = 0; i < 1; i++) {
                 try (Session session = driver.session(SessionConfig.builder()
                         .withDefaultAccessMode(AccessMode.READ).build())) {
                     try {
                         long start = System.currentTimeMillis();
                         Result result = session.run(
-                               /* "UNWIND range(1, $rows) AS row\n" +
-                                "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",*/
-                                "call gds.graph.streamNodeProperty('mygraph', 'n') yield nodeId, propertyValue\n" +
-                                        "return nodeId, propertyValue as value",
+                                "UNWIND range(1, $rows) AS row\n" +
+                                "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
                                 Map.of("rows", 1_000_000, "dimension", 128));
                         long cnt = 0;
                         while (result.hasNext()) {

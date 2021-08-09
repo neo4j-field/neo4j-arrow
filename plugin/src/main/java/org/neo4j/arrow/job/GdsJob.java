@@ -1,8 +1,6 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.job.CypherMessage;
-import org.neo4j.arrow.job.Job;
-import org.neo4j.arrow.job.JobSummary;
+import org.neo4j.arrow.Neo4jRecord;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
