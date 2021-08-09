@@ -5,12 +5,12 @@ import org.neo4j.graphdb.Result;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class ServerGenericRecord implements Neo4jRecord {
+public class CypherRecord implements Neo4jRecord {
 
     private final Map<String, Value> map;
     private final ArrayList<String> keys;
 
-    protected ServerGenericRecord(Map<String, Object> map) {
+    protected CypherRecord(Map<String, Object> map) {
         this.map = new HashMap<>();
         map.forEach((s, o) -> map.put(s, wrapObject(o)));
         this.keys = new ArrayList<>();
@@ -18,7 +18,7 @@ public class ServerGenericRecord implements Neo4jRecord {
     }
 
     protected static Neo4jRecord wrap(Map<String, Object> map) {
-        return new ServerGenericRecord(map);
+        return new CypherRecord(map);
     }
 
     protected static Neo4jRecord wrap(Result.ResultRow row, Collection<String> columns) {
@@ -77,7 +77,7 @@ public class ServerGenericRecord implements Neo4jRecord {
             public List<Value> asList() {
                 if (obj instanceof List<?>) {
                     return ((List<?>)obj).stream()
-                            .map(ServerGenericRecord::wrapObject)
+                            .map(CypherRecord::wrapObject)
                             .collect(Collectors.toList());
                 }
                 return List.of();

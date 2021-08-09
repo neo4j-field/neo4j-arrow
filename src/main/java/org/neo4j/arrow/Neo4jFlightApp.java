@@ -16,8 +16,13 @@ public class Neo4jFlightApp implements AutoCloseable {
     private final Location location;
     private final Neo4jProducer producer;
     private final BufferAllocator allocator;
+    private final String name;
 
     public Neo4jFlightApp(BufferAllocator rootAllocator, Location location, JobCreator jobCreator) {
+        this(rootAllocator, location, jobCreator, "unnamed-app");
+    }
+
+    public Neo4jFlightApp(BufferAllocator rootAllocator, Location location, JobCreator jobCreator, String name) {
         allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
         this.location = location;
         this.producer = new Neo4jProducer(allocator, location, jobCreator);
@@ -27,6 +32,7 @@ public class Neo4jFlightApp implements AutoCloseable {
                 // XXX this approach for some reason didn't work for me in python :-(
                 //.authHandler(new BasicServerAuthHandler(new Neo4jBasicAuthValidator()))
                 .build();
+        this.name = name;
     }
 
     public void start() throws IOException {
@@ -36,6 +42,15 @@ public class Neo4jFlightApp implements AutoCloseable {
 
     public void awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
         server.awaitTermination(timeout, unit);
+    }
+
+    public Location getLocation() {
+        return location;
+    }
+
+    @Override
+    public String toString() {
+        return "NeojFlightApp { name: " + name + ", location: " + location.toString() + " }";
     }
 
     @Override

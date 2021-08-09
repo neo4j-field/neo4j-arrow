@@ -12,12 +12,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-public class ServerSideJob extends Neo4jJob {
+public class CypherJob extends Neo4jJob {
 
     private final CompletableFuture<JobSummary> future;
     private final Log log;
 
-    public ServerSideJob(CypherMessage msg, Mode mode, GraphDatabaseService db, Log log) {
+    public CypherJob(CypherMessage msg, Mode mode, GraphDatabaseService db, Log log) {
         super(msg, mode);
         this.log = log;
 
@@ -30,9 +30,9 @@ public class ServerSideJob extends Neo4jJob {
 
                     result.accept(row -> {
                         long i = cnt.getAndIncrement();
-                        Neo4jRecord record = ServerGenericRecord.wrap(row, fields);
+                        Neo4jRecord record = CypherRecord.wrap(row, fields);
                         if (i == 1) {
-                            log.info("(arrow) first record seen for stream");
+                            log.info("(arrow) first record seen for stream with fields " + fields);
                             onFirstRecord(record);
                         }
                         if (i % 25_000 == 0)
@@ -65,7 +65,7 @@ public class ServerSideJob extends Neo4jJob {
 
         @Override
         public boolean visit(Result.ResultRow row) throws Exception {
-            final Neo4jRecord record = ServerGenericRecord.wrap(row, fields);
+            final Neo4jRecord record = CypherRecord.wrap(row, fields);
 
             if (rows == 0) {
                 log.info("(arrow) got first row");
@@ -81,7 +81,7 @@ public class ServerSideJob extends Neo4jJob {
                 log.info("(arrow) got consumer");
             }
 
-            consumer.accept(ServerGenericRecord.wrap(row, fields));
+            consumer.accept(CypherRecord.wrap(row, fields));
             return true;
         }
     }
