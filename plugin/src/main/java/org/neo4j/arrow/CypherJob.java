@@ -1,5 +1,8 @@
 package org.neo4j.arrow;
 
+import org.neo4j.arrow.job.CypherMessage;
+import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.JobSummary;
 import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
@@ -12,7 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-public class CypherJob extends Neo4jJob {
+public class CypherJob extends Job {
 
     private final CompletableFuture<JobSummary> future;
     private final Log log;

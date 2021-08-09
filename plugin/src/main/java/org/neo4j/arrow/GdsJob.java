@@ -1,5 +1,8 @@
 package org.neo4j.arrow;
 
+import org.neo4j.arrow.job.CypherMessage;
+import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.JobSummary;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
@@ -12,7 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-public class GdsJob extends Neo4jJob {
+public class GdsJob extends Job {
 
 
     private final CompletableFuture<Boolean> future;
@@ -34,8 +37,10 @@ public class GdsJob extends Neo4jJob {
         future = CompletableFuture.supplyAsync(() -> {
             log.info("...starting streaming future...");
 
+            // TODO: inspect the schema via the Graph instance...need to change the Job message type
             final PrimitiveLongIterator iterator = graph.nodeIterator();
             final NodeProperties properties = graph.nodeProperties("n");
+
             // get first node
             long nodeId = iterator.next();
             onFirstRecord(GdsRecord.wrap(nodeId, properties.getObject(nodeId)));

@@ -1,5 +1,7 @@
 package org.neo4j.arrow;
 
+import org.neo4j.arrow.job.CypherMessage;
+import org.neo4j.arrow.job.Job;
 import org.neo4j.driver.*;
 import org.neo4j.driver.async.AsyncSession;
 import org.slf4j.LoggerFactory;
@@ -12,7 +14,7 @@ import java.util.function.Consumer;
 /**
  * Implementation of a Neo4jJob that uses an AsyncSession via the Java Driver.
  */
-public class AsyncDriverJob extends Neo4jJob {
+public class AsyncDriverJob extends Job {
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(AsyncDriverJob.class);
 
     /* Drivers per identity */

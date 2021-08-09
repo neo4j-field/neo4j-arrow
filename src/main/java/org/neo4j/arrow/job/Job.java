@@ -1,12 +1,14 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.job;
+
+import org.neo4j.arrow.Neo4jRecord;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-public abstract class Neo4jJob implements AutoCloseable, Future<JobSummary> {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jJob.class);
+public abstract class Job implements AutoCloseable, Future<JobSummary> {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Job.class);
     private static final AtomicLong jobCounter = new AtomicLong(0);
 
     public enum Mode {
@@ -42,7 +44,7 @@ public abstract class Neo4jJob implements AutoCloseable, Future<JobSummary> {
     protected final CompletableFuture<Consumer<Neo4jRecord>> futureConsumer = new CompletableFuture<>();
     private final String jobId;
 
-    protected Neo4jJob(CypherMessage msg, Mode mode) {
+    protected Job(CypherMessage msg, Mode mode) {
         jobId = String.format("job-%d", jobCounter.getAndIncrement());
     }
 

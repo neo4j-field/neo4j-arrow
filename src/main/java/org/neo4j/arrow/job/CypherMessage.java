@@ -1,4 +1,4 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.job;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.neo4j.cypher.internal.ast.Statement;

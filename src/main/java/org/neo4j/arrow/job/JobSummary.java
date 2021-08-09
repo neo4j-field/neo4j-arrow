@@ -1,4 +1,4 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.job;
 
 public interface JobSummary {
     String toString();

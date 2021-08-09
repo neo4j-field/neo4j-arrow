@@ -3,8 +3,10 @@ package org.neo4j.arrow;
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.util.AutoCloseables;
 import org.junit.jupiter.api.Test;
+import org.neo4j.arrow.job.CypherMessage;
+import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.JobSummary;
 
 import java.util.List;
 import java.util.Map;
@@ -76,7 +78,7 @@ public class NoOpBenchmark {
         }
     }
 
-    private class NoOpJob extends Neo4jJob {
+    private class NoOpJob extends Job {
 
         final CompletableFuture<Integer> future;
         final int numResults;

@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import org.neo4j.arrow.job.JobSummary;
 import org.neo4j.driver.summary.ResultSummary;
 
 public class Neo4jDriverJobSummary implements JobSummary {

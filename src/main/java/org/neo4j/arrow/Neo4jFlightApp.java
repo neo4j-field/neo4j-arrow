@@ -5,6 +5,8 @@ import org.apache.arrow.flight.Location;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
+import org.neo4j.arrow.auth.Neo4jBasicAuthValidator;
+import org.neo4j.arrow.job.JobCreator;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;

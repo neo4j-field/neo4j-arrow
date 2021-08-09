@@ -1,4 +1,4 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.auth;
 
 import org.apache.arrow.flight.auth.BasicServerAuthHandler;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;

@@ -2,6 +2,7 @@ package org.neo4j.arrow;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.neo4j.arrow.job.CypherMessage;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

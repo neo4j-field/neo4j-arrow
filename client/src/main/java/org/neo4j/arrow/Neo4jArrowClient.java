@@ -10,6 +10,8 @@ import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.neo4j.arrow.job.CypherMessage;
+import org.neo4j.arrow.job.Job;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -105,7 +107,7 @@ public class Neo4jArrowClient implements AutoCloseable {
                 result = client.doAction(check, option).next();
                 String status = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())).toString();
                 logger.info("status: {}", status);
-                if (status.equalsIgnoreCase(Neo4jJob.Status.PRODUCING.toString()))
+                if (status.equalsIgnoreCase(Job.Status.PRODUCING.toString()))
                     ready = true;
                 Thread.sleep(10);
             } catch (FlightRuntimeException runtimeException) {

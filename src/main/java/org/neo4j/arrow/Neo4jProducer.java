@@ -14,6 +14,10 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.neo4j.arrow.job.CypherMessage;
+import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.JobCreator;
+import org.neo4j.arrow.job.JobSummary;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -40,7 +44,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
     /* Holds all known current streams based on their tickets */
     final Map<Ticket, FlightInfo> flightMap;
     /* Holds all existing jobs based on their tickets */
-    final Map<Ticket, Neo4jJob> jobMap;
+    final Map<Ticket, Job> jobMap;
 
     public Neo4jProducer(BufferAllocator allocator, Location location, JobCreator jobCreator) {
         this.location = location;
@@ -55,7 +59,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
     public void getStream(CallContext context, Ticket ticket, ServerStreamListener listener) {
         logger.debug("getStream called: context={}, ticket={}", context, ticket.getBytes());
 
-        final Neo4jJob job = jobMap.get(ticket);
+        final Job job = jobMap.get(ticket);
         if (job == null) {
             listener.error(CallStatus.NOT_FOUND.withDescription("can't find job").toRuntimeException());
             return;
@@ -276,7 +280,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
             case CYPHER_STATUS_ACTION:
                 try {
                     final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(action.getBody()));
-                    Neo4jJob job = jobMap.get(ticket);
+                    Job job = jobMap.get(ticket);
                     if (job != null) {
                         listener.onNext(new Result(job.getStatus().toString().getBytes(StandardCharsets.UTF_8)));
                         listener.onCompleted();
@@ -299,7 +303,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
                 /* Ticket this job */
                 final Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
-                final Neo4jJob job = jobCreator.newJob(msg, Neo4jJob.Mode.READ,
+                final Job job = jobCreator.newJob(msg, Job.Mode.READ,
                         // TODO: get from context?
                         Optional.of("neo4j"), Optional.of("password"));
                 jobMap.put(ticket, job);
@@ -391,7 +395,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
     @Override
     public void close() throws Exception {
         logger.debug("closing");
-        for (Neo4jJob job : jobMap.values()) {
+        for (Job job : jobMap.values()) {
             job.close();
         }
         AutoCloseables.close(allocator);
