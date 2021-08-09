@@ -11,7 +11,6 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
@@ -48,7 +47,7 @@ public class Neo4jArrowClient implements AutoCloseable {
         headers.insert("authorization",
                 String.format("Basic %s", Base64.getEncoder()
                         .encodeToString("neo4j:password".getBytes(StandardCharsets.UTF_8))));
-        option = new CredentialCallOption(new BasicAuthCredentialWriter("neo4j", "password"));
+        option = new CredentialCallOption(new BasicAuthCredentialWriter(Config.username, Config.password));
     }
 
     private void getStream(Ticket ticket) throws Exception {
@@ -97,6 +96,7 @@ public class Neo4jArrowClient implements AutoCloseable {
         Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(result.getBody()));
         logger.info("ticketId: {}", StandardCharsets.UTF_8.decode(ticket.serialize()));
 
+        // Use a silly retry strategy for now, waiting until we have a PRODUCING status
         int retries = 100;
         boolean ready = false;
         while (!ready && retries > 0) {
@@ -116,6 +116,8 @@ public class Neo4jArrowClient implements AutoCloseable {
             retries--;
         }
 
+        // Use a silly retry strategy for now because there could be a time lag between PRODUCING
+        // and the stream actually being available to read
         retries = 100;
         while (retries > 0) {
             try {
@@ -132,7 +134,7 @@ public class Neo4jArrowClient implements AutoCloseable {
     }
 
     public static void main(String[] args) throws Exception {
-        final Location location = Location.forGrpcInsecure("localhost", 9999);
+        final Location location = Location.forGrpcInsecure(Config.host, Config.port);
         BufferAllocator allocator = null;
         Neo4jArrowClient client = null;
 
