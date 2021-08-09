@@ -22,7 +22,6 @@ project.ext {
 
 dependencies {
     implementation (
-            [group: 'org.neo4j.driver', name: 'neo4j-java-driver', version: project.ext.neo4j.driverVersion],
             [group: 'org.neo4j', name: 'neo4j-parser', version: project.ext.neo4j.serverVersion],
             [group: 'org.slf4j', name: 'slf4j-api', version: project.ext.sl4jVersion],
             project.ext.arrowFlightGrpc
@@ -63,9 +62,11 @@ project(':client') {
     }
 
     dependencies {
-        implementation rootProject
-        implementation 'org.apache.arrow:flight-grpc:5.0.0'
-        runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
+        implementation (
+                rootProject,
+                rootProject.ext.arrowFlightGrpc,
+        )
+        runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion
     }
 
     jar {
@@ -91,10 +92,12 @@ project(':server') {
     }
 
     dependencies {
-        implementation rootProject
-        implementation 'org.apache.arrow:flight-grpc:5.0.0'
-        implementation 'org.neo4j.driver:neo4j-java-driver:4.3.3'
-        runtimeOnly 'org.slf4j:slf4j-simple:1.7.31'
+        implementation (
+                rootProject,
+                rootProject.ext.arrowFlightGrpc,
+                [group: 'org.neo4j.driver', name: 'neo4j-java-driver', version: rootProject.ext.neo4j.driverVersion],
+        )
+        runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion
         testImplementation (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
                 // project(':client')
@@ -116,6 +119,39 @@ project(':server') {
     }
 }
 
+project(':strawman') {
+    apply plugin: 'com.github.johnrengelman.shadow'
+    apply plugin: 'java'
+    apply plugin: 'application'
+
+    sourceCompatibility = 11
+    targetCompatibility = 11
+
+    group 'org.neo4j.arrow'
+    version = parent.version
+
+    application {
+        mainClass.set("org.neo4j.arrow.Neo4jDirectClient")
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        implementation (
+                rootProject,
+                [group: 'org.neo4j.driver', name: 'neo4j-java-driver', version: rootProject.ext.neo4j.driverVersion],
+                [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion]
+        )
+    }
+
+    jar {
+        manifest {
+            attributes 'Description': 'Basic Java Driver implementation'
+        }
+    }
+}
 
 project(':plugin') {
     apply plugin: 'com.github.johnrengelman.shadow'
