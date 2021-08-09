@@ -23,7 +23,7 @@ public class CypherMessage {
     private final String cypher;
     private final Map<String, Object> params;
 
-    protected CypherMessage(String cypher, Map<String, Object> params) {
+    public CypherMessage(String cypher, Map<String, Object> params) {
         this.cypher = cypher;
         this.params = params;
 
