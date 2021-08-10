@@ -119,16 +119,33 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     } else if (vector instanceof VarCharVector) {
                         ((VarCharVector)vector).set(idx, value.asString().getBytes(StandardCharsets.UTF_8));
                     } else if (vector instanceof ListVector) {
-                        UnionListWriter writer = writerMap.get(field.getName());
-                        if (writer == null) {
-                            writer = ((ListVector)vector).getWriter();
-                            writerMap.put(field.getName(), writer);
-                        }
+                        final UnionListWriter writer = writerMap.computeIfAbsent(field.getName(),
+                                s -> ((ListVector)vector).getWriter());
                         writer.startList();
-                        //writer.setPosition(idx);
-                        // TODO: support type mapping here...for now we assume numbers
-                        for (Neo4jRecord.Value entry: value.asList()) {
-                            writer.writeFloat8(entry.asDouble());
+
+                        // XXX: Assumes all values share the same type and first value is non-null
+                        switch (value.asList().get(0).type()) {
+                            case INT:
+                                value.asList().forEach(val -> writer.writeInt(val.asInt()));
+                                break;
+                            case LONG:
+                                value.asList().forEach(val -> writer.writeBigInt(val.asLong()));
+                                break;
+                            case FLOAT:
+                                value.asList().forEach(val -> writer.writeFloat4(val.asFloat()));
+                                break;
+                            case DOUBLE:
+                                value.asList().forEach(val -> writer.writeFloat8(value.asDouble()));
+                                break;
+                            case STRING:
+                                // TODO: figure out if this is as horribly inefficient like it looks :-)
+                                value.asList().forEach(val -> {
+                                    final byte[] bytes = val.asString().getBytes(StandardCharsets.UTF_8);
+                                    final ArrowBuf stringBuf = streamAllocator.buffer(bytes.length);
+                                    stringBuf.writeBytes(bytes);
+                                    writer.writeVarChar(0, val.asString().length(), stringBuf);
+                                });
+                                break;
                         }
                         writer.setValueCount(value.asList().size());
                         writer.endList();
@@ -325,7 +342,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     record.keys().stream().forEach(fieldName -> {
                         final Neo4jRecord.Value value = record.get(fieldName);
                         // TODO: better mapping support?
-                        logger.info("Translating Neo4j value {}", fieldName);
+                        System.out.println(String.format("xxx Translating Neo4j value %s -> %s", fieldName, value.type()));
                         switch (value.type()) {
                             case INT:
                                 fields.add(new Field(fieldName,

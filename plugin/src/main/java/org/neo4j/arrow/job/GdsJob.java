@@ -37,20 +37,24 @@ public class GdsJob extends Job {
 
             // TODO: inspect the schema via the Graph instance...need to change the Job message type
             final PrimitiveLongIterator iterator = graph.nodeIterator();
-            final NodeProperties properties = graph.nodeProperties("n");
+
+            // TODO: support property other than 'n'
+            final String propertykey = "n";
+            final NodeProperties properties = graph.nodeProperties(propertykey);
 
             // get first node
             long nodeId = iterator.next();
-            onFirstRecord(GdsRecord.wrap(nodeId, properties.getObject(nodeId)));
+            onFirstRecord(GdsRecord.wrap(properties, nodeId));
             log.info("got first record");
+            log.info(String.format("  %s -> %s", propertykey, properties.valueType()));
 
             final Consumer<Neo4jRecord> consumer = futureConsumer.join();
             log.info("consuming...");
-            consumer.accept(GdsRecord.wrap(nodeId, properties.getObject(nodeId)));
+            consumer.accept(GdsRecord.wrap(properties, nodeId));
 
             while (iterator.hasNext()) {
                 nodeId = iterator.next();
-                consumer.accept(GdsRecord.wrap(nodeId, properties.getObject(nodeId)));
+                consumer.accept(GdsRecord.wrap(properties, nodeId));
             }
             log.info("finishing stream");
             onCompletion(new JobSummary() {
