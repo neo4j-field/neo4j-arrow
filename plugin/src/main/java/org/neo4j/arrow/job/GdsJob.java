@@ -1,28 +1,23 @@
 package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.Neo4jRecord;
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
 import org.neo4j.graphalgo.core.loading.GraphStoreCatalog;
 import org.neo4j.graphalgo.core.loading.ImmutableCatalogRequest;
-import org.neo4j.graphalgo.core.utils.collection.primitive.PrimitiveLongIterable;
 import org.neo4j.graphalgo.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.logging.Log;
 
-import java.util.Collection;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 public class GdsJob extends Job {
-
-
     private final CompletableFuture<Boolean> future;
 
     public GdsJob(CypherMessage msg, Mode mode, Log log) {
-        super(msg, mode);
+        super();
         log.info("GdsJob called");
 
         final GraphStore store = GraphStoreCatalog.get(
@@ -51,7 +46,7 @@ public class GdsJob extends Job {
             log.info("got first record");
             log.info(String.format("  %s -> %s", propertykey, properties.valueType()));
 
-            final Consumer<Neo4jRecord> consumer = futureConsumer.join();
+            final Consumer<RowBasedRecord> consumer = futureConsumer.join();
 
             // Blast off!
             consumer.accept(GdsRecord.wrap(properties, nodeId));
@@ -60,12 +55,7 @@ public class GdsJob extends Job {
             }
 
             log.info("finishing stream");
-            onCompletion(new JobSummary() {
-                @Override
-                public String toString() {
-                    return "done";
-                }
-            });
+            onCompletion(() -> "done");
             return true;
         }).exceptionally(throwable -> {
             log.error(throwable.getMessage(), throwable);

@@ -45,6 +45,27 @@ test {
     }
 }
 
+project(':common') {
+    apply plugin: 'com.github.johnrengelman.shadow'
+    apply plugin: 'java'
+    sourceCompatibility = 11
+    targetCompatibility = 11
+
+    group = 'org.neo4j.arrow'
+    version = parent.version
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        implementation (
+                rootProject,
+                rootProject.ext.arrowFlightGrpc,
+        )
+    }
+}
+
 project(':client') {
     apply plugin: 'com.github.johnrengelman.shadow'
     apply plugin: 'java'
@@ -200,7 +221,7 @@ project(':plugin') {
         compileOnly 'org.neo4j:neo4j-kernel:' + rootProject.ext.neo4j.serverVersion
         testImplementation (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
-                [group: 'org.neo4j', name: 'neo4j-kerel', version: rootProject.ext.neo4j.serverVersion],
+                [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
                 project(':client')
         )
         testRuntimeOnly (

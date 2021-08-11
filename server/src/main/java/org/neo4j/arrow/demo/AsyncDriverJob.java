@@ -1,5 +1,6 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.demo;
 
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.job.CypherMessage;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.driver.*;
@@ -24,15 +25,15 @@ public class AsyncDriverJob extends Job {
     private final CompletableFuture future;
 
     protected AsyncDriverJob(CypherMessage msg, Mode mode, AuthToken authToken) {
-        super(msg, mode);
+        super();
 
         Driver driver;
         if (!driverMap.containsKey(authToken)) {
             org.neo4j.driver.Config.ConfigBuilder builder = org.neo4j.driver.Config.builder();
-            driver = GraphDatabase.driver(Config.neo4jUrl, authToken,
+            driver = GraphDatabase.driver(org.neo4j.arrow.Config.neo4jUrl, authToken,
                     builder.withUserAgent("Neo4j-Arrow/alpha")
                             .withMaxConnectionPoolSize(8)
-                            .withFetchSize(Config.boltFetchSize)
+                            .withFetchSize(org.neo4j.arrow.Config.boltFetchSize)
                             .build());
             driverMap.put(authToken, driver);
         } else {
@@ -40,7 +41,7 @@ public class AsyncDriverJob extends Job {
         }
 
         this.session = driver.asyncSession(SessionConfig.builder()
-                .withDatabase(Config.database)
+                .withDatabase(org.neo4j.arrow.Config.database)
                 .withDefaultAccessMode(AccessMode.valueOf(mode.name()))
                 .build());
 
@@ -50,11 +51,11 @@ public class AsyncDriverJob extends Job {
                     setStatus(Status.PRODUCING);
 
                     Record firstRecord = resultCursor.peekAsync().toCompletableFuture().join();
-                    onFirstRecord(Neo4jDriverRecord.wrap(firstRecord));
+                    onFirstRecord(DriverRecord.wrap(firstRecord));
 
-                    Consumer<Neo4jRecord> consumer = futureConsumer.join();
+                    Consumer<RowBasedRecord> consumer = futureConsumer.join();
                     return resultCursor.forEachAsync(record -> {
-                        consumer.accept(Neo4jDriverRecord.wrap(record));
+                        consumer.accept(DriverRecord.wrap(record));
                     });
                 }).whenCompleteAsync((resultSummary, throwable) -> {
                     if (throwable != null) {
@@ -64,7 +65,7 @@ public class AsyncDriverJob extends Job {
                         logger.info("job {} complete", session);
                         setStatus(Status.COMPLETE);
                     }
-                    onCompletion(Neo4jDriverJobSummary.wrap(resultSummary));
+                    onCompletion(DriverJobSummary.wrap(resultSummary));
                     session.closeAsync().toCompletableFuture().join();
                 }).toCompletableFuture();
     }

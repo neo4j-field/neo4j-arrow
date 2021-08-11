@@ -1,22 +1,23 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.demo;
 
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.driver.Record;
 import org.neo4j.driver.internal.types.InternalTypeSystem;
 
 import java.util.List;
 
-public class Neo4jDriverRecord implements Neo4jRecord {
+public class DriverRecord implements RowBasedRecord {
     private final Record record;
 
-    private Neo4jDriverRecord(Record record) {
+    private DriverRecord(Record record) {
         this.record = record;
     }
 
-    public static Neo4jRecord wrap(Record record) {
-        return new Neo4jDriverRecord(record);
+    public static RowBasedRecord wrap(Record record) {
+        return new DriverRecord(record);
     }
 
-    private static Neo4jRecord.Value wrapValue(org.neo4j.driver.Value value) {
+    private static RowBasedRecord.Value wrapValue(org.neo4j.driver.Value value) {
         return new Value() {
             @Override
             public int size() {
@@ -52,7 +53,7 @@ public class Neo4jDriverRecord implements Neo4jRecord {
 
             @Override
             public List<Object> asList() {
-                return value.asList(Neo4jDriverRecord::wrapValue);
+                return value.asList(DriverRecord::wrapValue);
             }
 
             @Override

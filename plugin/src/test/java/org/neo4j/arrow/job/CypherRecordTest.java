@@ -2,14 +2,13 @@ package org.neo4j.arrow.job;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.neo4j.arrow.Neo4jRecord;
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Path;
 import org.neo4j.graphdb.Relationship;
 import org.neo4j.graphdb.Result;
 
 import java.util.List;
-import java.util.Map;
 
 public class CypherRecordTest {
     private static final org.slf4j.Logger logger;
@@ -73,9 +72,9 @@ public class CypherRecordTest {
         };
 
         final CypherRecord record = CypherRecord.wrap(row, List.of("int", "bool", "string", "float"));
-        Assertions.assertEquals(Neo4jRecord.Type.INT, record.get("int").type());
-        Assertions.assertEquals(Neo4jRecord.Type.FLOAT, record.get("float").type());
-        Assertions.assertEquals(Neo4jRecord.Type.STRING, record.get("string").type());
+        Assertions.assertEquals(RowBasedRecord.Type.INT, record.get("int").type());
+        Assertions.assertEquals(RowBasedRecord.Type.FLOAT, record.get("float").type());
+        Assertions.assertEquals(RowBasedRecord.Type.STRING, record.get("string").type());
 
     }
 }

@@ -5,36 +5,40 @@ import org.apache.arrow.flight.Location;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
-import org.neo4j.arrow.auth.Neo4jBasicAuthValidator;
-import org.neo4j.arrow.job.JobCreator;
+import org.neo4j.arrow.action.ActionHandler;
+import org.neo4j.arrow.auth.HorribleBasicAuthValidator;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-public class Neo4jFlightApp implements AutoCloseable {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jFlightApp.class);
+public class App implements AutoCloseable {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(App.class);
 
     private final FlightServer server;
     private final Location location;
-    private final Neo4jProducer producer;
+    private final Producer producer;
     private final BufferAllocator allocator;
     private final String name;
 
-    public Neo4jFlightApp(BufferAllocator rootAllocator, Location location, JobCreator jobCreator) {
-        this(rootAllocator, location, jobCreator, "unnamed-app");
+    public App(BufferAllocator rootAllocator, Location location) {
+        this(rootAllocator, location, "unnamed-app");
     }
 
-    public Neo4jFlightApp(BufferAllocator rootAllocator, Location location, JobCreator jobCreator, String name) {
+    public App(BufferAllocator rootAllocator, Location location, String name) {
         allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
         this.location = location;
-        this.producer = new Neo4jProducer(allocator, location, jobCreator);
+        this.producer = new Producer(allocator, location);
         this.server = FlightServer.builder(rootAllocator, location, this.producer)
                 // XXX header auth expects basic HTTP headers in the GRPC calls
-                .headerAuthenticator(new BasicCallHeaderAuthenticator(new Neo4jBasicAuthValidator()))
+                .headerAuthenticator(new BasicCallHeaderAuthenticator(new HorribleBasicAuthValidator()))
                 // XXX this approach for some reason didn't work for me in python :-(
                 //.authHandler(new BasicServerAuthHandler(new Neo4jBasicAuthValidator()))
                 .build();
         this.name = name;
+    }
+
+    public void registerHandler(ActionHandler handler) {
+        producer.registerHandler(handler);
     }
 
     public void start() throws IOException {

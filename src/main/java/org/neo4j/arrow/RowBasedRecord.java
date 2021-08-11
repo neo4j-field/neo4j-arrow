@@ -6,7 +6,7 @@ import java.util.List;
  * Adapter for different ways to represent raw values from Neo4j. For instance, from a Driver or
  * the underlying Server tx api.
  */
-public interface Neo4jRecord {
+public interface RowBasedRecord {
 
     enum Type {
         INT,

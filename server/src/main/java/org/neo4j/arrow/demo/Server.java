@@ -1,17 +1,18 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.demo;
 
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
-import org.neo4j.driver.AuthTokens;
+import org.neo4j.arrow.Config;
+import org.neo4j.arrow.App;
 
 import java.util.concurrent.TimeUnit;
 
 /**
- * A simple implementation of a Neo4jArrow service.
+ * A simple implementation of a Neo4j Arrow Service.
  */
-public class Neo4jArrowServer {
+public class Server {
     private static final org.slf4j.Logger logger;
 
     static {
@@ -19,7 +20,7 @@ public class Neo4jArrowServer {
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[yyyy-MM-dd'T'HH:mm:ss:SSS]");
         System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
         System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "info");
-        logger = org.slf4j.LoggerFactory.getLogger(Neo4jArrowServer.class);
+        logger = org.slf4j.LoggerFactory.getLogger(Server.class);
     }
 
     public static void main(String[] args) throws Exception {
@@ -27,12 +28,10 @@ public class Neo4jArrowServer {
         TimeUnit unit = TimeUnit.MINUTES;
 
         final BufferAllocator bufferAllocator = new RootAllocator(Config.maxGlobalMemory);
-        final Neo4jFlightApp app = new Neo4jFlightApp(
+        final App app = new App(
                 bufferAllocator,
-                Location.forGrpcInsecure(Config.host, Config.port),
-                (cypher, mode, username, password) ->
-                        new AsyncDriverJob(cypher, mode,
-                                AuthTokens.basic(username.get(), password.get())));
+                Location.forGrpcInsecure(Config.host, Config.port));
+
         app.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

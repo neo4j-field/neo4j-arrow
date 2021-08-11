@@ -15,7 +15,7 @@ public class ArrowExtensionFactory extends ExtensionFactory<ArrowExtensionFactor
 
     @Override
     public Lifecycle newInstance(ExtensionContext context, Dependencies dependencies) {
-        return new ArrowCypherService(dependencies.dbms(), dependencies.logService());
+        return new ArrowService(dependencies.dbms(), dependencies.logService());
     }
 
     public interface Dependencies {

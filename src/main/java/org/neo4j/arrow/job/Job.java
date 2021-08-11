@@ -1,6 +1,6 @@
 package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.Neo4jRecord;
+import org.neo4j.arrow.RowBasedRecord;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,11 +40,11 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
 
     private final AtomicReference<Status> jobStatus = new AtomicReference<>(Status.PENDING);
     private final CompletableFuture<JobSummary> jobSummary = new CompletableFuture<>();
-    private final CompletableFuture<Neo4jRecord> firstRecord = new CompletableFuture<>();
-    protected final CompletableFuture<Consumer<Neo4jRecord>> futureConsumer = new CompletableFuture<>();
+    private final CompletableFuture<RowBasedRecord> firstRecord = new CompletableFuture<>();
+    protected final CompletableFuture<Consumer<RowBasedRecord>> futureConsumer = new CompletableFuture<>();
     private final String jobId;
 
-    protected Job(CypherMessage msg, Mode mode) {
+    protected Job() {
         jobId = String.format("job-%d", jobCounter.getAndIncrement());
     }
 
@@ -56,7 +56,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         jobStatus.set(status);
     }
 
-    protected void onFirstRecord(Neo4jRecord record) {
+    protected void onFirstRecord(RowBasedRecord record) {
         logger.info("First record received {}", firstRecord);
         setStatus(Status.PRODUCING);
         firstRecord.complete(record);
@@ -68,7 +68,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         jobSummary.complete(summary);
     }
 
-    public void consume(Consumer<Neo4jRecord> consumer) {
+    public void consume(Consumer<RowBasedRecord> consumer) {
         if (!futureConsumer.isDone())
             futureConsumer.complete(consumer);
         else
@@ -99,7 +99,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         return jobSummary.get(timeout, unit);
     }
 
-    public Future<Neo4jRecord> getFirstRecord() {
+    public Future<RowBasedRecord> getFirstRecord() {
         return firstRecord;
     }
 

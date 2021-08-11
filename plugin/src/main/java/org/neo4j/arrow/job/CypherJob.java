@@ -1,6 +1,6 @@
 package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.Neo4jRecord;
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
@@ -16,19 +16,20 @@ public class CypherJob extends Job {
     private final Log log;
 
     public CypherJob(CypherMessage msg, Mode mode, GraphDatabaseService db, Log log) {
-        super(msg, mode);
+        super();
         this.log = log;
 
         future = CompletableFuture.supplyAsync(() -> {
             try (Transaction tx = db.beginTx()) {
                 log.info("(arrow) starting tx...");
+
                 try (Result result = tx.execute(msg.getCypher(), msg.getParams())) {
                     AtomicLong cnt = new AtomicLong(1);
                     ArrayList<String> fields = new ArrayList(result.columns());
 
                     result.accept(row -> {
                         long i = cnt.getAndIncrement();
-                        Neo4jRecord record = CypherRecord.wrap(row, fields);
+                        RowBasedRecord record = CypherRecord.wrap(row, fields);
                         if (i == 1) {
                             log.info("(arrow) first record seen for stream with fields " + record.keys());
                             for (String field : record.keys()) {
@@ -56,12 +57,7 @@ public class CypherJob extends Job {
     }
 
     private JobSummary summarize() {
-        return new JobSummary() {
-            @Override
-            public String toString() {
-                return "{ TBD }";
-            }
-        };
+        return () -> "{ TBD }";
     }
 
     @Override

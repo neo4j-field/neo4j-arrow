@@ -23,10 +23,9 @@ public class Neo4jFlightServerTest {
         TimeUnit unit = TimeUnit.SECONDS;
 
         final BufferAllocator bufferAllocator = new RootAllocator(Long.MAX_VALUE);
-        final Neo4jFlightApp neo4jFlightServer = new Neo4jFlightApp(
+        final App neo4jFlightServer = new App(
                 bufferAllocator,
-                Location.forGrpcInsecure("0.0.0.0", 9999),
-                (message, mode, username, password) -> { return null; });
+                Location.forGrpcInsecure("0.0.0.0", 9999));
         neo4jFlightServer.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

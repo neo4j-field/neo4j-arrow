@@ -1,6 +1,6 @@
 package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.Neo4jRecord;
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphalgo.api.NodeProperties;
 import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-public class GdsRecord implements Neo4jRecord {
+public class GdsRecord implements RowBasedRecord {
     private final Value nodeId;
     private final Value value;
 

@@ -1,11 +1,11 @@
 package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.Neo4jRecord;
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphdb.Result;
 
 import java.util.*;
 
-public class CypherRecord implements Neo4jRecord {
+public class CypherRecord implements RowBasedRecord {
 
     private final Map<String, Value> map;
     private final ArrayList<String> keys;

@@ -9,8 +9,9 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Optional;
 
-public class Neo4jBasicAuthValidator implements BasicServerAuthHandler.BasicAuthValidator, BasicCallHeaderAuthenticator.CredentialValidator {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Neo4jBasicAuthValidator.class);
+public class HorribleBasicAuthValidator
+        implements BasicServerAuthHandler.BasicAuthValidator, BasicCallHeaderAuthenticator.CredentialValidator {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(HorribleBasicAuthValidator.class);
 
     // XXX
     private static final String HARDCODED_TOKEN = "neo4j:password";

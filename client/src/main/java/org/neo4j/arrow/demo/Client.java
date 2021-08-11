@@ -1,4 +1,4 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.demo;
 
 import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.auth2.BasicAuthCredentialWriter;
@@ -10,6 +10,8 @@ import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.neo4j.arrow.Config;
+import org.neo4j.arrow.action.StatusHandler;
 import org.neo4j.arrow.job.CypherMessage;
 import org.neo4j.arrow.job.Job;
 
@@ -18,7 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 
-public class Neo4jArrowClient implements AutoCloseable {
+public class Client implements AutoCloseable {
 
     private static final org.slf4j.Logger logger;
 
@@ -28,7 +30,7 @@ public class Neo4jArrowClient implements AutoCloseable {
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[yyyy-MM-dd'T'HH:mm:ss:SSS]");
         System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
         System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "info");
-        logger = org.slf4j.LoggerFactory.getLogger(Neo4jArrowClient.class);
+        logger = org.slf4j.LoggerFactory.getLogger(Client.class);
     }
 
     final private BufferAllocator allocator;
@@ -36,7 +38,7 @@ public class Neo4jArrowClient implements AutoCloseable {
     final private FlightClient client;
     final private CredentialCallOption option;
 
-    public Neo4jArrowClient(BufferAllocator allocator, Location location) {
+    public Client(BufferAllocator allocator, Location location) {
         this.allocator = allocator;
         this.location = location;
 
@@ -85,15 +87,7 @@ public class Neo4jArrowClient implements AutoCloseable {
                 cnt, delta, 1000 * (cnt / delta) ));
     }
 
-    public void run() throws Exception {
-        client.listActions(option)
-                .forEach(action -> logger.info("found action: {}", action.getType()));
-
-        CypherMessage msg = new CypherMessage("UNWIND range(1, $rows) AS row\n" +
-                "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
-                Map.of("rows", 1_000_000, "dimension", 128));
-
-        Action action = new Action("cypherRead", msg.serialize());
+    public void run(Action action) throws Exception {
         Result result = client.doAction(action, option).next();
         Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(result.getBody()));
         logger.info("ticketId: {}", StandardCharsets.UTF_8.decode(ticket.serialize()));
@@ -102,18 +96,18 @@ public class Neo4jArrowClient implements AutoCloseable {
         int retries = 100;
         boolean ready = false;
         while (!ready && retries > 0) {
-            Action check = new Action("cypherStatus", ticket.serialize().array());
+            Action check = new Action(StatusHandler.STATUS_ACTION, ticket.serialize().array());
             try {
                 result = client.doAction(check, option).next();
                 String status = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(result.getBody())).toString();
                 logger.info("status: {}", status);
                 if (status.equalsIgnoreCase(Job.Status.PRODUCING.toString()))
                     ready = true;
-                Thread.sleep(10);
+                Thread.sleep(100);
             } catch (FlightRuntimeException runtimeException) {
                 if (runtimeException.status().code() != FlightStatusCode.NOT_FOUND)
                     throw runtimeException;
-                Thread.sleep(10);
+                Thread.sleep(100);
             }
             retries--;
         }
@@ -139,13 +133,18 @@ public class Neo4jArrowClient implements AutoCloseable {
     public static void main(String[] args) throws Exception {
         final Location location = Location.forGrpcInsecure(Config.host, Config.port);
         BufferAllocator allocator = null;
-        Neo4jArrowClient client = null;
+        Client client = null;
 
         try {
             logger.info("starting client connection to {}", location.getUri());
             allocator = new RootAllocator(Integer.MAX_VALUE);
-            client = new Neo4jArrowClient(allocator, location);
-            client.run();
+            client = new Client(allocator, location);
+
+            CypherMessage msg = new CypherMessage("UNWIND range(1, $rows) AS row\n" +
+                    "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
+                    Map.of("rows", 1_000_000, "dimension", 128));
+            Action action = new Action("cypherRead", msg.serialize());
+            client.run(action);
             logger.info("client finished!");
         } finally {
             try {

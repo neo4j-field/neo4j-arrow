@@ -1,4 +1,5 @@
 rootProject.name = 'neo4j-arrow'
+include 'common'
 include 'client'
 include 'plugin'
 include 'server'
