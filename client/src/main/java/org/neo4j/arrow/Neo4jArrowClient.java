@@ -129,7 +129,8 @@ public class Neo4jArrowClient implements AutoCloseable {
             } catch (FlightRuntimeException runtimeException) {
                 if (runtimeException.status().code() != FlightStatusCode.NOT_FOUND)
                     throw runtimeException;
-                Thread.sleep(10);
+                logger.info("waiting before trying again...");
+                Thread.sleep(100);
             }
             retries--;
         }

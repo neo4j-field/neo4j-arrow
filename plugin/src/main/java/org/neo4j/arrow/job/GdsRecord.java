@@ -7,7 +7,7 @@ import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
-import java.util.stream.LongStream;
+import java.util.stream.IntStream;
 
 public class GdsRecord implements Neo4jRecord {
     private final Value nodeId;
@@ -38,10 +38,12 @@ public class GdsRecord implements Neo4jRecord {
 
     protected static Value wrapLongArray(long[] longs) {
         return new Value() {
-            final List<Value> values = Arrays.stream(longs)
-                    .boxed()
-                    .map(val -> wrapScalar(ValueType.LONG, val))
-                    .collect(Collectors.toList());
+            final List<Long> values = Arrays.stream(longs).boxed().collect(Collectors.toList());
+
+            @Override
+            public int size() {
+                return longs.length;
+            }
 
             @Override
             public int asInt() {
@@ -69,8 +71,28 @@ public class GdsRecord implements Neo4jRecord {
             }
 
             @Override
-            public List<Value> asList() {
+            public List<Object> asList() {
+                return Arrays.asList(values.toArray());
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return values.stream().mapToInt(Long::intValue).boxed().collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Long> asLongList() {
                 return values;
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return values.stream().map(Long::floatValue).collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return values.stream().mapToDouble(Long::doubleValue).boxed().collect(Collectors.toList());
             }
 
             @Override
@@ -82,10 +104,10 @@ public class GdsRecord implements Neo4jRecord {
 
     protected static Value wrapFloatArray(float[] floats) {
         return new Value() {
-            final List<Value> values = LongStream.range(0, floats.length)
-                    .mapToObj(idx -> Double.valueOf(floats[(int) idx]))
-                    .map(val -> wrapScalar(ValueType.DOUBLE, val))
-                    .collect(Collectors.toList());
+            @Override
+            public int size() {
+                return floats.length;
+            }
 
             @Override
             public int asInt() {
@@ -113,23 +135,57 @@ public class GdsRecord implements Neo4jRecord {
             }
 
             @Override
-            public List<Value> asList() {
-                return values;
+            public List<Object> asList() {
+                return IntStream.range(0, floats.length)
+                        .mapToObj(idx -> Float.valueOf(floats[idx]))
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return IntStream.range(0, floats.length)
+                        .mapToObj(idx -> Float.floatToIntBits(floats[idx]))
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return IntStream.range(0, floats.length)
+                        .mapToObj(idx -> Double.doubleToLongBits(floats[idx]))
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return IntStream.range(0, floats.length)
+                        .mapToObj(idx -> Float.valueOf(floats[idx]))
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return IntStream.range(0, floats.length)
+                        .mapToObj(idx -> Double.valueOf(floats[idx]))
+                        .collect(Collectors.toList());
             }
 
             @Override
             public Type type() {
-                return Type.LIST;
+                return Type.FLOAT_ARRAY;
             }
         };
     }
 
     protected static Value wrapDoubleArray(double[] floats) {
         return new Value() {
-            final List<Value> values = Arrays.stream(floats)
+            final List<Double> values = Arrays.stream(floats)
                     .boxed()
-                    .map(val -> wrapScalar(ValueType.DOUBLE, val))
                     .collect(Collectors.toList());
+
+            @Override
+            public int size() {
+                return floats.length;
+            }
 
             @Override
             public int asInt() {
@@ -157,13 +213,33 @@ public class GdsRecord implements Neo4jRecord {
             }
 
             @Override
-            public List<Value> asList() {
+            public List<Object> asList() {
+                return values.stream().map(v -> (Object)v).collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return values.stream().mapToInt(Double::intValue).boxed().collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return values.stream().mapToLong(Double::longValue).boxed().collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return values.stream().map(Double::floatValue).collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
                 return values;
             }
 
             @Override
             public Type type() {
-                return Type.LIST;
+                return Type.DOUBLE_ARRAY;
             }
         };
     }
@@ -172,6 +248,11 @@ public class GdsRecord implements Neo4jRecord {
         return new Value() {
             private final Number num = n;
             private final ValueType valueType = t;
+
+            @Override
+            public int size() {
+                return 1;
+            }
 
             @Override
             public int asInt() {
@@ -199,8 +280,28 @@ public class GdsRecord implements Neo4jRecord {
             }
 
             @Override
-            public List<Value> asList() {
+            public List<Object> asList() {
                 return List.of();
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return null;
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return null;
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return null;
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return null;
             }
 
             @Override
@@ -224,6 +325,11 @@ public class GdsRecord implements Neo4jRecord {
     protected static Value wrapString(String s) {
         return new Value() {
             private final String str = s;
+
+            @Override
+            public int size() {
+                return 1;
+            }
 
             @Override
             public int asInt() {
@@ -251,8 +357,28 @@ public class GdsRecord implements Neo4jRecord {
             }
 
             @Override
-            public List<Value> asList() {
+            public List<Object> asList() {
                 return List.of();
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return null;
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return null;
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return null;
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return null;
             }
 
             @Override

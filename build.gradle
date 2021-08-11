@@ -28,6 +28,7 @@ dependencies {
     )
     testImplementation (
             [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: project.ext.jupiterVersion],
+            [group: 'org.neo4j.driver', name: 'neo4j-java-driver', version: rootProject.ext.neo4j.driverVersion],
             project(':client')
     )
     testRuntimeOnly (

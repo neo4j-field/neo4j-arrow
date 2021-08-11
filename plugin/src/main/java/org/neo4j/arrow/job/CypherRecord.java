@@ -4,7 +4,6 @@ import org.neo4j.arrow.Neo4jRecord;
 import org.neo4j.graphdb.Result;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class CypherRecord implements Neo4jRecord {
 
@@ -34,6 +33,14 @@ public class CypherRecord implements Neo4jRecord {
         // Best effort translation.
         return new Value() {
             private final Object obj = o;
+
+            @Override
+            public int size() {
+                if (obj instanceof List)
+                    return ((List)obj).size();
+                return 1;
+            }
+
             @Override
             public int asInt() {
                 if (obj instanceof Integer)
@@ -76,12 +83,30 @@ public class CypherRecord implements Neo4jRecord {
             }
 
             @Override
-            public List<Value> asList() {
+            public List<Object> asList() {
                 if (obj instanceof List<?>) {
-                    return ((List<?>)obj).stream()
-                            .map(CypherRecord::wrapObject)
-                            .collect(Collectors.toList());
+                    return (List<Object>) obj;
                 }
+                return List.of();
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return List.of();
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return List.of();
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return List.of();
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
                 return List.of();
             }
 
@@ -97,8 +122,9 @@ public class CypherRecord implements Neo4jRecord {
                     return Type.DOUBLE;
                 if (obj instanceof String)
                     return Type.STRING;
-                if (obj instanceof List)
+                if (obj instanceof List) {
                     return Type.LIST;
+                }
                 return Type.OBJECT;
             }
         };

@@ -30,6 +30,26 @@ public class NoOpBenchmark {
         @Override
         public Value get(int index) {
             return new Value() {
+                private final List<Double> doubleList = List.of(
+                            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
+                                    1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d);
+
+                @Override
+                public int size() {
+                    return doubleList.size();
+                }
+
                 @Override
                 public int asInt() {
                     return 1;
@@ -56,13 +76,33 @@ public class NoOpBenchmark {
                 }
 
                 @Override
-                public List<Value> asList() {
+                public List<Object> asList() {
                     return List.of();
                 }
 
                 @Override
+                public List<Integer> asIntList() {
+                    return null;
+                }
+
+                @Override
+                public List<Long> asLongList() {
+                    return null;
+                }
+
+                @Override
+                public List<Float> asFloatList() {
+                    return null;
+                }
+
+                @Override
+                public List<Double> asDoubleList() {
+                    return doubleList;
+                }
+
+                @Override
                 public Type type() {
-                    return Type.INT;
+                    return Type.DOUBLE_ARRAY;
                 }
             };
         }

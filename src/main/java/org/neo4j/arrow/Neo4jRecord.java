@@ -10,9 +10,13 @@ public interface Neo4jRecord {
 
     enum Type {
         INT,
+        INT_ARRAY,
         LONG,
+        LONG_ARRAY,
         FLOAT,
+        FLOAT_ARRAY,
         DOUBLE,
+        DOUBLE_ARRAY,
         STRING,
         LIST,
         OBJECT
@@ -24,6 +28,9 @@ public interface Neo4jRecord {
     List<String> keys();
 
     interface Value {
+        /* Number of primitives or inner values */
+        int size();
+
         int asInt();
 
         long asLong();
@@ -34,7 +41,15 @@ public interface Neo4jRecord {
 
         String asString();
 
-        List<Value> asList();
+        List<Object> asList();
+
+        List<Integer> asIntList();
+
+        List<Long> asLongList();
+
+        List<Float> asFloatList();
+
+        List<Double> asDoubleList();
 
         Type type();
     }

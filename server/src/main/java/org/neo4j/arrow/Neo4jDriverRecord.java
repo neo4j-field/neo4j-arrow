@@ -1,6 +1,7 @@
 package org.neo4j.arrow;
 
 import org.neo4j.driver.Record;
+import org.neo4j.driver.internal.types.InternalTypeSystem;
 
 import java.util.List;
 
@@ -17,6 +18,13 @@ public class Neo4jDriverRecord implements Neo4jRecord {
 
     private static Neo4jRecord.Value wrapValue(org.neo4j.driver.Value value) {
         return new Value() {
+            @Override
+            public int size() {
+                if (value.hasType(InternalTypeSystem.TYPE_SYSTEM.LIST()))
+                    return value.asList().size();
+                return 1;
+            }
+
             @Override
             public int asInt() {
                 return value.asInt();
@@ -43,8 +51,28 @@ public class Neo4jDriverRecord implements Neo4jRecord {
             }
 
             @Override
-            public List<Value> asList() {
+            public List<Object> asList() {
                 return value.asList(Neo4jDriverRecord::wrapValue);
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return List.of();
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return List.of();
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return List.of();
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return List.of();
             }
 
             public Type type() {

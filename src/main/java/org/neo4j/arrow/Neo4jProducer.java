@@ -5,6 +5,8 @@ import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.BaseListVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
@@ -86,7 +88,7 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
             // We need to dynamically build out our vectors based on the identified schema
             final HashMap<String, FieldVector> vectorMap = new HashMap<>();
             // Complex things like Lists need special writers to fill them :-(
-            final HashMap<String, UnionListWriter> writerMap = new HashMap<>();
+            final Map<String, UnionListWriter> writerMap = new ConcurrentHashMap<>();
 
             final List<Field> fieldList = info.getSchema().getFields();
 
@@ -95,6 +97,14 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                 FieldVector fieldVector = root.getVector(field);
                 fieldVector.setInitialCapacity(Config.arrowBatchSize);
                 fieldVector.allocateNew();
+
+                if (fieldVector instanceof ListVector) {
+                    FieldVector child = fieldVector.getChildrenFromFields().get(0);
+                    child.setInitialCapacity(Config.arrowBatchSize * 128);
+                    child.allocateNew();
+                }
+
+
                 vectorMap.put(field.getName(), fieldVector);
             }
 
@@ -103,67 +113,69 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
             // A bit hacky, but provide the core processing logic as a Consumer
             job.consume(record -> {
-                int idx = cnt.getAndIncrement();
-
-                for (Field field : fieldList) {
-                    final Neo4jRecord.Value value = record.get(field.getName());
-                    final FieldVector vector = vectorMap.get(field.getName());
-                    if (vector instanceof IntVector) {
-                        ((IntVector) vector).set(idx, value.asInt());
-                    } else if (vector instanceof BigIntVector) {
-                        ((BigIntVector) vector).set(idx, value.asLong());
-                    } else if (vector instanceof Float4Vector) {
-                        ((Float4Vector)vector).set(idx, value.asFloat());
-                    } else if (vector instanceof Float8Vector) {
-                        ((Float8Vector)vector).set(idx, value.asDouble());
-                    } else if (vector instanceof VarCharVector) {
-                        ((VarCharVector)vector).set(idx, value.asString().getBytes(StandardCharsets.UTF_8));
-                    } else if (vector instanceof ListVector) {
-                        final UnionListWriter writer = writerMap.computeIfAbsent(field.getName(),
-                                s -> ((ListVector)vector).getWriter());
-                        writer.startList();
-
-                        // XXX: Assumes all values share the same type and first value is non-null
-                        switch (value.asList().get(0).type()) {
-                            case INT:
-                                value.asList().forEach(val -> writer.writeInt(val.asInt()));
-                                break;
-                            case LONG:
-                                value.asList().forEach(val -> writer.writeBigInt(val.asLong()));
-                                break;
-                            case FLOAT:
-                                value.asList().forEach(val -> writer.writeFloat4(val.asFloat()));
-                                break;
-                            case DOUBLE:
-                                value.asList().forEach(val -> writer.writeFloat8(value.asDouble()));
-                                break;
-                            case STRING:
-                                // TODO: figure out if this is as horribly inefficient like it looks :-)
-                                value.asList().forEach(val -> {
-                                    final byte[] bytes = val.asString().getBytes(StandardCharsets.UTF_8);
-                                    final ArrowBuf stringBuf = streamAllocator.buffer(bytes.length);
-                                    stringBuf.writeBytes(bytes);
-                                    writer.writeVarChar(0, val.asString().length(), stringBuf);
-                                });
-                                break;
-                        }
-                        writer.setValueCount(value.asList().size());
-                        writer.endList();
-                    }
-                }
-
-                if ((idx + 1) == Config.arrowBatchSize) {
-                    flush(listener, streamAllocator, loader, vectorMap, fieldList, idx);
-                    cnt.set(0);
-                    writerMap.clear();
-                    vectorMap.values().clear();
+                try {
+                    int idx = cnt.getAndIncrement();
 
                     for (Field field : fieldList) {
-                        FieldVector fieldVector = root.getVector(field);
-                        fieldVector.setInitialCapacity(Config.arrowBatchSize);
-                        fieldVector.allocateNew();
-                        vectorMap.put(field.getName(), fieldVector);
+                        final Neo4jRecord.Value value = record.get(field.getName());
+                        final FieldVector vector = vectorMap.get(field.getName());
+                        if (vector instanceof IntVector) {
+                            ((IntVector) vector).set(idx, value.asInt());
+                        } else if (vector instanceof BigIntVector) {
+                            ((BigIntVector) vector).set(idx, value.asLong());
+                        } else if (vector instanceof Float4Vector) {
+                            ((Float4Vector) vector).set(idx, value.asFloat());
+                        } else if (vector instanceof Float8Vector) {
+                            ((Float8Vector) vector).set(idx, value.asDouble());
+                        } else if (vector instanceof VarCharVector) {
+                            ((VarCharVector) vector).set(idx, value.asString().getBytes(StandardCharsets.UTF_8));
+                        } else if (vector instanceof ListVector) {
+                            final UnionListWriter writer = writerMap.computeIfAbsent(field.getName(),
+                                    s -> ((ListVector) vector).getWriter());
+                            writer.startList();
+
+                            // XXX: Assumes all values share the same type and first value is non-null
+                            switch (value.type()) {
+                                case INT_ARRAY:
+                                    value.asIntList().forEach(writer::writeInt);
+                                    break;
+                                case LONG_ARRAY:
+                                    value.asLongList().forEach(writer::writeBigInt);
+                                    break;
+                                case FLOAT_ARRAY:
+                                    value.asFloatList().forEach(writer::writeFloat4);
+                                    break;
+                                case DOUBLE_ARRAY:
+                                    value.asDoubleList().forEach(writer::writeFloat8);
+                                    break;
+                                default:
+                                    Exception e = CallStatus.INVALID_ARGUMENT.withDescription("invalid array type")
+                                            .toRuntimeException();
+                                    listener.error(e);
+                                    logger.error("invalid array type: " + value.type(), e);
+                                    return;
+                            }
+                            writer.setValueCount(value.asList().size());
+                            writer.endList();
+                        }
                     }
+
+                    if ((idx + 1) == Config.arrowBatchSize) {
+                        flush(listener, streamAllocator, loader, vectorMap, fieldList, idx);
+                        cnt.set(0);
+                        writerMap.clear();
+                        vectorMap.values().clear();
+
+                        for (Field field : fieldList) {
+                            FieldVector fieldVector = root.getVector(field);
+                            fieldVector.setInitialCapacity(Config.arrowBatchSize);
+                            fieldVector.allocateNew();
+                            vectorMap.put(field.getName(), fieldVector);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error(e.getMessage(), e);
+                    listener.error(CallStatus.UNKNOWN.withDescription(e.getMessage()).toRuntimeException());
                 }
             });
 
@@ -219,11 +231,9 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
 
             nodes.add(new ArrowFieldNode(idx + 1, 0));
 
-            if (vector instanceof ListVector) {
-                ((ListVector) vector).setLastSet(idx + 1);
-
+            if (vector instanceof FixedSizeListVector) {
                 buffers.add(vector.getValidityBuffer());
-                buffers.add(vector.getOffsetBuffer());
+                //buffers.add(vector.getOffsetBuffer());
 
                 for (FieldVector child : vector.getChildrenFromFields()) {
                     logger.debug("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
@@ -341,8 +351,10 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                     final List<Field> fields = new ArrayList<>();
                     record.keys().stream().forEach(fieldName -> {
                         final Neo4jRecord.Value value = record.get(fieldName);
+                        final int size = value.size();
                         // TODO: better mapping support?
                         System.out.println(String.format("xxx Translating Neo4j value %s -> %s", fieldName, value.type()));
+
                         switch (value.type()) {
                             case INT:
                                 fields.add(new Field(fieldName,
@@ -364,18 +376,41 @@ public class Neo4jProducer implements FlightProducer, AutoCloseable {
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.Utf8()), null));
                                 break;
-                            case LIST:
+                            case INT_ARRAY:
                                 fields.add(new Field(fieldName,
-                                        FieldType.nullable(new ArrowType.List()),
-                                        // TODO: inspect inner type...assume doubles for now.
+                                        FieldType.nullable(new ArrowType.FixedSizeList(size)),
                                         Arrays.asList(new Field(fieldName,
-                                                FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)), null))));
+                                                FieldType.nullable(new ArrowType.Int(32, true)), null))));
+                                break;
+                            case LONG_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(size)),
+                                        Arrays.asList(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.Int(64, true)), null))));
+                                break;
+                            case FLOAT_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(size)),
+                                        Arrays.asList(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)), null))));
+                                break;
+                            case DOUBLE_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(size)),
+                                        Arrays.asList(new Field(fieldName,
+                                            FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)), null))));
+                                break;
+                            case LIST:
+                                // Variable width List...suboptimal :-(
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.List()), null));
                                 break;
                             default:
                                 // TODO: fallback to raw bytes?
-                                logger.info("not sure how to translate field {} with type {}",
-                                        fieldName, value.type().name());
-                                break;
+                                Exception e = CallStatus.INVALID_ARGUMENT.withDescription("invalid field type for list" + fieldName).toRuntimeException();
+                                logger.error(e.getMessage(), e);
+                                listener.onError(e);
+                                return;
                         }
                     });
                     final FlightInfo info = new FlightInfo(new Schema(fields),
