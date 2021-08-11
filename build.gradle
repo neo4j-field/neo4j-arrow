@@ -14,7 +14,8 @@ project.ext {
     arrowFlightGrpc = 'org.apache.arrow:flight-grpc:5.0.0'
     neo4j = [
         driverVersion: '4.3.3',
-        serverVersion: '4.3.2',
+        serverVersion: '4.3.3',
+        gdsVersion: '1.6.4',
     ]
     jupiterVersion = '5.7.0'
     sl4jVersion = '1.7.31'
@@ -193,13 +194,13 @@ project(':plugin') {
         implementation rootProject
         implementation group: 'org.slf4j', name: 'slf4j-api', version: rootProject.ext.sl4jVersion
 
-        compileOnly 'org.neo4j.gds:proc-catalog:1.6.4'
+        compileOnly 'org.neo4j.gds:proc-catalog:' + rootProject.ext.neo4j.gdsVersion
         compileOnly rootProject.ext.arrowFlightGrpc
-        compileOnly 'org.neo4j:neo4j-configuration:4.3.2'
-        compileOnly 'org.neo4j:neo4j-kernel:4.3.2'
+        compileOnly 'org.neo4j:neo4j-configuration:' + rootProject.ext.neo4j.serverVersion
+        compileOnly 'org.neo4j:neo4j-kernel:' + rootProject.ext.neo4j.serverVersion
         testImplementation (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
-                'org.neo4j:neo4j-kernel:4.3.2',
+                [group: 'org.neo4j', name: 'neo4j-kerel', version: rootProject.ext.neo4j.serverVersion],
                 project(':client')
         )
         testRuntimeOnly (
@@ -218,9 +219,9 @@ project(':plugin') {
     shadowJar {
         dependencies {
             // Neo4j adds this for us
-            exclude(dependency('org.neo4j.driver:neo4j-java-driver'))
-            //exclude(dependency('org.slf4j:slf4j-simple'))
+            exclude(dependency('org.neo4j:neo4j-parser'))
+            exclude(dependency('org.opencycpher::'))
+
         }
-        // minimize()
     }
 }
