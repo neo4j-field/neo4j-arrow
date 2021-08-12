@@ -27,9 +27,9 @@ public class CypherActionHandler implements ActionHandler {
     private static final List<String> supportedActions = List.of(CYPHER_READ_ACTION, CYPHER_WRITE_ACTION);
     private static Logger logger = LoggerFactory.getLogger(CypherActionHandler.class);
 
-    private final JobCreator jobCreator;
+    private final JobCreator<CypherMessage> jobCreator;
 
-    public CypherActionHandler(JobCreator jobCreator) {
+    public CypherActionHandler(JobCreator<CypherMessage> jobCreator) {
         this.jobCreator = jobCreator;
     }
 
@@ -46,15 +46,15 @@ public class CypherActionHandler implements ActionHandler {
 
     @Override
     public Outcome handle(FlightProducer.CallContext context, Action action, Producer producer) {
+        CypherMessage msg;
+        try {
+            msg = CypherMessage.deserialize(action.getBody());
+        } catch (IOException e) {
+            return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid CypherMessage"));
+        }
+
         switch (action.getType()) {
             case CYPHER_READ_ACTION:
-                CypherMessage msg;
-                try {
-                    msg = CypherMessage.deserialize(action.getBody());
-                } catch (IOException e) {
-                    return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid CypherMessage"));
-                }
-
                 /* Ticket this job */
                 final Job job = jobCreator.newJob(msg, Job.Mode.READ,
                         // TODO: get from context?

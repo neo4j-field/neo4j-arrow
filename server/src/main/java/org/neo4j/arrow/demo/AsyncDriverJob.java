@@ -1,7 +1,7 @@
 package org.neo4j.arrow.demo;
 
 import org.neo4j.arrow.RowBasedRecord;
-import org.neo4j.arrow.job.CypherMessage;
+import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.driver.*;
 import org.neo4j.driver.async.AsyncSession;

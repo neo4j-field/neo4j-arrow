@@ -1,9 +1,7 @@
-package org.neo4j.arrow;
+package org.neo4j.arrow.action;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.neo4j.arrow.job.CypherMessage;
-import org.neo4j.arrow.job.JobCreator;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -18,7 +16,7 @@ public class CypherMessageTest {
         System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[yyyy-MM-dd'T'HH:mm:ss:SSS]");
         System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
-        logger = org.slf4j.LoggerFactory.getLogger(Neo4jFlightServerTest.class);
+        logger = org.slf4j.LoggerFactory.getLogger(CypherMessageTest.class);
     }
 
     @Test

@@ -11,8 +11,8 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.neo4j.arrow.Config;
+import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.arrow.action.StatusHandler;
-import org.neo4j.arrow.job.CypherMessage;
 import org.neo4j.arrow.job.Job;
 
 import java.nio.ByteBuffer;

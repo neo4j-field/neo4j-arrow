@@ -1,6 +1,7 @@
 package org.neo4j.arrow.job;
 
 import org.neo4j.arrow.RowBasedRecord;
+import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;

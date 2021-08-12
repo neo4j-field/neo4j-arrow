@@ -1,6 +1,7 @@
 package org.neo4j.arrow.job;
 
 import org.neo4j.arrow.RowBasedRecord;
+import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
@@ -10,12 +11,12 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class CypherJob extends Job {
+public class Neo4jTransactionApiJob extends Job {
 
     private final CompletableFuture<JobSummary> future;
     private final Log log;
 
-    public CypherJob(CypherMessage msg, Mode mode, GraphDatabaseService db, Log log) {
+    public Neo4jTransactionApiJob(CypherMessage msg, Mode mode, GraphDatabaseService db, Log log) {
         super();
         this.log = log;
 

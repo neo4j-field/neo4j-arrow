@@ -23,7 +23,6 @@ project.ext {
 
 dependencies {
     implementation (
-            [group: 'org.neo4j', name: 'neo4j-parser', version: project.ext.neo4j.serverVersion],
             [group: 'org.slf4j', name: 'slf4j-api', version: project.ext.sl4jVersion],
             project.ext.arrowFlightGrpc
     )
@@ -58,10 +57,25 @@ project(':common') {
         mavenCentral()
     }
 
+    test {
+        useJUnitPlatform()
+        filter {
+            includeTestsMatching "org.neo4j.arrow.*"
+        }
+    }
+
     dependencies {
         implementation (
                 rootProject,
                 rootProject.ext.arrowFlightGrpc,
+                [group: 'org.neo4j', name: 'neo4j-parser', version: rootProject.ext.neo4j.serverVersion],
+        )
+        testImplementation (
+                [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
+        )
+        testRuntimeOnly (
+                [group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: rootProject.ext.jupiterVersion],
+                [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion],
         )
     }
 }
@@ -77,7 +91,7 @@ project(':client') {
     version = parent.version
 
     application {
-        mainClass.set("org.neo4j.arrow.Neo4jArrowClient")
+        mainClass.set("org.neo4j.arrow.Client")
     }
 
     repositories {
@@ -88,6 +102,7 @@ project(':client') {
         implementation (
                 rootProject,
                 rootProject.ext.arrowFlightGrpc,
+                project(':common')
         )
         runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion
     }
@@ -118,12 +133,12 @@ project(':server') {
         implementation (
                 rootProject,
                 rootProject.ext.arrowFlightGrpc,
+                project(':common'),
                 [group: 'org.neo4j.driver', name: 'neo4j-java-driver', version: rootProject.ext.neo4j.driverVersion],
         )
         runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion
         testImplementation (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
-                // project(':client')
         )
         testRuntimeOnly (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: rootProject.ext.jupiterVersion],
@@ -132,7 +147,7 @@ project(':server') {
     }
 
     application {
-        mainClass.set("org.neo4j.arrow.Neo4jArrowServer")
+        mainClass.set("org.neo4j.arrow.Server")
     }
 
     jar {
@@ -212,13 +227,17 @@ project(':plugin') {
     }
 
     dependencies {
-        implementation rootProject
-        implementation group: 'org.slf4j', name: 'slf4j-api', version: rootProject.ext.sl4jVersion
-
-        compileOnly 'org.neo4j.gds:proc-catalog:' + rootProject.ext.neo4j.gdsVersion
-        compileOnly rootProject.ext.arrowFlightGrpc
-        compileOnly 'org.neo4j:neo4j-configuration:' + rootProject.ext.neo4j.serverVersion
-        compileOnly 'org.neo4j:neo4j-kernel:' + rootProject.ext.neo4j.serverVersion
+        implementation (
+                rootProject,
+                project(':common'),
+                [group: 'org.slf4j', name: 'slf4j-api', version: rootProject.ext.sl4jVersion],
+        )
+        compileOnly (
+                [group: 'org.neo4j', name: 'neo4j-configuration', version: rootProject.ext.neo4j.serverVersion],
+                [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
+                [group: 'org.neo4j.gds', name: 'proc-catalog', version: rootProject.ext.neo4j.gdsVersion],
+                rootProject.ext.arrowFlightGrpc,
+        )
         testImplementation (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
@@ -242,7 +261,6 @@ project(':plugin') {
             // Neo4j adds this for us
             exclude(dependency('org.neo4j:neo4j-parser'))
             exclude(dependency('org.opencycpher::'))
-
         }
     }
 }
