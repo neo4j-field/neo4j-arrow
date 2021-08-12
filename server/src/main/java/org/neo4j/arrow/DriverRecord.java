@@ -1,6 +1,5 @@
-package org.neo4j.arrow.demo;
+package org.neo4j.arrow;
 
-import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.driver.Record;
 import org.neo4j.driver.internal.types.InternalTypeSystem;
 
@@ -53,27 +52,27 @@ public class DriverRecord implements RowBasedRecord {
 
             @Override
             public List<Object> asList() {
-                return value.asList(DriverRecord::wrapValue);
+                return value.asList(val -> val.asObject());
             }
 
             @Override
             public List<Integer> asIntList() {
-                return List.of();
+                return value.asList(val -> val.asInt());
             }
 
             @Override
             public List<Long> asLongList() {
-                return List.of();
+                return value.asList(val -> val.asLong());
             }
 
             @Override
             public List<Float> asFloatList() {
-                return List.of();
+                return value.asList(val -> val.asFloat());
             }
 
             @Override
             public List<Double> asDoubleList() {
-                return List.of();
+                return value.asList(val -> val.asDouble());
             }
 
             public Type type() {

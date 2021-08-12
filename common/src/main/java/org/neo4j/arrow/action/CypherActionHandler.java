@@ -110,9 +110,12 @@ public class CypherActionHandler implements ActionHandler {
                                         FieldType.nullable(new ArrowType.Utf8()), null));
                                 break;
                             case LIST:
-                                // Variable width List...suboptimal, but all we can do with Cypher :-(
+                                // Variable width List...suboptimal, but all we can do with Cypher :-( Assume Doubles for now.
                                 fields.add(new Field(fieldName,
-                                        FieldType.nullable(new ArrowType.List()), null));
+                                        FieldType.nullable(new ArrowType.List()),
+                                        List.of(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
+                                                null))));
                                 break;
                             default:
                                 // TODO: fallback to raw bytes?

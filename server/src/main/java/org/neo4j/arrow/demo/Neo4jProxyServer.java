@@ -6,13 +6,16 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.Config;
 import org.neo4j.arrow.App;
+import org.neo4j.arrow.action.CypherActionHandler;
+import org.neo4j.arrow.job.AsyncDriverJob;
+import org.neo4j.driver.AuthTokens;
 
 import java.util.concurrent.TimeUnit;
 
 /**
  * A simple implementation of a Neo4j Arrow Service.
  */
-public class Server {
+public class Neo4jProxyServer {
     private static final org.slf4j.Logger logger;
 
     static {
@@ -20,7 +23,7 @@ public class Server {
         System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[yyyy-MM-dd'T'HH:mm:ss:SSS]");
         System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
         System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "info");
-        logger = org.slf4j.LoggerFactory.getLogger(Server.class);
+        logger = org.slf4j.LoggerFactory.getLogger(Neo4jProxyServer.class);
     }
 
     public static void main(String[] args) throws Exception {
@@ -31,6 +34,11 @@ public class Server {
         final App app = new App(
                 bufferAllocator,
                 Location.forGrpcInsecure(Config.host, Config.port));
+
+        final CypherActionHandler cypherHandler = new CypherActionHandler(
+                (cypherMsg, mode, username, password) ->
+                        new AsyncDriverJob(cypherMsg, mode, AuthTokens.basic(username.get(), password.get())));
+        app.registerHandler(cypherHandler);
 
         app.start();
 

@@ -5,6 +5,7 @@ import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
@@ -23,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Producer implements FlightProducer, AutoCloseable {
@@ -86,14 +88,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                 FieldVector fieldVector = root.getVector(field);
                 fieldVector.setInitialCapacity(Config.arrowBatchSize);
                 fieldVector.allocateNew();
-
-                if (fieldVector instanceof ListVector) {
-                    FieldVector child = fieldVector.getChildrenFromFields().get(0);
-                    child.setInitialCapacity(Config.arrowBatchSize * 128);
-                    child.allocateNew();
-                }
-
-
                 vectorMap.put(field.getName(), fieldVector);
             }
 
@@ -101,6 +95,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             listener.start(root);
 
             // A bit hacky, but provide the core processing logic as a Consumer
+            final AtomicBoolean errored = new AtomicBoolean(false);
             job.consume(record -> {
                 try {
                     int idx = cnt.getAndIncrement();
@@ -134,14 +129,18 @@ public class Producer implements FlightProducer, AutoCloseable {
                                 case FLOAT_ARRAY:
                                     value.asFloatList().forEach(writer::writeFloat4);
                                     break;
+                                case LIST: // our generic list, fallthrough to Double
                                 case DOUBLE_ARRAY:
                                     value.asDoubleList().forEach(writer::writeFloat8);
                                     break;
                                 default:
-                                    Exception e = CallStatus.INVALID_ARGUMENT.withDescription("invalid array type")
-                                            .toRuntimeException();
-                                    listener.error(e);
-                                    logger.error("invalid array type: " + value.type(), e);
+                                    if (errored.compareAndSet(false, true)) {
+                                        Exception e = CallStatus.INVALID_ARGUMENT.withDescription("invalid array type")
+                                                .toRuntimeException();
+                                        listener.error(e);
+                                        logger.error("invalid array type: " + value.type(), e);
+                                        job.cancel(true);
+                                    }
                                     return;
                             }
                             writer.setValueCount(value.asList().size());
@@ -163,8 +162,11 @@ public class Producer implements FlightProducer, AutoCloseable {
                         }
                     }
                 } catch (Exception e) {
-                    logger.error(e.getMessage(), e);
-                    listener.error(CallStatus.UNKNOWN.withDescription(e.getMessage()).toRuntimeException());
+                    if (errored.compareAndSet(false, true)) {
+                        logger.error(e.getMessage(), e);
+                        job.cancel(true);
+                        listener.error(CallStatus.UNKNOWN.withDescription(e.getMessage()).toRuntimeException());
+                    }
                 }
             });
 
@@ -220,9 +222,15 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             nodes.add(new ArrowFieldNode(idx + 1, 0));
 
-            if (vector instanceof FixedSizeListVector) {
-                buffers.add(vector.getValidityBuffer());
-                //buffers.add(vector.getOffsetBuffer());
+            if (vector instanceof BaseListVector) {
+                // Variable-width ListVectors have some special crap we need to deal with
+                if (vector instanceof ListVector) {
+                    ((ListVector) vector).setLastSet(idx + 1);
+                    buffers.add(vector.getValidityBuffer());
+                    buffers.add(vector.getOffsetBuffer());
+                } else {
+                    buffers.add(vector.getValidityBuffer());
+                }
 
                 for (FieldVector child : vector.getChildrenFromFields()) {
                     logger.debug("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
@@ -246,6 +254,9 @@ public class Producer implements FlightProducer, AutoCloseable {
             listener.putNext();
             logger.info(String.format("put batch of %,d rows", batch.getLength()));
             logger.debug("{}", streamAllocator);
+        } catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            listener.error(CallStatus.UNKNOWN.withDescription("unknown error during batching").toRuntimeException());
         }
     }
 
@@ -347,6 +358,7 @@ public class Producer implements FlightProducer, AutoCloseable {
     public void listActions(CallContext context, StreamListener<ActionType> listener) {
         logger.debug("listActions called: context={}", context);
         handlerMap.values().stream()
+                .distinct()
                 .flatMap(handler -> handler.actionDescriptions().stream())
                 .forEach(listener::onNext);
         listener.onCompleted();

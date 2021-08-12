@@ -1,8 +1,8 @@
-package org.neo4j.arrow.demo;
+package org.neo4j.arrow.job;
 
+import org.neo4j.arrow.DriverRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.CypherMessage;
-import org.neo4j.arrow.job.Job;
 import org.neo4j.driver.*;
 import org.neo4j.driver.async.AsyncSession;
 import org.slf4j.LoggerFactory;
@@ -13,25 +13,25 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
 
 /**
- * Implementation of a Neo4jJob that uses an AsyncSession via the Java Driver.
+ * Implementation of a Neo4jJob that uses an AsyncSession via the Neo4j Java Driver.
  */
 public class AsyncDriverJob extends Job {
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(AsyncDriverJob.class);
 
-    /* Drivers per identity */
+    /* 1 Driver per identity */
     private static ConcurrentMap<AuthToken, Driver> driverMap = new ConcurrentHashMap<>();
 
     private final AsyncSession session;
     private final CompletableFuture future;
 
-    protected AsyncDriverJob(CypherMessage msg, Mode mode, AuthToken authToken) {
+    public AsyncDriverJob(CypherMessage msg, Mode mode, AuthToken authToken) {
         super();
 
         Driver driver;
         if (!driverMap.containsKey(authToken)) {
             org.neo4j.driver.Config.ConfigBuilder builder = org.neo4j.driver.Config.builder();
             driver = GraphDatabase.driver(org.neo4j.arrow.Config.neo4jUrl, authToken,
-                    builder.withUserAgent("Neo4j-Arrow/alpha")
+                    builder.withUserAgent("Neo4j-Arrow-Proxy/alpha")
                             .withMaxConnectionPoolSize(8)
                             .withFetchSize(org.neo4j.arrow.Config.boltFetchSize)
                             .build());
@@ -50,19 +50,19 @@ public class AsyncDriverJob extends Job {
                     logger.info("Job {} producing", session);
                     setStatus(Status.PRODUCING);
 
-                    Record firstRecord = resultCursor.peekAsync().toCompletableFuture().join();
+                    /* We need to inspect the first record and guess at a schema :-( */
+                    final Record firstRecord = resultCursor.peekAsync().toCompletableFuture().join();
                     onFirstRecord(DriverRecord.wrap(firstRecord));
 
-                    Consumer<RowBasedRecord> consumer = futureConsumer.join();
-                    return resultCursor.forEachAsync(record -> {
-                        consumer.accept(DriverRecord.wrap(record));
-                    });
+                    final Consumer<RowBasedRecord> consumer = futureConsumer.join();
+                    return resultCursor.forEachAsync(record ->
+                            consumer.accept(DriverRecord.wrap(record)));
                 }).whenCompleteAsync((resultSummary, throwable) -> {
                     if (throwable != null) {
                         setStatus(Status.ERROR);
-                        logger.error("job failure", throwable);
+                        logger.error("Job failure", throwable);
                     } else {
-                        logger.info("job {} complete", session);
+                        logger.info("Job {} complete", session);
                         setStatus(Status.COMPLETE);
                     }
                     onCompletion(DriverJobSummary.wrap(resultSummary));
@@ -77,6 +77,7 @@ public class AsyncDriverJob extends Job {
 
     @Override
     public void close() throws Exception {
-
+        future.cancel(true);
+        session.closeAsync();
     }
 }

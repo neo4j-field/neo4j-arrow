@@ -76,7 +76,7 @@ def check_flight_status(client, ticket, options):
         buffer = ticket
     status = None
     try:
-        results = client.do_action(("cypherStatus", buffer), options=options)
+        results = client.do_action(("jobStatus", buffer), options=options)
         status = next(results).body.to_pybytes().decode("utf8")
     except Exception as e:
         print(f"⚠ check_flight_status: {e}")
@@ -103,7 +103,6 @@ def get_flight_info(client, ticket, options):
         info = client.get_flight_info(descriptor, options=options)
     except Exception as e:
         print(f"⚠ get_flight_info: {e}")
-        sys.exit(1)
     return info
 
 def stream_flight(client, ticket, options):
@@ -116,6 +115,8 @@ def stream_flight(client, ticket, options):
     for chunk, metadata in result:
         cnt = cnt + chunk.num_rows
         print(f"Current Row @ {cnt:,}:\t[fields: {chunk.schema.names}, rows: {chunk.num_rows:,}]")
+        #for col in chunk:
+        #    print(col)
     finish = time()
     print(f"Done! Time Delta: {round(finish - start, 1):,}s")
     print(f"Count: {cnt:,} rows, Rate: {round(cnt / (finish - start)):,} rows/s")
@@ -157,10 +158,18 @@ if __name__ == "__main__":
         if status == "PRODUCING":
             break
         else:
-            sleep(2)
+            sleep(3)
     
     print("Flight ready! Getting flight info...")
-    info = get_flight_info(client, ticket, options)
+    info = None
+    while info is None:
+        sleep(3)
+        try:
+            info = get_flight_info(client, ticket, options)
+        except Exception as e:
+            print(f"failed to get flight info...retrying in 5s")
+            sleep(5)
+
     print(f"Got info on our flight: {info}")
 
     print("Boarding flight and getting stream...")
