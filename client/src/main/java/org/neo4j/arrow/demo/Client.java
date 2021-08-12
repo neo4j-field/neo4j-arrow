@@ -11,13 +11,13 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.neo4j.arrow.Config;
+import org.neo4j.arrow.action.CypherActionHandler;
 import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.arrow.action.StatusHandler;
 import org.neo4j.arrow.job.Job;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.Map;
 
 public class Client implements AutoCloseable {
@@ -46,11 +46,6 @@ public class Client implements AutoCloseable {
                 .allocator(allocator)
                 .location(location)
                 .build();
-
-        final FlightCallHeaders headers = new FlightCallHeaders();
-        headers.insert("authorization",
-                String.format("Basic %s", Base64.getEncoder()
-                        .encodeToString("neo4j:password".getBytes(StandardCharsets.UTF_8))));
         option = new CredentialCallOption(new BasicAuthCredentialWriter(Config.username, Config.password));
     }
 
@@ -143,7 +138,7 @@ public class Client implements AutoCloseable {
             CypherMessage msg = new CypherMessage("UNWIND range(1, $rows) AS row\n" +
                     "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
                     Map.of("rows", 1_000_000, "dimension", 128));
-            Action action = new Action("cypherRead", msg.serialize());
+            Action action = new Action(CypherActionHandler.CYPHER_READ_ACTION, msg.serialize());
             client.run(action);
             logger.info("client finished!");
         } finally {
