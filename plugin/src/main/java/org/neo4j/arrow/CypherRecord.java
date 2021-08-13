@@ -1,9 +1,9 @@
-package org.neo4j.arrow.job;
+package org.neo4j.arrow;
 
-import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphdb.Result;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class CypherRecord implements RowBasedRecord {
 
@@ -21,7 +21,7 @@ public class CypherRecord implements RowBasedRecord {
         return new CypherRecord(map);
     }
 
-    protected static CypherRecord wrap(Result.ResultRow row, Collection<String> columns) {
+    public static CypherRecord wrap(Result.ResultRow row, Collection<String> columns) {
         final Map<String, Object> map = new HashMap<>();
         for (String column : columns) {
             map.put(column, row.get(column));
@@ -92,21 +92,50 @@ public class CypherRecord implements RowBasedRecord {
 
             @Override
             public List<Integer> asIntList() {
+                if (obj instanceof List) {
+                    List<?> list = (List<?>)obj;
+                    return list.stream()
+                            .mapToInt(o -> wrapObject(o).asInt())
+                            .boxed()
+                            .collect(Collectors.toList());
+                }
                 return List.of();
             }
 
             @Override
             public List<Long> asLongList() {
+                if (obj instanceof List) {
+                    List<?> list = (List<?>)obj;
+                    return list.stream()
+                            .mapToLong(o -> wrapObject(o).asLong())
+                            .boxed()
+                            .collect(Collectors.toList());
+                }
                 return List.of();
             }
 
             @Override
             public List<Float> asFloatList() {
+                if (obj instanceof List) {
+                    List<?> list = (List<?>)obj;
+                    return list.stream()
+                            .mapToDouble(o -> wrapObject(o).asDouble())
+                            .boxed()
+                            .map(d -> d.floatValue())
+                            .collect(Collectors.toList());
+                }
                 return List.of();
             }
 
             @Override
             public List<Double> asDoubleList() {
+                if (obj instanceof List) {
+                    List<?> list = (List<?>)obj;
+                    return list.stream()
+                            .mapToDouble(o -> wrapObject(o).asDouble())
+                            .boxed()
+                            .collect(Collectors.toList());
+                }
                 return List.of();
             }
 

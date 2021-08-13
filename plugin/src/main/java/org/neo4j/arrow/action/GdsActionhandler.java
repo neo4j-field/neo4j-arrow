@@ -8,9 +8,9 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.Producer;
 import org.neo4j.arrow.RowBasedRecord;
-import org.neo4j.arrow.job.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.JobCreator;
+import org.neo4j.logging.Log;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -20,17 +20,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-public class CypherActionHandler implements ActionHandler {
-    public static final String CYPHER_READ_ACTION = "cypherRead";
-    public static final String CYPHER_WRITE_ACTION = "cypherWrite";
+public class GdsActionhandler implements ActionHandler {
+    public static final String NODE_PROPS_ACTION = "gdsNodeProperties";
+    public static final String REL_PROPS_ACTION = "gdsRelProperties";
 
-    private static final List<String> supportedActions = List.of(CYPHER_READ_ACTION, CYPHER_WRITE_ACTION);
-    private static Logger logger = LoggerFactory.getLogger(CypherActionHandler.class);
+    private static final List<String> supportedActions = List.of(NODE_PROPS_ACTION, REL_PROPS_ACTION);
+    private final Log log;
+    private final JobCreator jobCreator;
 
-    private final JobCreator<CypherMessage> jobCreator;
-
-    public CypherActionHandler(JobCreator<CypherMessage> jobCreator) {
+    public GdsActionhandler(JobCreator<GdsMessage> jobCreator, Log log) {
         this.jobCreator = jobCreator;
+        this.log = log;
     }
 
     @Override
@@ -40,27 +40,27 @@ public class CypherActionHandler implements ActionHandler {
 
     @Override
     public List<ActionType> actionDescriptions() {
-        return List.of(new ActionType(CYPHER_READ_ACTION, "Submit a new Cypher-based read job"),
-                new ActionType(CYPHER_WRITE_ACTION, "Submit a new Cypher-based write job"));
+        return List.of(new ActionType(NODE_PROPS_ACTION, "Stream node properties from a GDS Graph"),
+                new ActionType(REL_PROPS_ACTION, "Stream relationship properties from a GDS Graph"));
     }
 
     @Override
     public Outcome handle(FlightProducer.CallContext context, Action action, Producer producer) {
-        CypherMessage msg;
+        // XXX: assumption is we've set the peer identity to the user.
+        final String username = context.peerIdentity();
+        GdsMessage msg;
         try {
-            msg = CypherMessage.deserialize(action.getBody());
+            msg = GdsMessage.deserialize(action.getBody());
         } catch (IOException e) {
-            return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid CypherMessage"));
+            e.printStackTrace();
+            return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
         }
 
         switch (action.getType()) {
-            case CYPHER_READ_ACTION:
-                /* Ticket this job */
-                final Job job = jobCreator.newJob(msg, Job.Mode.READ,
-                        // TODO: get from context?
-                        Optional.of("neo4j"), Optional.of("password"));
+            case NODE_PROPS_ACTION:
+                Job job = jobCreator.newJob(msg, Job.Mode.READ,
+                        Optional.of(username), Optional.empty());
                 final Ticket ticket = producer.ticketJob(job);
-
                 /* We need to wait for the first record to discern our final schema */
                 final Future<RowBasedRecord> futureRecord = job.getFirstRecord();
 
@@ -68,9 +68,9 @@ public class CypherActionHandler implements ActionHandler {
                     try {
                         return Optional.of(futureRecord.get());
                     } catch (InterruptedException e) {
-                        logger.error("interrupted getting first record", e);
+                        log.error("interrupted getting first record", e);
                     } catch (ExecutionException e) {
-                        logger.error("execution error", e);
+                        log.error("execution error", e);
                     }
                     return Optional.empty();
                 }).thenAcceptAsync(maybeRecord -> {
@@ -84,7 +84,6 @@ public class CypherActionHandler implements ActionHandler {
                     final List<Field> fields = new ArrayList<>();
                     record.keys().stream().forEach(fieldName -> {
                         final RowBasedRecord.Value value = record.get(fieldName);
-                        // TODO: better mapping support?
                         System.out.printf("xxx Translating Neo4j value %s -> %s\n", fieldName, value.type());
 
                         switch (value.type()) {
@@ -108,17 +107,37 @@ public class CypherActionHandler implements ActionHandler {
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.Utf8()), null));
                                 break;
-                            case LIST:
-                                // Variable width List...suboptimal, but all we can do with Cypher :-( Assume Doubles for now.
+                            case INT_ARRAY:
                                 fields.add(new Field(fieldName,
-                                        FieldType.nullable(new ArrowType.List()),
+                                        FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
+                                        List.of(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.Int(32, true)),
+                                                null))));
+                                break;
+                            case LONG_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
+                                        List.of(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.Int(64, true)),
+                                                null))));
+                                break;
+                            case FLOAT_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
+                                        List.of(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)),
+                                                null))));
+                                break;
+                            case DOUBLE_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
                                         List.of(new Field(fieldName,
                                                 FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
                                                 null))));
                                 break;
                             default:
                                 // TODO: fallback to raw bytes?
-                                logger.error("unsupported value type for handler: {}", value.type());
+                                log.error("unsupported value type for handler: {}", value.type());
                         }
                     });
                     producer.setFlightInfo(ticket, new Schema(fields));
@@ -126,12 +145,10 @@ public class CypherActionHandler implements ActionHandler {
 
                 /* We're taking off, so hand the ticket back to our client. */
                 return Outcome.success(new Result(ticket.serialize().array()));
-            case CYPHER_WRITE_ACTION:
-                return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("can't do writes yet!"));
-            default:
-                logger.warn("unknown action {}", action.getType());
-                return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("unknown action!"));
+            case REL_PROPS_ACTION:
+                // not implemented
+                break;
         }
-
+        return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("coming soon!"));
     }
 }

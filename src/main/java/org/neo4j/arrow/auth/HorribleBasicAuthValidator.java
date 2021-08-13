@@ -29,8 +29,9 @@ public class HorribleBasicAuthValidator
     public Optional<String> isValid(byte[] token) {
         logger.debug("isValid called: token={}", token);
 
+        // TODO: make an auth handler that isn't this silly
         if (Arrays.equals(HARDCODED_TOKEN.getBytes(StandardCharsets.UTF_8), token))
-            return Optional.of(HARDCODED_TOKEN);
+            return Optional.of("neo4j");
         else
             return Optional.empty();
     }

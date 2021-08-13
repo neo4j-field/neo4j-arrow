@@ -2,6 +2,7 @@ package org.neo4j.arrow.job;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.neo4j.arrow.CypherRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Path;

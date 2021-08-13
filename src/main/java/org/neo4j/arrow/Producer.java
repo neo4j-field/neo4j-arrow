@@ -8,7 +8,9 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
+import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -16,7 +18,8 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
-import org.neo4j.arrow.job.*;
+import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.JobSummary;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -79,7 +82,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             // We need to dynamically build out our vectors based on the identified schema
             final HashMap<String, FieldVector> vectorMap = new HashMap<>();
             // Complex things like Lists need special writers to fill them :-(
-            final Map<String, UnionListWriter> writerMap = new ConcurrentHashMap<>();
+            final Map<String, BaseWriter.ListWriter> writerMap = new ConcurrentHashMap<>();
 
             final List<Field> fieldList = info.getSchema().getFields();
 
@@ -113,11 +116,12 @@ public class Producer implements FlightProducer, AutoCloseable {
                             ((Float8Vector) vector).set(idx, value.asDouble());
                         } else if (vector instanceof VarCharVector) {
                             ((VarCharVector) vector).set(idx, value.asString().getBytes(StandardCharsets.UTF_8));
-                        } else if (vector instanceof ListVector) {
-                            final UnionListWriter writer = writerMap.computeIfAbsent(field.getName(),
-                                    s -> ((ListVector) vector).getWriter());
+                        } else if (vector instanceof FixedSizeListVector) {
+                            // Used for GDS
+                            final UnionFixedSizeListWriter writer =
+                                    (UnionFixedSizeListWriter) writerMap.computeIfAbsent(field.getName(),
+                                    s -> ((FixedSizeListVector) vector).getWriter());
                             writer.startList();
-
                             // XXX: Assumes all values share the same type and first value is non-null
                             switch (value.type()) {
                                 case INT_ARRAY:
@@ -129,7 +133,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                                 case FLOAT_ARRAY:
                                     value.asFloatList().forEach(writer::writeFloat4);
                                     break;
-                                case LIST: // our generic list, fallthrough to Double
                                 case DOUBLE_ARRAY:
                                     value.asDoubleList().forEach(writer::writeFloat8);
                                     break;
@@ -143,6 +146,17 @@ public class Producer implements FlightProducer, AutoCloseable {
                                     }
                                     return;
                             }
+                            writer.setValueCount(value.asList().size());
+                            writer.endList();
+                        } else if (vector instanceof ListVector) {
+                            // Used for Cypher
+                            final UnionListWriter writer =
+                                    (UnionListWriter) writerMap.computeIfAbsent(field.getName(),
+                                            s -> ((ListVector) vector).getWriter());
+                            writer.startList();
+                            // XXX: Assumes all values are doubles for now :-(
+                            for (Double d : value.asDoubleList())
+                                writer.writeFloat8(d);
                             writer.setValueCount(value.asList().size());
                             writer.endList();
                         }
@@ -189,6 +203,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             AutoCloseables.close(root);
 
         } catch (Exception e) {
+            e.printStackTrace();
             logger.error("ruh row", e);
             throw CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException();
         } finally {
@@ -198,6 +213,10 @@ public class Producer implements FlightProducer, AutoCloseable {
                 logger.error("problem when auto-closing after get_stream", e);
             }
         }
+    }
+
+    private void handleRecord(RowBasedRecord record ){
+
     }
 
     /**
@@ -255,6 +274,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             logger.info(String.format("put batch of %,d rows", batch.getLength()));
             logger.debug("{}", streamAllocator);
         } catch (Exception e) {
+            e.printStackTrace();
             logger.error(e.getMessage(), e);
             listener.error(CallStatus.UNKNOWN.withDescription("unknown error during batching").toRuntimeException());
         }

@@ -87,6 +87,7 @@ public class CypherMessage {
             buffer.put(paramsBytes);
             return buffer.array();
         } catch (Exception e) {
+            logger.error("serialization error", e);
             e.printStackTrace();
         }
         return new byte[0];

@@ -1,7 +1,8 @@
 package org.neo4j.arrow.job;
 
+import org.neo4j.arrow.GdsRecord;
 import org.neo4j.arrow.RowBasedRecord;
-import org.neo4j.arrow.action.CypherMessage;
+import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
@@ -17,12 +18,12 @@ import java.util.function.Consumer;
 public class GdsJob extends Job {
     private final CompletableFuture<Boolean> future;
 
-    public GdsJob(CypherMessage msg, Mode mode, Log log) {
+    public GdsJob(GdsMessage msg, Mode mode, String username, Log log) {
         super();
         log.info("GdsJob called");
 
         final GraphStore store = GraphStoreCatalog.get(
-                ImmutableCatalogRequest.of("neo4j", "neo4j"), "mygraph")
+                ImmutableCatalogRequest.of(username, msg.getDbName()), msg.getGraphName())
                 .graphStore();
         log.info("got graphstore " + store.toString());
 

@@ -1,5 +1,6 @@
 package org.neo4j.arrow.job;
 
+import org.neo4j.arrow.CypherRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.graphdb.GraphDatabaseService;

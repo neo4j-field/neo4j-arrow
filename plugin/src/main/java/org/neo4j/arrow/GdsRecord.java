@@ -1,6 +1,5 @@
-package org.neo4j.arrow.job;
+package org.neo4j.arrow;
 
-import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.graphalgo.api.NodeProperties;
 import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 

@@ -40,7 +40,7 @@ def get_actions(client, options={}):
         print(f"💥 Found {len(actions)} actions!")
     return actions
 
-def submit_read(client, cypher, params={}, options={}):
+def cypher_read(client, cypher, params={}, options={}):
     """Submit a cypherRead action and get a flight ticket"""
     if type(options) == dict:
         options = flight.FlightCallOptions(headers=list(options.items()))
@@ -62,7 +62,22 @@ def submit_read(client, cypher, params={}, options={}):
         results = client.do_action(("cypherRead", buffer), options=options)
         ticket = pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
     except Exception as e:
-        print(f"⚠ submit_read: {e}")
+        print(f"⚠ submit_cypher_read: {e}")
+        sys.exit(1)
+    return ticket
+
+def gds_read_node_prop(client, params={}, options={}):
+    """Submit a cypherRead action and get a flight ticket"""
+    if type(options) == dict:
+        options = flight.FlightCallOptions(headers=list(options.items()))
+
+    params_bytes = json.dumps(params).encode("utf8")
+    ticket = None
+    try:
+        results = client.do_action(("gdsNodeProperties", params_bytes), options=options)
+        ticket = pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+    except Exception as e:
+        print(f"⚠ submit_cypher_read: {e}")
         sys.exit(1)
     return ticket
 
@@ -148,7 +163,43 @@ if __name__ == "__main__":
     params = {"rows": 1_000_000, "dimension": 128}
     print(f"  cypher: {cypher}")
     print(f"  params: {params}")
-    ticket = submit_read(client, cypher, params, options)
+    ticket = cypher_read(client, cypher, params, options)
+    print(f"Got ticket: {ticket}")
+
+    print("Waiting for flight to be available...")
+    for i in range(1, 10):
+        status = check_flight_status(client, ticket, options)
+        print(f"  status: {status}")
+        if status == "PRODUCING":
+            break
+        else:
+            sleep(3)
+    
+    print("Flight ready! Getting flight info...")
+    info = None
+    while info is None:
+        sleep(3)
+        try:
+            info = get_flight_info(client, ticket, options)
+        except Exception as e:
+            print(f"failed to get flight info...retrying in 5s")
+            sleep(5)
+
+    print(f"Got info on our flight: {info}")
+
+    print("Boarding flight and getting stream...")
+    stream_flight(client, ticket, options)
+
+    ### GDS
+    print("----------------------------------------------------------------")
+    gds_params = {
+        "dbName": "neo4j",
+        "graphName:": "mygraph",
+        "filters": [],
+        "properties": ["n"],
+    }
+    print(f"Submitting GDS node properties request:\n{gds_params}")
+    ticket = gds_read_node_prop(client, gds_params, options)
     print(f"Got ticket: {ticket}")
 
     print("Waiting for flight to be available...")
