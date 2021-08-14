@@ -1,97 +1,94 @@
-# `neo4j-arrow` OR _how to go >10x faster than with Neo4j and Python_
+# neo4j-arrow -- Data Science workflows 10-100x faster
 
-This is some tire kicking of the [Apache Arrow](https://arrow.apache.org/) project to see if Arrow can help solve a few rough spots for us:
+> "“When you want to do something, do it right away. Do it when you can. 
+> It’s the only way to live a life without regrets.” 
+> 
+>                                    --Sonic The Hedgehog
 
+![gotta-go-fast](./fast.gif)
+
+This is some tire kicking of the [Apache Arrow](https://arrow.apache.org/)
+project to see if Arrow can help solve a few rough spots for us.
 
 ## Why? My Problem Statements
 
-1. Python driver performance in Data Science use cases that require reading a LOT of data from a Neo4j database (think dumping node embeddings at scale)...it's hellishly slow compared to our Java driver.
-2. Needing to handle "job-like" processing where the query could take an unknown amount of time to execute before results are returned...can we decouple the client from the transaction?
-3. Make it a more "native" Python data science experience, integrating better with NumPy and Pandas...this is just a gap in our current out-of-box experience today.
+1. **Data Science involves moving lots of "big data" around**, both into and 
+   out of the graph. Some customers need to move millions of scalars (e.g. 
+   community assignments) or even millions of vectors (e.g. 256-degree node 
+   embeddings). This is traditionally a challenge for Cypher-based approaches.
+2. **Data Science relies heavily on Python as the _lingua franca_**, but 
+   Neo4j's Python driver has traditionally been ill-fitted for integration 
+   with Neo4j. There's a general lack of integration with common libraries 
+   like Pandas, NumPy, etc. As a result, PySpark + the Neo4j Spark Connector 
+   are often recommended as an improvement.
+3. **Data Science often involves batch processing** where algorithms run for 
+   long periods of time. The Neo4j drivers, nor Neo4j itself, provide async 
+   transaction/job capabilities.
 
-### 1. Python Driver Perf
+### Problem 1: Moving "Big Data"
 
-Trying to operationalize your GDS deployment? You need to get data out...often at scale...and often into PySpark or other Python related environments. The Python driver, being written in pure Python, seems to have a bottleneck in how fast it can process bolt messages off the wire and transform them into Python data types.
+> “Only love that continues to flow in the face of anger, blame, and 
+> indifference can be called love. All else is simply a **transaction.**” 
+> 
+>                                    -- Vironika Tugaleva
 
-PyArrow uses, I believe, a C++ Arrow backend...like how Numpy, etc. work...so all the data wranging is done outside Python and outside the GIL.
+Getting large amounts of data into Neo4j has been a challenge...and, honestly, 
+this project is yet to address this matter. However, _getting data out en 
+masse_, **can** be immediately addressed with Apache Arrow.
 
-This native backend should make things faster.
+How?
 
-### 2. Jobs
+Sidestepping the **transaction layer** of Neo4j and using Arrow's more 
+efficient (for fixed-width data types) vector format.
 
-While there's an active PRD around the concept of "jobs," it doesn't solve the data transmission issues.
+#### Dumping Data Today
+Neo4j users needing to exfiltrate large quantities of node or relationship 
+properties, such as node embeddings, have a few choices today:
 
-While not my core concern here, Arrow Flight offers an extensible RPC framework that in theory could satisfy some of the API around this (but not the persistence & Job control). The API, in my opinion, is important enough that it is worthwhile looking into how friendly we can make it.
+1. Use a driver and Cypher to retrieve Node properties
+2. Use a driver and Cypher to call procs like `gds.graph.streamNodeProperties`
+3. Use APOC routines that write to files on the Neo4j file system
+4. Use alternative integrations like the Neo4j Streams (Apache Kafka) 
+   integration
 
-The concept of Arrow Flight RPC "actions" along with the basic "get"/"set" stream features feel like really good building blocks.
+In all the above cases, the user needs to either write orchestration code 
+around our drivers (which subjectively is quite cumbersome and full of 
+footguns) OR needs access to the filesystem along with additional Neo4j 
+plugins like APOC, etc. In this latter case, users of Aura are effectively SOL.
 
-### 3. Native Python Data Science DX
+We can do better!
 
-People love Py2neo because it's less hoops and hurdles to weave Python driver code into their data engineering or analytics code in platforms like Databricks, Dataiku, etc.
+#### Streaming data with Apache Arrow
+Apache Arrow solves multiple problems directly and indirectly related to 
+moving large quantities of data. Replacing Bolt as the wire-format and
+leveraging a common API across languages (from Python to R to Java, etc.) it 
+foremost provides a way to elegantly work with "big data" in a columnar 
+fashion.
 
-PyArrow natively integrates with both NumPy and Pandas...allowing for simple conversions to/from their respective data formats like DataFrames.
+In many data export use cases I've found, the users need only a few 
+properties exported, making columnar representations a good fit.
 
-The built-in integration in PyArrow should reduce the steps required to go from "cypher query" to "data frame", sort of like how the Neo4j Spark Connector expedites that as well.
+Arrow also includes the Flight framework, a combination of RPC (based on 
+gRPC) and basic remote stream operations (get, put, list, etc.).
 
-Plus, Apache Arrow seems to be incorporated into Databricks (via Apache Spark) and other platforms these days either internally or potentially externally. Amazon is even using it for some of their data services.
+### Problem 2: Python as a Platform
+The secret sauce of modern Data Science platforms appears to be exposing 
+Python as the thing the scientists learn and interact with and use it to 
+abstract out the complex "computer science-y" things like memory allocation, 
+zero-copy slices, etc. Underneath Pandas, NumPy, SciPy, etc. is a sea of C 
+code (and sometimes C++, Fortran, etc.) specializing in efficiency. The 
 
-## My Experiments
+### Problem 3: Batch Jobs
+While not my core concern here, Arrow Flight offers an extensible RPC 
+framework that in theory could satisfy some of the API around this (but not 
+the persistence & Job control). The API, in my opinion, is important enough 
+that it is worthwhile looking into how friendly we can make it.
 
-Given the silly query that generates fake embeddings with row "numbers":
+While there's an active PRD around the concept of "jobs," it doesn't solve 
+the data transmission issues.
 
-```
-UNWIND range(1, $rows) AS row
-RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding
-```
+The concept of Arrow Flight RPC "actions" along with the basic "get"/"set" 
+stream features feel like really good building blocks.
 
-How long does it take to get ALL the results to a Neo4j Python driver? (Or any driver for that matter?)
 
-### Neo4j Python Performance
-Given my measurements, in pure Python it can take **>200s** on my laptop to stream the results back using something trivial like:
-
-```python
-#!/usr/bin/env python
-import neo4j
-from time import time
-
-query = """
-        UNWIND range(1, $rows) AS row
-        RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding
-    """
-params = {"rows": 1_000_000, "dimension": 128}
-
-auth = ('neo4j', 'password')
-with neo4j.GraphDatabase.driver('neo4j://localhost:7687', auth=auth) as d:
-    with d.session(fetch_size=10_000) as s:
-        print(f"Starting query {query}")
-        result = s.run(query, params)
-        cnt = 0
-        start = time()
-        for row in result:
-            cnt = cnt + 1
-            if cnt % 50_000 == 0:
-                print(f"Current Row @ {cnt:,}:\t[fields: {row.keys()}]")
-        finish = time()
-        print(f"Done! Time Delta: {round(finish - start, 2):,}s")
-        print(f"Count: {cnt:,}, Rate: {round(cnt / (finish - start)):,} rows/s")
-
-```
-> See [direct.py](./direct.py) for the code
-
-### Using PyArrow
-
-PyArrow can't talk Bolt...**but**, it can talk to an Apache Arrow Flight service. IF one existed that has it's own way to talk to Neo4j, THEN it could proxy the Cypher transaction and facilitate rendering the Arrow stream back to the PyArrow client.
-
-IF the Neo4j Java Driver is _measurably faster than_ the Neo4j Python driver, THEN it's possible the overhead of using it as a proxy is negligible.
-
-What's the performance with PyArrow and a Java-Driver-Based Arrow Flight service? On my laptop with local db...it's **28s** to stream all the data back to the client.
-
-> That's **~7x faster**, btw...and in other workloads with smaller row sizes I've alreayd seen **>10x** improvements.
-
-What's the client code look like? Take a look at [client.py](./client.py).
-
-## Sooooo...
-
-The above PyArrow client stuff can be cleaned up and made friendlier...and the server side code can use some work. But this _feels_ promising. A **10x speedup** on my laptop gives me some hope!
-
-If we can remove the Bolt proxy from the equation, it _might get even faster!_
+...TBC...
