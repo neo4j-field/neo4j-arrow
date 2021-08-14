@@ -15,7 +15,10 @@ public class Neo4jDirectClient {
         logger = org.slf4j.LoggerFactory.getLogger(Neo4jDirectClient.class);
     }
 
-    private static final String cypher = "CALL gds.graph.streamNodeProperty('mygraph', 'n')";
+    private static final String cypher =
+            System.getenv("GDS") != null
+                    ? "CALL gds.graph.streamNodeProperty('mygraph', 'n')"
+                    : "UNWIND range(1, 1000000) AS row RETURN row, [_ IN range(1, 128) | rand()] as fauxEmbedding";
 
     public static void main(String[] args) {
         logger.info("Connecting to {} using Java Driver", Config.neo4jUrl);
