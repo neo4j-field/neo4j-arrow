@@ -125,16 +125,20 @@ public class Producer implements FlightProducer, AutoCloseable {
                             // XXX: Assumes all values share the same type and first value is non-null
                             switch (value.type()) {
                                 case INT_ARRAY:
-                                    value.asIntList().forEach(writer::writeInt);
+                                    for (int i : value.asIntArray())
+                                        writer.writeInt(i);
                                     break;
                                 case LONG_ARRAY:
-                                    value.asLongList().forEach(writer::writeBigInt);
+                                    for (long l : value.asLongArray())
+                                        writer.writeBigInt(l);
                                     break;
                                 case FLOAT_ARRAY:
-                                    value.asFloatList().forEach(writer::writeFloat4);
+                                    for (float f : value.asFloatArray())
+                                        writer.writeFloat4(f);
                                     break;
                                 case DOUBLE_ARRAY:
-                                    value.asDoubleList().forEach(writer::writeFloat8);
+                                    for (double d : value.asDoubleArray())
+                                        writer.writeFloat8(d);
                                     break;
                                 default:
                                     if (errored.compareAndSet(false, true)) {
@@ -146,7 +150,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                                     }
                                     return;
                             }
-                            writer.setValueCount(value.asList().size());
+                            writer.setValueCount(value.size());
                             writer.endList();
                         } else if (vector instanceof ListVector) {
                             // Used for Cypher

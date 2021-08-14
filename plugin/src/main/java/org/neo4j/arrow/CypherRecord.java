@@ -140,6 +140,11 @@ public class CypherRecord implements RowBasedRecord {
             }
 
             @Override
+            public double[] asDoubleArray() {
+                return null;
+            }
+
+            @Override
             public Type type() {
                 if (obj instanceof Integer)
                     return Type.INT;

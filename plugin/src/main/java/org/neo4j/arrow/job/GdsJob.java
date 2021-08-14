@@ -42,6 +42,11 @@ public class GdsJob extends Job {
             final String propertykey = "n";
             final NodeProperties properties = graph.nodeProperties(propertykey);
 
+            if (properties == null) {
+                log.error("no properties found for %s", propertykey);
+                return false;
+            }
+
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
             onFirstRecord(GdsRecord.wrap(properties, nodeId));

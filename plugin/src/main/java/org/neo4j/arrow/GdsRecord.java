@@ -3,6 +3,7 @@ package org.neo4j.arrow;
 import org.neo4j.graphalgo.api.NodeProperties;
 import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -12,7 +13,7 @@ public class GdsRecord implements RowBasedRecord {
     private final Value nodeId;
     private final Value value;
 
-    private GdsRecord(Value value, long nodeId) {
+    protected GdsRecord(Value value, long nodeId) {
         this.nodeId = wrapScalar(ValueType.LONG, nodeId);
         this.value = value;
     }
@@ -95,6 +96,11 @@ public class GdsRecord implements RowBasedRecord {
             }
 
             @Override
+            public double[] asDoubleArray() {
+                return null;
+            }
+
+            @Override
             public Type type() {
                 return Type.LIST;
             }
@@ -162,10 +168,20 @@ public class GdsRecord implements RowBasedRecord {
             }
 
             @Override
+            public float[] asFloatArray() {
+                return floats;
+            }
+
+            @Override
             public List<Double> asDoubleList() {
                 return IntStream.range(0, floats.length)
                         .mapToObj(idx -> Double.valueOf(floats[idx]))
                         .collect(Collectors.toList());
+            }
+
+            @Override
+            public double[] asDoubleArray() {
+                return null;
             }
 
             @Override
@@ -175,15 +191,12 @@ public class GdsRecord implements RowBasedRecord {
         };
     }
 
-    protected static Value wrapDoubleArray(double[] floats) {
+    protected static Value wrapDoubleArray(double[] doubles) {
         return new Value() {
-            final List<Double> values = Arrays.stream(floats)
-                    .boxed()
-                    .collect(Collectors.toList());
 
             @Override
             public int size() {
-                return floats.length;
+                return doubles.length;
             }
 
             @Override
@@ -213,27 +226,36 @@ public class GdsRecord implements RowBasedRecord {
 
             @Override
             public List<Object> asList() {
-                return values.stream().map(v -> (Object)v).collect(Collectors.toList());
+                return null; //values.stream().map(v -> (Object)v).collect(Collectors.toList());
             }
 
             @Override
             public List<Integer> asIntList() {
-                return values.stream().mapToInt(Double::intValue).boxed().collect(Collectors.toList());
+                return null; //values.stream().mapToInt(Double::intValue).boxed().collect(Collectors.toList());
             }
 
             @Override
             public List<Long> asLongList() {
-                return values.stream().mapToLong(Double::longValue).boxed().collect(Collectors.toList());
+                return null; // values.stream().mapToLong(Double::longValue).boxed().collect(Collectors.toList());
             }
 
             @Override
             public List<Float> asFloatList() {
-                return values.stream().map(Double::floatValue).collect(Collectors.toList());
+                return null; // values.stream().map(Double::floatValue).collect(Collectors.toList());
             }
 
             @Override
             public List<Double> asDoubleList() {
-                return values;
+                ArrayList<Double> list = new ArrayList<>(doubles.length);
+                for (double d : doubles) {
+                    list.add(d);
+                }
+                return list;
+            }
+
+            @Override
+            public double[] asDoubleArray() {
+                return doubles;
             }
 
             @Override
@@ -300,6 +322,11 @@ public class GdsRecord implements RowBasedRecord {
 
             @Override
             public List<Double> asDoubleList() {
+                return null;
+            }
+
+            @Override
+            public double[] asDoubleArray() {
                 return null;
             }
 
@@ -377,6 +404,11 @@ public class GdsRecord implements RowBasedRecord {
 
             @Override
             public List<Double> asDoubleList() {
+                return null;
+            }
+
+            @Override
+            public double[] asDoubleArray() {
                 return null;
             }
 

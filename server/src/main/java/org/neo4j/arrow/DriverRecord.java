@@ -75,6 +75,11 @@ public class DriverRecord implements RowBasedRecord {
                 return value.asList(val -> val.asDouble());
             }
 
+            @Override
+            public double[] asDoubleArray() {
+                return null;
+            }
+
             public Type type() {
                 switch (value.type().name()) {
                     case "INTEGER":

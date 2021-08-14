@@ -114,6 +114,11 @@ public class NoOpBenchmark {
                 }
 
                 @Override
+                public double[] asDoubleArray() {
+                    return null;
+                }
+
+                @Override
                 public Type type() {
                     return Type.DOUBLE_ARRAY;
                 }

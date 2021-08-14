@@ -29,28 +29,68 @@ public interface RowBasedRecord {
 
     interface Value {
         /* Number of primitives or inner values */
-        int size();
+        default int size() {
+            return 1;
+        }
 
-        int asInt();
+        default int asInt() {
+            return 0;
+        }
 
-        long asLong();
+        default long asLong() {
+            return 0L;
+        }
 
-        float asFloat();
+        default float asFloat() {
+            return 0f;
+        }
 
-        double asDouble();
+        default double asDouble() {
+            return 0d;
+        }
 
-        String asString();
+        default String asString() {
+            return "";
+        }
 
-        List<Object> asList();
+        default List<Object> asList() {
+            return List.of();
+        }
 
-        List<Integer> asIntList();
+        default List<Integer> asIntList() {
+            return List.of();
+        }
 
-        List<Long> asLongList();
+        default int[] asIntArray() {
+            return new int[0];
+        }
 
-        List<Float> asFloatList();
+        default List<Long> asLongList() {
+            return List.of();
+        }
 
-        List<Double> asDoubleList();
+        default long[] asLongArray() {
+            return new long[0];
+        }
 
-        Type type();
+        default List<Float> asFloatList() {
+            return List.of();
+        }
+
+        default float[] asFloatArray() {
+            return new float[0];
+        }
+
+        default List<Double> asDoubleList() {
+            return List.of();
+        }
+
+        default double[] asDoubleArray() {
+            return new double[0];
+        }
+
+        default Type type() {
+            return Type.OBJECT;
+        }
     }
 }

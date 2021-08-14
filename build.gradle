@@ -242,11 +242,13 @@ project(':plugin') {
         testImplementation (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
-                project(':client')
+                project(':client'),
+                rootProject.ext.arrowFlightGrpc
         )
         testRuntimeOnly (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: rootProject.ext.jupiterVersion],
                 [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion],
+                [group: 'org.neo4j.gds', name: 'core', version: rootProject.ext.neo4j.gdsVersion],
         )
     }
 
