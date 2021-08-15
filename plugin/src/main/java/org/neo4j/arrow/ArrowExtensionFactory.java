@@ -9,6 +9,13 @@ import org.neo4j.logging.internal.LogService;
 
 public class ArrowExtensionFactory extends ExtensionFactory<ArrowExtensionFactory.Dependencies> {
 
+    static {
+        // XXX Neo4j's "Logger" is annoying me...need to figure out how to properly hook in Slf4j
+        System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
+        System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "[yyyy-MM-dd'T'HH:mm:ss:SSS]");
+        System.setProperty("org.slf4j.simpleLogger.logFile", "System.out");
+    }
+
     public ArrowExtensionFactory() {
         super(ExtensionType.GLOBAL, "arrowExtension");
     }

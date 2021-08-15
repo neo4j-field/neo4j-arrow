@@ -25,12 +25,12 @@ public class GdsJob extends Job {
         final GraphStore store = GraphStoreCatalog.get(
                 ImmutableCatalogRequest.of(username, msg.getDbName()), msg.getGraphName())
                 .graphStore();
-        log.info("got graphstore " + store.toString());
+        log.info("got graphstore for graph named %s", msg.getGraphName());
 
         // just get all stuff for now
         final Graph graph = store
                 .getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
-        log.info("got graph " + graph.toString());
+        log.info("got graph for labels %s, relationship types %s", store.nodeLabels(), store.relationshipTypes());
 
         future = CompletableFuture.supplyAsync(() -> {
             log.info("...starting streaming future...");
@@ -38,27 +38,27 @@ public class GdsJob extends Job {
             // TODO: inspect the schema via the Graph instance...need to change the Job message type
             final PrimitiveLongIterator iterator = graph.nodeIterator();
 
-            // TODO: support property other than 'n'
-            final String propertykey = "n";
-            final NodeProperties properties = graph.nodeProperties(propertykey);
+            // TODO: support more than 1 property in the request
+            final String propertyName = msg.getProperties().get(0);
+            final NodeProperties properties = graph.nodeProperties(propertyName);
 
             if (properties == null) {
-                log.error("no properties found for %s", propertykey);
+                log.error("no node property found for %s", propertyName);
                 return false;
             }
 
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
-            onFirstRecord(GdsRecord.wrap(properties, nodeId));
+            onFirstRecord(GdsRecord.wrap(nodeId, propertyName, properties));
             log.info("got first record");
-            log.info(String.format("  %s -> %s", propertykey, properties.valueType()));
+            log.info(String.format("  %s -> %s", propertyName, properties.valueType()));
 
             final Consumer<RowBasedRecord> consumer = futureConsumer.join();
 
             // Blast off!
-            consumer.accept(GdsRecord.wrap(properties, nodeId));
+            consumer.accept(GdsRecord.wrap(nodeId, propertyName, properties));
             while (iterator.hasNext()) {
-                consumer.accept(GdsRecord.wrap(properties, iterator.next()));
+                consumer.accept(GdsRecord.wrap(nodeId, propertyName, properties));
             }
 
             log.info("finishing stream");

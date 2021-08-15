@@ -84,7 +84,7 @@ public class GdsActionhandler implements ActionHandler {
                     final List<Field> fields = new ArrayList<>();
                     record.keys().stream().forEach(fieldName -> {
                         final RowBasedRecord.Value value = record.get(fieldName);
-                        System.out.printf("xxx Translating Neo4j value %s -> %s\n", fieldName, value.type());
+                        log.info("Translating Neo4j value %s -> %s\n", fieldName, value.type());
 
                         switch (value.type()) {
                             case INT:

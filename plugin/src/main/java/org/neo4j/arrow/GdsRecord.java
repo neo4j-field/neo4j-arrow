@@ -3,36 +3,38 @@ package org.neo4j.arrow;
 import org.neo4j.graphalgo.api.NodeProperties;
 import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class GdsRecord implements RowBasedRecord {
     private final Value nodeId;
-    private final Value value;
 
-    protected GdsRecord(Value value, long nodeId) {
+    // TODO: perf optimize by using fixed-width arrays and numeric indexing
+    private final Map<String, Value> valueMap;
+    private ArrayList<String> keys = new ArrayList<>();
+
+    protected GdsRecord(long nodeId, Map<String, Value> valueMap) {
         this.nodeId = wrapScalar(ValueType.LONG, nodeId);
-        this.value = value;
+        this.valueMap = valueMap;
+        keys.addAll(this.valueMap.keySet());
     }
 
-    public static GdsRecord wrap(NodeProperties properties, long nodeId) {
+    public static GdsRecord wrap(long nodeId, String fieldName, NodeProperties properties) {
         switch (properties.valueType()) {
             case LONG:
-                return new GdsRecord(wrapScalar(properties.valueType(), properties.longValue(nodeId)), nodeId);
+                return new GdsRecord(nodeId, Map.of(fieldName, wrapScalar(properties.valueType(), properties.longValue(nodeId))));
             case DOUBLE:
-                return new GdsRecord(wrapScalar(properties.valueType(), properties.doubleValue(nodeId)), nodeId);
+                return new GdsRecord(nodeId, Map.of(fieldName, wrapScalar(properties.valueType(), properties.doubleValue(nodeId))));
             case LONG_ARRAY:
-                return new GdsRecord(wrapLongArray(properties.longArrayValue(nodeId)), nodeId);
+                return new GdsRecord(nodeId, Map.of(fieldName, wrapLongArray(properties.longArrayValue(nodeId))));
             case FLOAT_ARRAY:
-                return new GdsRecord(wrapFloatArray(properties.floatArrayValue(nodeId)), nodeId);
+                return new GdsRecord(nodeId, Map.of(fieldName, wrapFloatArray(properties.floatArrayValue(nodeId))));
             case DOUBLE_ARRAY:
-                return new GdsRecord(wrapDoubleArray(properties.doubleArrayValue(nodeId)), nodeId);
+                return new GdsRecord(nodeId, Map.of(fieldName, wrapDoubleArray(properties.doubleArrayValue(nodeId))));
             default:
                 // XXX tbd string type?
-                return new GdsRecord(wrapString(properties.getObject(nodeId).toString()), nodeId);
+                return new GdsRecord(nodeId, Map.of(fieldName, wrapString(properties.getObject(nodeId).toString())));
         }
     }
 
@@ -423,7 +425,7 @@ public class GdsRecord implements RowBasedRecord {
     public Value get(int index) {
         if (index == 0)
             return nodeId;
-        return value;
+        return valueMap.get(keys.get(index - 1));
     }
 
     @Override
@@ -431,14 +433,16 @@ public class GdsRecord implements RowBasedRecord {
         switch (field) {
             case "nodeId":
                 return nodeId;
-            case "value":
-                return value;
+            default:
+                return valueMap.get(field);
         }
-        return null;
     }
 
     @Override
     public List<String> keys() {
-        return List.of("nodeId", "value");
+        ArrayList<String> list = new ArrayList<>(keys.size() + 1);
+        list.add("nodeId");
+        list.addAll(keys);
+        return list;
     }
 }

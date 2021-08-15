@@ -207,16 +207,18 @@ easily be _over 2x as fast_.
 > data structures.
 
 ### Problem 3: Batch Jobs
-While not my core concern here, Arrow Flight offers an extensible RPC 
-framework that in theory could satisfy some of the API around this (but not 
-the persistence & Job control). The API, in my opinion, is important enough 
-that it is worthwhile looking into how friendly we can make it.
+While not top core concern here, Arrow Flight offers an extensible RPC 
+framework that, in theory, could satisfy some of the workflow around this (but 
+not the persistence & Job control). The API, in my opinion, is important 
+enough that it is worthwhile looking into how friendly we can make it.
 
-While there's an active PRD around the concept of "jobs," it doesn't solve 
-the data transmission issues.
+> While there's an active PRD around the concept of "jobs," it doesn't solve
+> the bulk data-over-the-wire issues. The current design is for running long 
+> write-based workloads like data loads or GDS algos. This is fine...but 
+> given Bolt and Cypher have no concepts yet of "jobs", we're starting 
+> effectively from scratch.
 
 The concept of Arrow Flight RPC "actions" along with the basic "get"/"set" 
-stream features feel like really good building blocks.
-
+stream features feel like solid building blocks.
 
 ...TBC...
