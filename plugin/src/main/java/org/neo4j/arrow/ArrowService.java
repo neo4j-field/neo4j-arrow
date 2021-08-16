@@ -11,9 +11,12 @@ import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.arrow.job.GdsJob;
 import org.neo4j.arrow.job.Neo4jTransactionApiJob;
 import org.neo4j.configuration.GraphDatabaseSettings;
+import org.neo4j.cypher.internal.javacompat.GraphDatabaseCypherService;
 import org.neo4j.dbms.api.DatabaseManagementService;
+import org.neo4j.graphalgo.compat.GdsGraphDatabaseAPI;
 import org.neo4j.graphalgo.compat.GraphDatabaseApiProxy;
 import org.neo4j.kernel.api.security.AuthManager;
+import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.internal.LogService;
@@ -52,7 +55,7 @@ public class ArrowService extends LifecycleAdapter {
                 new BasicCallHeaderAuthenticator(new NativeAuthValidator(authManager)));
         app.registerHandler(new CypherActionHandler(
                 (msg, mode, username, password) ->
-                        new Neo4jTransactionApiJob(msg, mode, dbms.database("neo4j"), log)));
+                        new Neo4jTransactionApiJob(msg, mode, dbms, log)));
         app.registerHandler(new GdsActionhandler(
                 (msg, mode, username, password) ->
                         new GdsJob(msg, username.get(), log), log));

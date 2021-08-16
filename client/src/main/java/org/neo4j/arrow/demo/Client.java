@@ -145,7 +145,7 @@ public class Client implements AutoCloseable {
             allocator = new RootAllocator(Integer.MAX_VALUE);
             client = new Client(allocator, location);
 
-            CypherMessage msg = new CypherMessage("UNWIND range(1, $rows) AS row\n" +
+            CypherMessage msg = new CypherMessage("neo4j", "UNWIND range(1, $rows) AS row\n" +
                     "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
                     Map.of("rows", 1_000_000, "dimension", 128));
             Action action = new Action(CypherActionHandler.CYPHER_READ_ACTION, msg.serialize());

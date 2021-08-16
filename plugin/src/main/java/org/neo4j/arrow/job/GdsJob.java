@@ -41,9 +41,7 @@ public class GdsJob extends Job {
 
             // TODO: support more than 1 property in the request. Use first filter for now as label filter
             final String propertyName = msg.getProperties().get(0);
-            final NodeProperties properties = store.nodePropertyValues(
-                    msg.getFilters().size() > 0 ? NodeLabel.of(msg.getFilters().get(0)) : NodeLabel.ALL_NODES,
-                    propertyName);
+            final NodeProperties properties = store.nodePropertyValues(propertyName);
 
             if (properties == null) {
                 log.error("no node property found for %s", propertyName);

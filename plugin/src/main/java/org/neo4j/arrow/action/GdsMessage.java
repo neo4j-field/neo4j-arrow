@@ -14,8 +14,8 @@ public class GdsMessage {
 
     static private final ObjectMapper mapper = new ObjectMapper();
 
-    public static final String JSON_KEY_DATABASE_NAME = "dbName";
-    public static final String JSON_KEY_GRAPH_NAME = "graphName";
+    public static final String JSON_KEY_DATABASE_NAME = "db";
+    public static final String JSON_KEY_GRAPH_NAME = "graph";
     public static final String JSON_KEY_FILTER_LIST = "filters";
     public static final String JSON_KEY_PROPERTY_LIST = "properties";
 

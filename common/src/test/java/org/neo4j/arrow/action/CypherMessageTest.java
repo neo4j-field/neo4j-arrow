@@ -24,7 +24,7 @@ public class CypherMessageTest {
         final String cypher = "MATCH (n:MyLabel) RETURN [n.prop1] AS prop1, n AS node;";
         final Map<String, Object> map = Map.of("n", 123, "name", "Dave");
 
-        CypherMessage msg = new CypherMessage(cypher, map);
+        CypherMessage msg = new CypherMessage("neo4j", cypher, map);
         byte[] bytes = msg.serialize();
         Assertions.assertTrue(bytes.length > 0);
 

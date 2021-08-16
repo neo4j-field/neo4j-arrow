@@ -21,11 +21,17 @@ public class CypherMessage {
     static private final CypherParser parser = new CypherParser();
 
     private final String cypher;
+    private final String database;
     private final Map<String, Object> params;
 
-    public CypherMessage(String cypher, Map<String, Object> params) {
+    public CypherMessage(String database, String cypher) {
+        this(database, cypher, Map.of());
+    }
+
+    public CypherMessage(String database, String cypher, Map<String, Object> params) {
         this.cypher = cypher;
         this.params = params;
+        this.database = database;
 
         Statement stmt = parser.parse(cypher, new CypherExceptionFactory() {
             @Override
@@ -53,14 +59,19 @@ public class CypherMessage {
         short len = buffer.getShort();
         byte[] slice = new byte[len];
         buffer.get(slice);
-        String cypher = StandardCharsets.UTF_8.decode(ByteBuffer.wrap(slice)).toString();
+        String cypher = new String(slice, StandardCharsets.UTF_8);
+
+        len = buffer.getShort();
+        slice = new byte[len];
+        buffer.get(slice);
+        String database = new String(slice, StandardCharsets.UTF_8);
 
         len = buffer.getShort();
         slice = new byte[len];
         buffer.get(slice);
         Map<String, Object> params = mapper.createParser(slice).readValueAs(Map.class);
 
-        return new CypherMessage(cypher, params);
+        return new CypherMessage(database, cypher, params);
     }
 
     /**
@@ -68,8 +79,10 @@ public class CypherMessage {
      * network byte order.
      *   [0-3] - length of cypher string C
      *   [4-C] - cypher string
-     *   [C-C+4] - length of params P as JSON
-     *   [C+4-C+4+P] - params serialized as JSON
+     *   [C-C+4] - length of database name D
+     *   [C+4-C+D+4] - database name string
+     *   [C+D+4-C+D+8] - length of params P as JSON
+     *   [C+D+8-C+D+P+8] - params serialized as JSO
      *
      * @return byte[]
      */
@@ -77,12 +90,15 @@ public class CypherMessage {
         // not most memory sensitive approach for now, but simple
         try {
             final byte[] cypherBytes = cypher.getBytes(StandardCharsets.UTF_8);
+            final byte[] databaseBytes = database.getBytes(StandardCharsets.UTF_8);
             final byte[] paramsBytes = mapper.writeValueAsString(params).getBytes(StandardCharsets.UTF_8);
 
-            ByteBuffer buffer = ByteBuffer.allocate(cypherBytes.length + paramsBytes.length + 8);
+            ByteBuffer buffer = ByteBuffer.allocate(cypherBytes.length + paramsBytes.length + 12);
             buffer.order(ByteOrder.BIG_ENDIAN);
             buffer.putShort((short) cypherBytes.length);
             buffer.put(cypherBytes);
+            buffer.putShort((short) databaseBytes.length);
+            buffer.put(databaseBytes);
             buffer.putShort((short) paramsBytes.length);
             buffer.put(paramsBytes);
             return buffer.array();
@@ -95,6 +111,10 @@ public class CypherMessage {
 
     public String getCypher() {
         return cypher;
+    }
+
+    public String getDatabase() {
+        return database;
     }
 
     public Map<String, Object> getParams() {

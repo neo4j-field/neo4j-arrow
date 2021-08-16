@@ -28,6 +28,7 @@ public class GdsRecord implements RowBasedRecord {
 
     public static GdsRecord wrap(long nodeId, String fieldName, NodeProperties properties) {
         switch (properties.valueType()) {
+            // TODO: INT?
             case LONG:
                 return new GdsRecord(nodeId,
                         new String[] { fieldName },
@@ -36,6 +37,7 @@ public class GdsRecord implements RowBasedRecord {
                 return new GdsRecord(nodeId,
                         new String[] { fieldName },
                         new Value[] { wrapScalar(properties.valueType(), properties.doubleValue(nodeId)) });
+                // TODO: INT_ARRAY?
             case LONG_ARRAY:
                 return new GdsRecord(nodeId, new String[] { fieldName }, new Value[] { (wrapLongArray(properties.longArrayValue(nodeId)))});
             case FLOAT_ARRAY:
