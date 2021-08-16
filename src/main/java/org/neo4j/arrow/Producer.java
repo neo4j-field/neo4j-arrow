@@ -103,6 +103,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 try {
                     int idx = cnt.getAndIncrement();
 
+                    // TODO: refactor to using fixed arrays for speed
                     for (Field field : fieldList) {
                         final RowBasedRecord.Value value = record.get(field.getName());
                         final FieldVector vector = vectorMap.get(field.getName());

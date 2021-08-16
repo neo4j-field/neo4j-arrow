@@ -1,7 +1,5 @@
 package org.neo4j.arrow.job;
 
-import org.apache.arrow.flight.Action;
-
 import java.util.Optional;
 
 @FunctionalInterface

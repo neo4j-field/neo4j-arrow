@@ -51,8 +51,11 @@ public class GdsMessage {
     public static GdsMessage deserialize(byte[] bytes) throws IOException {
         final Map<String, Object> params = mapper.createParser(bytes).readValueAs(Map.class);
 
+        logger.info("XXX got gds message keys: {}", params.keySet());
+
         final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "neo4j").toString();
-        final String graphName = params.getOrDefault(JSON_KEY_GRAPH_NAME, "mygraph").toString();
+        // TODO: assert our minimum schema
+        final String graphName = params.get(JSON_KEY_GRAPH_NAME).toString();
 
         List<String> filters = List.of();
         Object obj = params.getOrDefault(JSON_KEY_FILTER_LIST, filters);
@@ -83,5 +86,15 @@ public class GdsMessage {
 
     public List<String> getProperties() {
         return properties;
+    }
+
+    @Override
+    public String toString() {
+        return "GdsMessage{" +
+                "dbName='" + dbName + '\'' +
+                ", graphName='" + graphName + '\'' +
+                ", filters=" + filters +
+                ", properties=" + properties +
+                '}';
     }
 }

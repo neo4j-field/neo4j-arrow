@@ -3,6 +3,7 @@ package org.neo4j.arrow.job;
 import org.neo4j.arrow.GdsRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.graphalgo.NodeLabel;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
@@ -18,9 +19,9 @@ import java.util.function.Consumer;
 public class GdsJob extends Job {
     private final CompletableFuture<Boolean> future;
 
-    public GdsJob(GdsMessage msg, Mode mode, String username, Log log) {
+    public GdsJob(GdsMessage msg, String username, Log log) {
         super();
-        log.info("GdsJob called");
+        log.info("GdsJob called for msg: %s", msg);
 
         final GraphStore store = GraphStoreCatalog.get(
                 ImmutableCatalogRequest.of(username, msg.getDbName()), msg.getGraphName())
@@ -38,9 +39,11 @@ public class GdsJob extends Job {
             // TODO: inspect the schema via the Graph instance...need to change the Job message type
             final PrimitiveLongIterator iterator = graph.nodeIterator();
 
-            // TODO: support more than 1 property in the request
+            // TODO: support more than 1 property in the request. Use first filter for now as label filter
             final String propertyName = msg.getProperties().get(0);
-            final NodeProperties properties = graph.nodeProperties(propertyName);
+            final NodeProperties properties = store.nodePropertyValues(
+                    msg.getFilters().size() > 0 ? NodeLabel.of(msg.getFilters().get(0)) : NodeLabel.ALL_NODES,
+                    propertyName);
 
             if (properties == null) {
                 log.error("no node property found for %s", propertyName);
@@ -58,7 +61,7 @@ public class GdsJob extends Job {
             // Blast off!
             consumer.accept(GdsRecord.wrap(nodeId, propertyName, properties));
             while (iterator.hasNext()) {
-                consumer.accept(GdsRecord.wrap(nodeId, propertyName, properties));
+                consumer.accept(GdsRecord.wrap(iterator.next(), propertyName, properties));
             }
 
             log.info("finishing stream");

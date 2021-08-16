@@ -8,7 +8,8 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.Producer;
 import org.neo4j.arrow.RowBasedRecord;
-import org.neo4j.arrow.job.*;
+import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.JobCreator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

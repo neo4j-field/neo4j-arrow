@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import org.neo4j.common.DependencyResolver;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.kernel.extension.ExtensionFactory;
 import org.neo4j.kernel.extension.ExtensionType;
@@ -27,6 +28,7 @@ public class ArrowExtensionFactory extends ExtensionFactory<ArrowExtensionFactor
 
     public interface Dependencies {
         DatabaseManagementService dbms();
+        DependencyResolver resolver();
         LogService logService();
     }
 }

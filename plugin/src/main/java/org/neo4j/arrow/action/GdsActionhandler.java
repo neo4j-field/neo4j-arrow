@@ -48,6 +48,7 @@ public class GdsActionhandler implements ActionHandler {
     public Outcome handle(FlightProducer.CallContext context, Action action, Producer producer) {
         // XXX: assumption is we've set the peer identity to the user.
         final String username = context.peerIdentity();
+        log.info("user '%s' attempting a GDS action: %s", username, action.getType());
         GdsMessage msg;
         try {
             msg = GdsMessage.deserialize(action.getBody());

@@ -204,7 +204,7 @@ easily be _over 2x as fast_.
 > as the Java Driver running the same Cypher. The Java driver consumes 
 > multiple CPU cores and twice as much memory as the PyArrow. As you'll see 
 > shortly, it's possible to _beat the Java Driver_ if we use known width 
-> data structures.
+> data structures. (Bolt, keep in mind, assumes Lists are heterogeneous.)
 
 ### Problem 3: Batch Jobs
 While not top core concern here, Arrow Flight offers an extensible RPC 

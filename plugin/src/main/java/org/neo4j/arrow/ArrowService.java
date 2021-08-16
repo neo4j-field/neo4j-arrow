@@ -1,21 +1,26 @@
 package org.neo4j.arrow;
 
 import org.apache.arrow.flight.Location;
+import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.CypherActionHandler;
 import org.neo4j.arrow.action.GdsActionhandler;
+import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.arrow.job.GdsJob;
 import org.neo4j.arrow.job.Neo4jTransactionApiJob;
+import org.neo4j.configuration.GraphDatabaseSettings;
 import org.neo4j.dbms.api.DatabaseManagementService;
+import org.neo4j.graphalgo.compat.GraphDatabaseApiProxy;
+import org.neo4j.kernel.api.security.AuthManager;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.internal.LogService;
 
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 public class ArrowService extends LifecycleAdapter {
 
@@ -37,14 +42,20 @@ public class ArrowService extends LifecycleAdapter {
         log.info(">>>--[Arrow]--> init()");
         allocator = new RootAllocator(Config.maxGlobalMemory);
         location = Location.forGrpcInsecure(Config.host, Config.port);
-        app = new App(allocator, location, "neo4j-arrow-plugin");
 
+        // Use GDS's handy hooks to get our Auth Manager. Needs to be deferred as it will fail here.
+        final Supplier<AuthManager> authManager = () ->
+                GraphDatabaseApiProxy.resolveDependency(dbms.database(
+                        GraphDatabaseSettings.SYSTEM_DATABASE_NAME), AuthManager.class);
+
+        app = new App(allocator, location, "neo4j-arrow-plugin",
+                new BasicCallHeaderAuthenticator(new NativeAuthValidator(authManager)));
         app.registerHandler(new CypherActionHandler(
                 (msg, mode, username, password) ->
                         new Neo4jTransactionApiJob(msg, mode, dbms.database("neo4j"), log)));
         app.registerHandler(new GdsActionhandler(
                 (msg, mode, username, password) ->
-                        new GdsJob(msg, mode, username.get(), log), log));
+                        new GdsJob(msg, username.get(), log), log));
     }
 
     @Override

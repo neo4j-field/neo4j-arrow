@@ -6,6 +6,7 @@ import org.apache.arrow.flight.grpc.CredentialCallOption;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
@@ -55,6 +56,7 @@ public class Client implements AutoCloseable {
 
         long start = System.currentTimeMillis();
         long cnt = 0;
+        long byteCnt = 0;
 
         try (FlightStream stream = client.getStream(ticket, option);
                 VectorSchemaRoot root = stream.getRoot();
@@ -69,8 +71,15 @@ public class Client implements AutoCloseable {
                     logger.info("got batch, sized: {}", batch.getLength());
                     loader.load(batch);
                     cnt += batch.getLength();
-                    if (cnt % 25_000 == 0)
-                        logger.info("Current Row @ {}: [fields:{}, batchLen: {}]", cnt, root.getSchema().getFields(), batch.getLength());
+                    for (FieldVector vector : root.getFieldVectors())
+                        byteCnt += vector.getBufferSize();
+                    if (cnt % 25_000 == 0) {
+                        logger.info(String.format("Current Row @ %,d: [fields:%s, batchLen: %,d]",
+                                cnt, root.getSchema().getFields(), batch.getLength()));
+                        for (FieldVector vector : root.getFieldVectors()) {
+                            logger.info(String.format("vector %s: %,d bytes", vector.getName(), vector.getBufferSize()));
+                        }
+                    }
                 }
             }
         } catch (Exception e) {
@@ -78,8 +87,9 @@ public class Client implements AutoCloseable {
             throw e;
         }
         long delta = System.currentTimeMillis() - start;
-        logger.info(String.format("Finished. Count=%,d rows, Time Delta=%,d ms, Rate=%,d rows/s",
-                cnt, delta, 1000 * (cnt / delta) ));
+        logger.info(String.format("Finished. Count=%,d rows, Time Delta=%,d ms, Rate=%,d rows/s, Bytes=%,d",
+                cnt, delta, 1000 * (cnt / delta), byteCnt ));
+        logger.info(String.format("Throughput: %,d MiB/s", ((byteCnt / delta) * 1000) / (1024 * 1024)));
     }
 
     public void run(Action action) throws Exception {

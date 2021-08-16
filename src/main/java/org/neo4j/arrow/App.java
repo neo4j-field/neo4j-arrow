@@ -3,6 +3,7 @@ package org.neo4j.arrow;
 import org.apache.arrow.flight.FlightServer;
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
+import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.ActionHandler;
@@ -21,16 +22,22 @@ public class App implements AutoCloseable {
     private final String name;
 
     public App(BufferAllocator rootAllocator, Location location) {
-        this(rootAllocator, location, "unnamed-app");
+        this(rootAllocator, location, "unnamed-app",
+                new BasicCallHeaderAuthenticator(new HorribleBasicAuthValidator()));
     }
 
     public App(BufferAllocator rootAllocator, Location location, String name) {
+        this(rootAllocator, location, name,
+                new BasicCallHeaderAuthenticator(new HorribleBasicAuthValidator()));
+    }
+
+    public App(BufferAllocator rootAllocator, Location location, String name, CallHeaderAuthenticator authenticator) {
         allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
         this.location = location;
         this.producer = new Producer(allocator, location);
         this.server = FlightServer.builder(rootAllocator, location, this.producer)
                 // XXX header auth expects basic HTTP headers in the GRPC calls
-                .headerAuthenticator(new BasicCallHeaderAuthenticator(new HorribleBasicAuthValidator()))
+                .headerAuthenticator(authenticator)
                 // XXX this approach for some reason didn't work for me in python :-(
                 //.authHandler(new BasicServerAuthHandler(new Neo4jBasicAuthValidator()))
                 .build();

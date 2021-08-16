@@ -3,7 +3,9 @@ package org.neo4j.arrow;
 import org.neo4j.graphalgo.api.NodeProperties;
 import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -11,30 +13,38 @@ public class GdsRecord implements RowBasedRecord {
     private final Value nodeId;
 
     // TODO: perf optimize by using fixed-width arrays and numeric indexing
-    private final Map<String, Value> valueMap;
-    private ArrayList<String> keys = new ArrayList<>();
+    private final Value[] valueArray;
+    private final String[] keyArray;
 
-    protected GdsRecord(long nodeId, Map<String, Value> valueMap) {
+    protected GdsRecord(long nodeId, String[] keys, Value[] values) {
         this.nodeId = wrapScalar(ValueType.LONG, nodeId);
-        this.valueMap = valueMap;
-        keys.addAll(this.valueMap.keySet());
+        this.keyArray = keys;
+        this.valueArray = values;
+    }
+
+    protected GdsRecord(long nodeId, List<String> keys, List<Value> values) {
+        this(nodeId, keys.toArray(new String[keys.size()]), values.toArray(new Value[values.size()]));
     }
 
     public static GdsRecord wrap(long nodeId, String fieldName, NodeProperties properties) {
         switch (properties.valueType()) {
             case LONG:
-                return new GdsRecord(nodeId, Map.of(fieldName, wrapScalar(properties.valueType(), properties.longValue(nodeId))));
+                return new GdsRecord(nodeId,
+                        new String[] { fieldName },
+                        new Value[] { wrapScalar(properties.valueType(), properties.longValue(nodeId)) });
             case DOUBLE:
-                return new GdsRecord(nodeId, Map.of(fieldName, wrapScalar(properties.valueType(), properties.doubleValue(nodeId))));
+                return new GdsRecord(nodeId,
+                        new String[] { fieldName },
+                        new Value[] { wrapScalar(properties.valueType(), properties.doubleValue(nodeId)) });
             case LONG_ARRAY:
-                return new GdsRecord(nodeId, Map.of(fieldName, wrapLongArray(properties.longArrayValue(nodeId))));
+                return new GdsRecord(nodeId, new String[] { fieldName }, new Value[] { (wrapLongArray(properties.longArrayValue(nodeId)))});
             case FLOAT_ARRAY:
-                return new GdsRecord(nodeId, Map.of(fieldName, wrapFloatArray(properties.floatArrayValue(nodeId))));
+                return new GdsRecord(nodeId, new String[] { fieldName }, new Value[] { (wrapFloatArray(properties.floatArrayValue(nodeId)))});
             case DOUBLE_ARRAY:
-                return new GdsRecord(nodeId, Map.of(fieldName, wrapDoubleArray(properties.doubleArrayValue(nodeId))));
+                return new GdsRecord(nodeId, new String[] { fieldName }, new Value[] { (wrapDoubleArray(properties.doubleArrayValue(nodeId)))});
             default:
                 // XXX tbd string type?
-                return new GdsRecord(nodeId, Map.of(fieldName, wrapString(properties.getObject(nodeId).toString())));
+                return new GdsRecord(nodeId, new String[] { fieldName }, new Value[] { (wrapString(properties.getObject(nodeId).toString()))});
         }
     }
 
@@ -45,31 +55,6 @@ public class GdsRecord implements RowBasedRecord {
             @Override
             public int size() {
                 return longs.length;
-            }
-
-            @Override
-            public int asInt() {
-                return 0;
-            }
-
-            @Override
-            public long asLong() {
-                return 0;
-            }
-
-            @Override
-            public float asFloat() {
-                return 0;
-            }
-
-            @Override
-            public double asDouble() {
-                return 0;
-            }
-
-            @Override
-            public String asString() {
-                return "";
             }
 
             @Override
@@ -114,31 +99,6 @@ public class GdsRecord implements RowBasedRecord {
             @Override
             public int size() {
                 return floats.length;
-            }
-
-            @Override
-            public int asInt() {
-                return 0;
-            }
-
-            @Override
-            public long asLong() {
-                return 0;
-            }
-
-            @Override
-            public float asFloat() {
-                return 0;
-            }
-
-            @Override
-            public double asDouble() {
-                return 0;
-            }
-
-            @Override
-            public String asString() {
-                return "";
             }
 
             @Override
@@ -199,31 +159,6 @@ public class GdsRecord implements RowBasedRecord {
             @Override
             public int size() {
                 return doubles.length;
-            }
-
-            @Override
-            public int asInt() {
-                return 0;
-            }
-
-            @Override
-            public long asLong() {
-                return 0;
-            }
-
-            @Override
-            public float asFloat() {
-                return 0;
-            }
-
-            @Override
-            public double asDouble() {
-                return 0;
-            }
-
-            @Override
-            public String asString() {
-                return "";
             }
 
             @Override
@@ -423,9 +358,10 @@ public class GdsRecord implements RowBasedRecord {
 
     @Override
     public Value get(int index) {
+        assert index > 0 && index < (valueArray.length - 1);
         if (index == 0)
             return nodeId;
-        return valueMap.get(keys.get(index - 1));
+        return valueArray[index - 1];
     }
 
     @Override
@@ -434,15 +370,18 @@ public class GdsRecord implements RowBasedRecord {
             case "nodeId":
                 return nodeId;
             default:
-                return valueMap.get(field);
+                for (int i=0; i<keyArray.length; i++)
+                    if (keyArray[i].equals(field))
+                        return valueArray[i];
         }
+        return null;
     }
 
     @Override
     public List<String> keys() {
-        ArrayList<String> list = new ArrayList<>(keys.size() + 1);
+        ArrayList<String> list = new ArrayList<>(keyArray.length + 1);
         list.add("nodeId");
-        list.addAll(keys);
+        list.addAll(List.of(keyArray));
         return list;
     }
 }

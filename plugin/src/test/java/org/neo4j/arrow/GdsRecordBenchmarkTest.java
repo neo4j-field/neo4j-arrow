@@ -15,7 +15,6 @@ import org.neo4j.logging.Log;
 import org.neo4j.logging.log4j.Log4jLogProvider;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -30,36 +29,37 @@ public class GdsRecordBenchmarkTest {
         log = new Log4jLogProvider(System.out).getLog(GdsRecordBenchmarkTest.class);
     }
 
-    private static final double[] PAYLOAD = {
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 10
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 20
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 30
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 40
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 50
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 60
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 70
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 80
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 90
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 100
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 110
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 120
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 130
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 140
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 150
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 160
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 170
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 180
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 190
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 200
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 210
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 220
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 230
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 240
-            1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d, // 250
-            1d, 2d, 3d, 4d, 5d, 6d }; // 256
+    private static final float[] PAYLOAD = {
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 10
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 20
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 30
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 40
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 50
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 60
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 70
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 80
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 90
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 100
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 110
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 120
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 130
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 140
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 150
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 160
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 170
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 180
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 190
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 200
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 210
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 220
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 230
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 240
+            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 250
+            1f, 2f, 3f, 4f, 5f, 6f }; // 256
 
     private static RowBasedRecord getRecord() {
-        final RowBasedRecord record = new GdsRecord(1, Map.of("nodeProp", GdsRecord.wrapDoubleArray(PAYLOAD)));
+        final RowBasedRecord record = new GdsRecord(1, List.of("embedding"),
+                List.of(GdsRecord.wrapFloatArray(PAYLOAD)));
         return record;
     }
 
