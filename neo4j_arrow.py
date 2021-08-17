@@ -3,9 +3,8 @@ import pyarrow.flight as flight
 import base64
 import json
 import struct
-import sys
+import time as _time
 from enum import Enum
-from time import sleep, time
 from os import environ as env
 
 _JOB_CYPHER = "cypherRead"
@@ -72,7 +71,7 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
-    def gds_nodes(self, graph, properties='*', database='neo4j', filters=[]):
+    def gds_nodes(self, graph, properties=[], database='neo4j', filters=[]):
         """Submit a GDS job for streaming Node properties. Returns a ticket."""
         params = {
             'db': database,
@@ -97,12 +96,12 @@ class Neo4jArrow:
     
     def wait_for_job(self, ticket, status=JobStatus.PRODUCING, timeout=60):
         """Block until a given job (specified by a ticket) reaches a status."""
-        start = time()
-        while time() - start < timeout:
+        start = _time.time()
+        while _time.time() - start < timeout:
             if self.status(ticket) == status:
                 return True
             else:
-                time.sleep(1)
+                _time.sleep(1)
         return False
     
     def stream(self, ticket):
