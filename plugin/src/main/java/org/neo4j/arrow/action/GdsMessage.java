@@ -60,13 +60,13 @@ public class GdsMessage {
         List<String> filters = List.of();
         Object obj = params.getOrDefault(JSON_KEY_FILTER_LIST, filters);
         if (obj instanceof List) {
-            filters = ((List<?>)obj).stream().map(o -> o.toString()).collect(Collectors.toList());
+            filters = ((List<?>)obj).stream().map(Object::toString).collect(Collectors.toList());
         }
 
         List<String> properties = List.of();
         obj = params.getOrDefault(JSON_KEY_PROPERTY_LIST, properties);
         if (obj instanceof List) {
-            properties = ((List<?>)obj).stream().map(o -> o.toString()).collect(Collectors.toList());
+            properties = ((List<?>)obj).stream().map(Object::toString).collect(Collectors.toList());
         }
 
         return new GdsMessage(dbName, graphName, properties, filters);
