@@ -147,7 +147,7 @@ project(':server') {
     }
 
     application {
-        mainClass.set("org.neo4j.arrow.Server")
+        mainClass.set("org.neo4j.arrow.demo.Neo4jProxyServer")
     }
 
     jar {
