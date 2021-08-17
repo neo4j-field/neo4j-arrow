@@ -1,6 +1,6 @@
 # neo4j-arrow -- Data Science workflows 10-100x faster
 
-> "“When you want to do something, do it right away. Do it when you can. 
+> “When you want to do something, do it right away. Do it when you can. 
 > It’s the only way to live a life without regrets.” 
 >   -- Sonic The Hedgehog
 
