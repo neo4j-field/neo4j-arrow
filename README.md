@@ -2,12 +2,19 @@
 
 > "“When you want to do something, do it right away. Do it when you can. 
 > It’s the only way to live a life without regrets.” 
->   --Sonic The Hedgehog
+>   -- Sonic The Hedgehog
 
 ![gotta-go-fast](./fast.gif)
 
 This is some tire kicking of the [Apache Arrow](https://arrow.apache.org/)
 project to see if Arrow can help solve a few rough spots for us.
+
+## tl;dr: just give me some links!
+
+* The kitchen sink: [server-side neo4j-arrow plugin](./plugin/)
+* Neo4j Arrow proxy: [stand-alone server](./server/) (works with Aura, I think)
+* The PyArrow client: [neo4j-arrow.py](./neo4j_arrow.py)
+* My demo: [PyArrow Demo](./PyArrow%20Demo.ipynb)
 
 ## Why? My Problem Statements
 

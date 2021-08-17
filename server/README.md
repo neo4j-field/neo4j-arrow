@@ -1,6 +1,8 @@
 # neo4j-arrow "proxy" server
 Can't install the `neo4j-arrow` [plugin](../plugin)? Try the proxy.
 
+> This approach support Cypher jobs, but does *not* support GDS jobs!
+
 ## Building
 Simplest way is to run the `shadowJar` task (from the project root):
 
