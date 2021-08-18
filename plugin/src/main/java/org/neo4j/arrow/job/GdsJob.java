@@ -3,7 +3,6 @@ package org.neo4j.arrow.job;
 import org.neo4j.arrow.GdsRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.GdsMessage;
-import org.neo4j.graphalgo.NodeLabel;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
@@ -16,9 +15,22 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
+/**
+ * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
+ */
 public class GdsJob extends Job {
     private final CompletableFuture<Boolean> future;
 
+    /**
+     * Create a new GdsJob for processing the given {@link GdsMessage}.
+     * <p>
+     * The supplied username is assumed to allow GDS to enforce authorization and is assumed to be
+     * previously authenticated.
+     *
+     * @param msg the {@link GdsMessage} to process in the job
+     * @param username an already authenticated username
+     * @param log the Neo4j log instance
+     */
     public GdsJob(GdsMessage msg, String username, Log log) {
         super();
         log.info("GdsJob called for msg: %s", msg);
@@ -28,7 +40,7 @@ public class GdsJob extends Job {
                 .graphStore();
         log.info("got graphstore for graph named %s", msg.getGraphName());
 
-        // just get all stuff for now
+        // TODO: apply "filters" to labels or types...for now just get all
         final Graph graph = store
                 .getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
         log.info("got graph for labels %s, relationship types %s", store.nodeLabels(), store.relationshipTypes());
@@ -57,6 +69,7 @@ public class GdsJob extends Job {
             final Consumer<RowBasedRecord> consumer = futureConsumer.join();
 
             // Blast off!
+            // TODO: GDS lets us batch access to lists of nodes...future opportunity?
             consumer.accept(GdsRecord.wrap(nodeId, propertyName, properties));
             while (iterator.hasNext()) {
                 consumer.accept(GdsRecord.wrap(iterator.next(), propertyName, properties));

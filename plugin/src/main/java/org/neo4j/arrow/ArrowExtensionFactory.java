@@ -28,7 +28,6 @@ public class ArrowExtensionFactory extends ExtensionFactory<ArrowExtensionFactor
 
     public interface Dependencies {
         DatabaseManagementService dbms();
-        DependencyResolver resolver();
         LogService logService();
     }
 }

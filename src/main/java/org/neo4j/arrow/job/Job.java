@@ -7,6 +7,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+/**
+ * The abstract base class for neo4j-arrow Jobs.
+ */
 public abstract class Job implements AutoCloseable, Future<JobSummary> {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Job.class);
     private static final AtomicLong jobCounter = new AtomicLong(0);

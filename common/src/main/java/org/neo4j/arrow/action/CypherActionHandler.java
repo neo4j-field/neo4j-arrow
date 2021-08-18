@@ -21,13 +21,21 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
+/**
+ * Orchestrate Cypher read and write-based {@link Job}s. (The exact mechanism of submitting the Cypher
+ * is depending on the type of {@link Job} created by the {@link JobCreator}.)
+ */
 public class CypherActionHandler implements ActionHandler {
+
+    /** A reading Cypher transaction */
     public static final String CYPHER_READ_ACTION = "cypherRead";
+    /** A writing Cypher transaction */
     public static final String CYPHER_WRITE_ACTION = "cypherWrite";
 
     private static final List<String> supportedActions = List.of(CYPHER_READ_ACTION, CYPHER_WRITE_ACTION);
     private static Logger logger = LoggerFactory.getLogger(CypherActionHandler.class);
 
+    /** A {@link JobCreator} that works with {@link CypherMessage}s */
     private final JobCreator<CypherMessage> jobCreator;
 
     public CypherActionHandler(JobCreator<CypherMessage> jobCreator) {
@@ -56,9 +64,8 @@ public class CypherActionHandler implements ActionHandler {
 
         switch (action.getType()) {
             case CYPHER_READ_ACTION:
-                /* Ticket this job */
                 final Job job = jobCreator.newJob(msg, Job.Mode.READ,
-                        // TODO: get from context?
+                        // TODO: get Cypher username/password from Context?
                         Optional.of("neo4j"), Optional.of("password"));
                 final Ticket ticket = producer.ticketJob(job);
 
@@ -69,9 +76,9 @@ public class CypherActionHandler implements ActionHandler {
                     try {
                         return Optional.of(futureRecord.get());
                     } catch (InterruptedException e) {
-                        logger.error("interrupted getting first record", e);
+                        logger.error("Interrupted getting first record", e);
                     } catch (ExecutionException e) {
-                        logger.error("execution error", e);
+                        logger.error("Execution error getting first record", e);
                     }
                     return Optional.empty();
                 }).thenAcceptAsync(maybeRecord -> {
@@ -85,8 +92,8 @@ public class CypherActionHandler implements ActionHandler {
                     final List<Field> fields = new ArrayList<>();
                     record.keys().stream().forEach(fieldName -> {
                         final RowBasedRecord.Value value = record.get(fieldName);
-                        // TODO: better mapping support?
-                        System.out.printf("xxx Translating Neo4j value %s -> %s\n", fieldName, value.type());
+                        // TODO: better mapping support for generic Cypher values?
+                        logger.info("translating Neo4j value {} -> {}", fieldName, value.type());
 
                         switch (value.type()) {
                             case INT:
@@ -125,13 +132,15 @@ public class CypherActionHandler implements ActionHandler {
                     producer.setFlightInfo(ticket, new Schema(fields));
                 });
 
-                /* We're taking off, so hand the ticket back to our client. */
+                // We're taking off, so hand the ticket back to our client.
                 return Outcome.success(new Result(ticket.serialize().array()));
+
             case CYPHER_WRITE_ACTION:
-                return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("can't do writes yet!"));
+                return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("Can't do cypher writes yet!"));
+
             default:
                 logger.warn("unknown action {}", action.getType());
-                return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("unknown action!"));
+                return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("Unknown action for handler"));
         }
 
     }

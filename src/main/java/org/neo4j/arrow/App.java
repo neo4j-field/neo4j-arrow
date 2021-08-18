@@ -12,6 +12,9 @@ import org.neo4j.arrow.auth.HorribleBasicAuthValidator;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * An Arrow Flight Application for integrating Neo4j and Apache Arrow
+ */
 public class App implements AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(App.class);
 
@@ -21,16 +24,42 @@ public class App implements AutoCloseable {
     private final BufferAllocator allocator;
     private final String name;
 
+    /**
+     * Create a new Arrow Flight application using the provided memory allocator. It will listen on
+     * the provided {@link Location}.
+     *
+     * @param rootAllocator
+     * @param location
+     */
     public App(BufferAllocator rootAllocator, Location location) {
         this(rootAllocator, location, "unnamed-app",
                 new BasicCallHeaderAuthenticator(new HorribleBasicAuthValidator()));
     }
 
+    /**
+     * Create a new Arrow Flight application using the provided memory allocator. It will listen on
+     * the provided {@link Location}.
+     *
+     * @param rootAllocator
+     * @param location
+     * @param name identifiable name for the service
+     */
     public App(BufferAllocator rootAllocator, Location location, String name) {
         this(rootAllocator, location, name,
                 new BasicCallHeaderAuthenticator(new HorribleBasicAuthValidator()));
     }
 
+    /**
+     * Create a new Arrow Flight application using the provided memory allocator. It will listen on
+     * the provided {@link Location}.
+     * <p>
+     * Utilizes the provided {@link CallHeaderAuthenticator} for authenticating client calls and
+     * requests.
+     * @param rootAllocator
+     * @param location
+     * @param name identifiable name for the service
+     * @param authenticator
+     */
     public App(BufferAllocator rootAllocator, Location location, String name, CallHeaderAuthenticator authenticator) {
         allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
         this.location = location;

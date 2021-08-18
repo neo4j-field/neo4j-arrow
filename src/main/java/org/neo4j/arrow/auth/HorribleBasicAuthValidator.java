@@ -9,12 +9,21 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Optional;
 
+/**
+ * Seriously, try not to use this. It's an auth validator that uses an in-memory (on jvm heap) token
+ * containing a username and password for authenticating with the Arrow Flight service.
+ * <p>
+ *     <em>THIS SHOULD BE USED FOR TESTING OR LOCAL HACKING ONLY!</em>
+ * </p>
+ */
 public class HorribleBasicAuthValidator
         implements BasicServerAuthHandler.BasicAuthValidator, BasicCallHeaderAuthenticator.CredentialValidator {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(HorribleBasicAuthValidator.class);
 
-    // XXX
-    private static final String HARDCODED_TOKEN = "neo4j:password";
+    // XXX you really shouldn't be using this auth validator! It simply keeps an in-memory token.
+    /** The hardcoded auth token in the form of username:password. Set via environment variable. */
+    private static final String HARDCODED_TOKEN = System.getenv()
+            .getOrDefault("NEO4J_ARROW_TOKEN", "neo4j:password");
 
     @Override
     public byte[] getToken(String username, String password) {
@@ -42,6 +51,6 @@ public class HorribleBasicAuthValidator
         if (username.equals("neo4j") && password.equals("password"))
             return () -> username;
         else
-            throw new Exception("Shit");
+            throw new Exception("Oh, fiddlesticks");
     }
 }

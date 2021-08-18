@@ -7,7 +7,7 @@ import org.apache.arrow.memory.RootAllocator;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import org.neo4j.arrow.action.GdsActionhandler;
+import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.demo.Client;
 import org.neo4j.arrow.job.Job;
@@ -19,6 +19,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+/**
+ * A simple local perf test, nothing fancy. Just make sure data can flow and flow effectively. Used
+ * mostly for doing flame graphs of the call stack to find hot spots.
+ */
 public class GdsRecordBenchmarkTest {
     private final static Log log;
 
@@ -29,6 +33,7 @@ public class GdsRecordBenchmarkTest {
         log = new Log4jLogProvider(System.out).getLog(GdsRecordBenchmarkTest.class);
     }
 
+    // 256 floats!
     private static final float[] PAYLOAD = {
             1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 10
             1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 20
@@ -113,14 +118,14 @@ public class GdsRecordBenchmarkTest {
         try (App app = new App(serverAllocator, location);
              Client client = new Client(clientAllocator, location)) {
 
-            app.registerHandler(new GdsActionhandler(
+            app.registerHandler(new GdsActionHandler(
                     (msg, mode, username, password) -> new NoOpJob(1_000_000, signal),
                     log));
             app.start();
 
             final long start = System.currentTimeMillis();
             final GdsMessage msg = new GdsMessage("neo4j", "mygraph", List.of("fastRp"), List.of());
-            final Action action = new Action(GdsActionhandler.NODE_PROPS_ACTION, msg.serialize());
+            final Action action = new Action(GdsActionHandler.NODE_PROPS_ACTION, msg.serialize());
             client.run(action);
             final long stop = signal.join();
             log.info(String.format("Client Lifecycle Time: %,d ms", stop - start));

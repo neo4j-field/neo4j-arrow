@@ -4,9 +4,6 @@ import org.neo4j.arrow.CypherRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.dbms.api.DatabaseManagementService;
-import org.neo4j.graphalgo.compat.GdsGraphDatabaseAPI;
-import org.neo4j.graphalgo.compat.GraphDatabaseApiProxy;
-import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
@@ -16,6 +13,9 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Interact with the Database directly via the Transaction API and Cypher.
+ */
 public class Neo4jTransactionApiJob extends Job {
 
     private final CompletableFuture<JobSummary> future;

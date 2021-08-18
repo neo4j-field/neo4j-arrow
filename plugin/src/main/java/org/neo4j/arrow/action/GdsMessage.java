@@ -9,6 +9,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Primary message type for communicating parameters to GDS jobs. Relies on JSON for serialization
+ * to keep things simple and portable without manual byte-packing, etc.
+ */
 public class GdsMessage {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(GdsMessage.class);
 
@@ -19,10 +23,16 @@ public class GdsMessage {
     public static final String JSON_KEY_FILTER_LIST = "filters";
     public static final String JSON_KEY_PROPERTY_LIST = "properties";
 
-    private String dbName;
-    private String graphName;
-    private List<String> filters;
-    private List<String> properties;
+    /** Name of the Neo4j Database where our Graph lives. Optional. Defaults to "neo4j" */
+    private final String dbName;
+    /** Name of the Graph (projection) from the Graph Catalog. Required. */
+    private final String graphName;
+    /** List of "filters" to apply to the Graph when generating results. Optional. */
+    private final List<String> filters;
+    /** List of properties to read or write. Optional for reads (Can be empty for "all" properties
+     * during reads.)
+     */
+    private final List<String> properties;
 
     public GdsMessage(String dbName, String graphName, List<String> properties, List<String> filters) {
         this.dbName = dbName;
@@ -33,6 +43,10 @@ public class GdsMessage {
         // TODO: validation / constraints of values?
     }
 
+    /**
+     * Serialize the GdsMessage to a JSON blob of bytes.
+     * @return byte[] containing UTF-8 JSON blob or byte[0] on error
+     */
     public byte[] serialize() {
         try {
             return mapper.writeValueAsString(
@@ -43,18 +57,21 @@ public class GdsMessage {
                     .getBytes(StandardCharsets.UTF_8);
         } catch (JsonProcessingException e) {
             logger.error("serialization error", e);
-            e.printStackTrace();
         }
         return new byte[0];
     }
 
+    /**
+     * Deserialize the given bytes, containing JSON, into a GdsMessage instance.
+     * @param bytes UTF-8 bytes containing JSON payload
+     * @return new GdsMessage
+     * @throws IOException if error encountered during serialization
+     */
     public static GdsMessage deserialize(byte[] bytes) throws IOException {
         final Map<String, Object> params = mapper.createParser(bytes).readValueAs(Map.class);
 
-        logger.info("XXX got gds message keys: {}", params.keySet());
-
         final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "neo4j").toString();
-        // TODO: assert our minimum schema
+        // TODO: assert our minimum schema?
         final String graphName = params.get(JSON_KEY_GRAPH_NAME).toString();
 
         List<String> filters = List.of();

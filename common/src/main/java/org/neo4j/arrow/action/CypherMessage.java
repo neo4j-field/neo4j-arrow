@@ -77,12 +77,6 @@ public class CypherMessage {
     /**
      * Serialize the CypherMessage to a platform independent format, kept very simple for now, in
      * network byte order.
-     *   [0-3] - length of cypher string C
-     *   [4-C] - cypher string
-     *   [C-C+4] - length of database name D
-     *   [C+4-C+D+4] - database name string
-     *   [C+D+4-C+D+8] - length of params P as JSON
-     *   [C+D+8-C+D+P+8] - params serialized as JSO
      *
      * @return byte[]
      */
@@ -94,17 +88,25 @@ public class CypherMessage {
             final byte[] paramsBytes = mapper.writeValueAsString(params).getBytes(StandardCharsets.UTF_8);
 
             ByteBuffer buffer = ByteBuffer.allocate(cypherBytes.length + paramsBytes.length + 12);
+            // Size prefixes, as scalars, are transmitted in network byte order
             buffer.order(ByteOrder.BIG_ENDIAN);
+
+            // Cypher length
             buffer.putShort((short) cypherBytes.length);
+            // Cypher utf8 string
             buffer.put(cypherBytes);
+            // Database name length
             buffer.putShort((short) databaseBytes.length);
+            // Database utf8 string
             buffer.put(databaseBytes);
+            // JSON params length
             buffer.putShort((short) paramsBytes.length);
+            // JSON params utf8 string
             buffer.put(paramsBytes);
+
             return buffer.array();
         } catch (Exception e) {
             logger.error("serialization error", e);
-            e.printStackTrace();
         }
         return new byte[0];
     }

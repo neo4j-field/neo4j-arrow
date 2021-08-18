@@ -10,7 +10,7 @@ public class NativeAuthValidatorTest {
         final String username = "dave";
         final String password = "so it goes!";
 
-        final NativeAuthValidator validator = new NativeAuthValidator(() -> AuthManager.NO_AUTH);
+        final NativeAuthValidator validator = new NativeAuthValidator(() -> AuthManager.NO_AUTH, null);
         final byte[] out = validator.getToken(username, password);
         final String newUsername = validator.isValid(out).get();
 

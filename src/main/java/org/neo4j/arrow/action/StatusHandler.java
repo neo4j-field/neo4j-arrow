@@ -33,7 +33,7 @@ public class StatusHandler implements ActionHandler {
     public Outcome handle(FlightProducer.CallContext context, Action action, Producer producer) {
         // TODO: standardize on matching logic? case sensitive/insensitive?
         if (!action.getType().equalsIgnoreCase(STATUS_ACTION)) {
-            return Outcome.failure(CallStatus.UNKNOWN.withDescription("unsupported action for handler"));
+            return Outcome.failure(CallStatus.UNKNOWN.withDescription("Unsupported action for job status handler"));
         }
 
         try {
@@ -44,7 +44,7 @@ public class StatusHandler implements ActionHandler {
             }
             return Outcome.failure(CallStatus.NOT_FOUND.withDescription("no job for ticket"));
         } catch (IOException e) {
-            logger.error("problem servicing cypher status action", e);
+            logger.error("Problem servicing cypher status action", e);
             return Outcome.failure(CallStatus.INTERNAL.withDescription(e.getMessage()));
         }
     }

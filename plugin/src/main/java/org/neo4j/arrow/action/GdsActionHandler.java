@@ -8,6 +8,7 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.Producer;
 import org.neo4j.arrow.RowBasedRecord;
+import org.neo4j.arrow.job.GdsJob;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.JobCreator;
 import org.neo4j.logging.Log;
@@ -20,15 +21,20 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-public class GdsActionhandler implements ActionHandler {
+/**
+ * Native integration with GDS via Arrow.
+ * <p>
+ * Provides jobs/services for reading properties from a graph projection in the Graph Catalog.
+ */
+public class GdsActionHandler implements ActionHandler {
     public static final String NODE_PROPS_ACTION = "gdsNodeProperties";
     public static final String REL_PROPS_ACTION = "gdsRelProperties";
 
     private static final List<String> supportedActions = List.of(NODE_PROPS_ACTION, REL_PROPS_ACTION);
     private final Log log;
-    private final JobCreator jobCreator;
+    private final JobCreator<GdsMessage> jobCreator;
 
-    public GdsActionhandler(JobCreator<GdsMessage> jobCreator, Log log) {
+    public GdsActionHandler(JobCreator<GdsMessage> jobCreator, Log log) {
         this.jobCreator = jobCreator;
         this.log = log;
     }
@@ -46,7 +52,8 @@ public class GdsActionhandler implements ActionHandler {
 
     @Override
     public Outcome handle(FlightProducer.CallContext context, Action action, Producer producer) {
-        // XXX: assumption is we've set the peer identity to the user.
+        // XXX: assumption is we've set the peer identity to the username...
+        // XXX: see org.neo4j.arrow.auth.NativeAuthValidator for details.
         final String username = context.peerIdentity();
         log.info("user '%s' attempting a GDS action: %s", username, action.getType());
         GdsMessage msg;
@@ -62,10 +69,12 @@ public class GdsActionhandler implements ActionHandler {
                 Job job = jobCreator.newJob(msg, Job.Mode.READ,
                         Optional.of(username), Optional.empty());
                 final Ticket ticket = producer.ticketJob(job);
-                /* We need to wait for the first record to discern our final schema */
+
+                // We need to wait for the first record to discern our final schema
                 final Future<RowBasedRecord> futureRecord = job.getFirstRecord();
 
                 CompletableFuture.supplyAsync(() -> {
+                    // Try to get our first record
                     try {
                         return Optional.of(futureRecord.get());
                     } catch (InterruptedException e) {
@@ -80,8 +89,10 @@ public class GdsActionhandler implements ActionHandler {
                         producer.deleteFlight(ticket);
                         return;
                     }
+
                     final RowBasedRecord record = (RowBasedRecord) maybeRecord.get();
 
+                    // Build the Arrow schema from our first record, assuming it's constant
                     final List<Field> fields = new ArrayList<>();
                     record.keys().stream().forEach(fieldName -> {
                         final RowBasedRecord.Value value = record.get(fieldName);
@@ -141,15 +152,17 @@ public class GdsActionhandler implements ActionHandler {
                                 log.error("unsupported value type for handler: {}", value.type());
                         }
                     });
+
+                    // We've got our Schema, so publish this Flight for consumption
                     producer.setFlightInfo(ticket, new Schema(fields));
                 });
 
-                /* We're taking off, so hand the ticket back to our client. */
+                // We're taking off, so hand the ticket back to our client.
                 return Outcome.success(new Result(ticket.serialize().array()));
             case REL_PROPS_ACTION:
-                // not implemented
+                // not implemented yet
                 break;
         }
-        return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("coming soon!"));
+        return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("coming soon?!"));
     }
 }

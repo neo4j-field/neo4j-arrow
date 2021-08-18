@@ -22,14 +22,20 @@ project to see if Arrow can help solve a few rough spots for us.
    out of the graph. Some customers need to move millions of scalars (e.g. 
    community assignments) or even millions of vectors (e.g. 256-degree node 
    embeddings). This is traditionally a challenge for Cypher-based approaches.
+
 2. **Data Science relies heavily on Python as the _lingua franca_**, but 
    Neo4j's Python driver has traditionally been ill-fitted for integration 
    with Neo4j. There's a general lack of integration with common libraries 
    like Pandas, NumPy, etc. As a result, PySpark + the Neo4j Spark Connector 
    are often recommended as an improvement.
+
 3. **Data Science often involves batch processing** where algorithms run for 
    long periods of time. The Neo4j drivers, nor Neo4j itself, provide async 
    transaction/job capabilities.
+
+> Some inspiring propaganda for the cause:
+> [It's time to retire the CSV](https://www.bitsondisk.com/writing/2021/retire-the-csv/)
+> [Graphistry uses Arrow](https://www.kdnuggets.com/2018/01/supercharging-visualization-apache-arrow.html?utm_content=buffer38573&utm_medium=social&utm_source=twitter.com&utm_campaign=buffer)
 
 ### Problem 1: Moving "Big Data"
 
@@ -44,8 +50,10 @@ masse_, **can** be immediately addressed with Apache Arrow.
 How?
 
 1. Sidestepping the **transaction layer** of Neo4j, avoiding "PageCache thrash"
+
 2. Using Arrow's more efficient (for fixed-width data types) **vector format 
    wire and in-memory format**
+
 3. Exploiting support for things like `float[]` primitives over `double[]`
 
 #### Dumping Data Today
@@ -53,8 +61,11 @@ Neo4j users needing to exfiltrate large quantities of node or relationship
 properties, such as node embeddings, have a few choices today:
 
 1. Use a driver and Cypher to retrieve Node properties
+
 2. Use a driver and Cypher to call procs like `gds.graph.streamNodeProperties`
+
 3. Use APOC routines that write to files on the Neo4j file system
+
 4. Use alternative integrations like the Neo4j Streams (Apache Kafka) 
    integration
 
@@ -229,3 +240,9 @@ The concept of Arrow Flight RPC "actions" along with the basic "get"/"set"
 stream features feel like solid building blocks.
 
 ...TBC...
+
+# Licensing & Copyright
+Like other `neo4j-labs` and `neo4j-contrib` projects, this project is 
+provided under the terms of the [Apache 2.0](./LICENSE) license.
+
+All files and code are copyright 2021, Neo4j, Inc.

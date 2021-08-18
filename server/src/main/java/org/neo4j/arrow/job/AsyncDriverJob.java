@@ -5,6 +5,7 @@ import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.driver.*;
 import org.neo4j.driver.async.AsyncSession;
+import org.neo4j.driver.summary.ResultSummary;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CompletableFuture;
@@ -18,11 +19,11 @@ import java.util.function.Consumer;
 public class AsyncDriverJob extends Job {
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(AsyncDriverJob.class);
 
-    /* 1 Driver per identity */
+    /* 1 Driver per identity for now...gross simplification. */
     private static ConcurrentMap<AuthToken, Driver> driverMap = new ConcurrentHashMap<>();
 
     private final AsyncSession session;
-    private final CompletableFuture future;
+    private final CompletableFuture<ResultSummary> future;
 
     public AsyncDriverJob(CypherMessage msg, Mode mode, AuthToken authToken) {
         super();

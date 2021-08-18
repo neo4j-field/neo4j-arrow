@@ -9,7 +9,7 @@ public class DriverJobSummary implements JobSummary {
     }
 
     public static JobSummary wrap(ResultSummary summary) {
-        return () ->  summary.toString();
+        return summary::toString;
     }
 
     @Override

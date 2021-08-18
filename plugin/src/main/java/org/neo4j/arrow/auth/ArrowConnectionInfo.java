@@ -2,6 +2,9 @@ package org.neo4j.arrow.auth;
 
 import org.neo4j.internal.kernel.api.connectioninfo.ClientConnectionInfo;
 
+/**
+ * Placeholder for now...
+ */
 public class ArrowConnectionInfo extends ClientConnectionInfo {
     @Override
     public String asConnectionDetails() {

@@ -6,17 +6,14 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.CypherActionHandler;
-import org.neo4j.arrow.action.GdsActionhandler;
+import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.arrow.job.GdsJob;
 import org.neo4j.arrow.job.Neo4jTransactionApiJob;
 import org.neo4j.configuration.GraphDatabaseSettings;
-import org.neo4j.cypher.internal.javacompat.GraphDatabaseCypherService;
 import org.neo4j.dbms.api.DatabaseManagementService;
-import org.neo4j.graphalgo.compat.GdsGraphDatabaseAPI;
 import org.neo4j.graphalgo.compat.GraphDatabaseApiProxy;
 import org.neo4j.kernel.api.security.AuthManager;
-import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.internal.LogService;
@@ -25,6 +22,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
+/**
+ * An Apache Arrow service for Neo4j, offering Arrow RPC-based access to Cypher and GDS services.
+ * <p>
+ * Since this runs as a database plugin, all Cypher access is via the Transaction API. GDS access
+ * is available directly to the Graph Catalog.
+ */
 public class ArrowService extends LifecycleAdapter {
 
     private final DatabaseManagementService dbms;
@@ -46,17 +49,19 @@ public class ArrowService extends LifecycleAdapter {
         allocator = new RootAllocator(Config.maxGlobalMemory);
         location = Location.forGrpcInsecure(Config.host, Config.port);
 
-        // Use GDS's handy hooks to get our Auth Manager. Needs to be deferred as it will fail here.
+        // Use GDS's handy hooks to get our Auth Manager. Needs to be deferred as it will fail
+        // if we try to get a reference here since it doesn't exist yet.
         final Supplier<AuthManager> authManager = () ->
                 GraphDatabaseApiProxy.resolveDependency(dbms.database(
                         GraphDatabaseSettings.SYSTEM_DATABASE_NAME), AuthManager.class);
 
         app = new App(allocator, location, "neo4j-arrow-plugin",
-                new BasicCallHeaderAuthenticator(new NativeAuthValidator(authManager)));
+                new BasicCallHeaderAuthenticator(new NativeAuthValidator(authManager, log)));
+
         app.registerHandler(new CypherActionHandler(
                 (msg, mode, username, password) ->
                         new Neo4jTransactionApiJob(msg, mode, dbms, log)));
-        app.registerHandler(new GdsActionhandler(
+        app.registerHandler(new GdsActionHandler(
                 (msg, mode, username, password) ->
                         new GdsJob(msg, username.get(), log), log));
     }
@@ -74,6 +79,9 @@ public class ArrowService extends LifecycleAdapter {
         super.stop();
 
         log.info(">>>--[Arrow]--> stop()");
+
+        // Use an async approach to stopping so we don't completely block Neo4j's shutdown waiting
+        // for streams to terminate.
         long timeout = 5;
         TimeUnit unit = TimeUnit.SECONDS;
 
@@ -92,6 +100,8 @@ public class ArrowService extends LifecycleAdapter {
     public void shutdown() throws Exception {
         super.shutdown();
         log.info(">>>--[Arrow]--> shutdown()");
+
+        // XXX you must close the allocator BEFORE the app!
         AutoCloseables.close(allocator, app);
     }
 }

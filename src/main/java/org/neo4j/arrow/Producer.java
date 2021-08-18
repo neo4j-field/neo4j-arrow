@@ -30,6 +30,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
+ * framework and stream wrangling.
+ *
+ * <p>
+ *     RPC {@link Action}s are made available via registration into the {@link #handlerMap} via
+ *     {@link #registerHandler(ActionHandler)}.
+ * </p>
+ * <p>
+ *     Streams, aka "Flights", are indexed by {@link Ticket}s and kept in {@link #flightMap}. As a
+ *     consequence, there's currently no multi-process support. The {@link Job} backing the stream
+ *     is kept in {@link #jobMap}.
+ * </p>
+ */
 public class Producer implements FlightProducer, AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Producer.class);
 
@@ -51,29 +65,41 @@ public class Producer implements FlightProducer, AutoCloseable {
         handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
     }
 
+    /**
+     * Attempt to get an Arrow stream for the given {@link Ticket}.
+     *
+     * @param context the {@link org.apache.arrow.flight.FlightProducer.CallContext} that contains
+     *                details on the client (the peer) attempting to access the stream.
+     * @param ticket the {@link Ticket} for the Flight
+     * @param listener the {@link org.apache.arrow.flight.FlightProducer.ServerStreamListener} for
+     *                 returning results in the stream back to the caller.
+     */
     @Override
     public void getStream(CallContext context, Ticket ticket, ServerStreamListener listener) {
         logger.debug("getStream called: context={}, ticket={}", context, ticket.getBytes());
 
         final Job job = jobMap.get(ticket);
         if (job == null) {
-            listener.error(CallStatus.NOT_FOUND.withDescription("can't find job").toRuntimeException());
+            listener.error(CallStatus.NOT_FOUND.withDescription("No job for ticket").toRuntimeException());
             return;
         }
         final FlightInfo info = flightMap.get(ticket);
         if (info == null) {
-            listener.error(CallStatus.NOT_FOUND.withDescription("can't find info").toRuntimeException());
+            listener.error(CallStatus.NOT_FOUND.withDescription("No flight for ticket").toRuntimeException());
             return;
         }
 
+        // XXX: need to investigate optimal pre-allocation of memory for streams
         logger.info("producing stream for ticket {}", ticket);
         BufferAllocator streamAllocator = allocator.newChildAllocator(
                 String.format("stream-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
                 1024L, Config.maxStreamMemory);
         if (streamAllocator == null) {
-            logger.error("oh no", new Exception("couldn't create child allocator!"));
-            listener.error(CallStatus.INTERNAL.withDescription("failed to create child allocator").toRuntimeException());
+            logger.error("Oh no!", new Exception("Couldn't create child allocator!"));
+            listener.error(CallStatus.INTERNAL.withDescription("Failed to create child memory allocator")
+                    .toRuntimeException());
         }
+
         try {
             final VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), streamAllocator);
             final VectorLoader loader = new VectorLoader(root);
@@ -84,9 +110,10 @@ public class Producer implements FlightProducer, AutoCloseable {
             // Complex things like Lists need special writers to fill them :-(
             final Map<String, BaseWriter.ListWriter> writerMap = new ConcurrentHashMap<>();
 
-            final List<Field> fieldList = info.getSchema().getFields();
-
             logger.info("using schema: {}", info.getSchema().toJson());
+
+            // TODO: do we need to allocate explicitly?
+            final List<Field> fieldList = info.getSchema().getFields();
             for (Field field : fieldList) {
                 FieldVector fieldVector = root.getVector(field);
                 fieldVector.setInitialCapacity(Config.arrowBatchSize);
@@ -98,6 +125,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             listener.start(root);
 
             // A bit hacky, but provide the core processing logic as a Consumer
+            // TODO: handle batches of records to decrease frequency of calls
             final AtomicBoolean errored = new AtomicBoolean(false);
             job.consume(record -> {
                 try {
@@ -107,6 +135,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     for (Field field : fieldList) {
                         final RowBasedRecord.Value value = record.get(field.getName());
                         final FieldVector vector = vectorMap.get(field.getName());
+
                         if (vector instanceof IntVector) {
                             ((IntVector) vector).set(idx, value.asInt());
                         } else if (vector instanceof BigIntVector) {
@@ -118,7 +147,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         } else if (vector instanceof VarCharVector) {
                             ((VarCharVector) vector).set(idx, value.asString().getBytes(StandardCharsets.UTF_8));
                         } else if (vector instanceof FixedSizeListVector) {
-                            // Used for GDS
+                            // Used for GdsJobs
                             final UnionFixedSizeListWriter writer =
                                     (UnionFixedSizeListWriter) writerMap.computeIfAbsent(field.getName(),
                                     s -> ((FixedSizeListVector) vector).getWriter());
@@ -220,19 +249,15 @@ public class Producer implements FlightProducer, AutoCloseable {
         }
     }
 
-    private void handleRecord(RowBasedRecord record ){
-
-    }
-
     /**
      * Flush out our vectors into the stream. At this point, all data is Arrow-based.
      *
-     * @param listener
-     * @param streamAllocator
-     * @param loader
-     * @param vectorMap
-     * @param fieldList
-     * @param idx
+     * @param listener reference to the {@link org.apache.arrow.flight.FlightProducer.ServerStreamListener}
+     * @param streamAllocator reference to the stream's memory allocator
+     * @param loader reference to the {@link VectorLoader}
+     * @param vectorMap reference to the {@link Producer}'s map of field names to {@link FieldVector}s
+     * @param fieldList list of {@link Field}s
+     * @param idx offset within the stream
      */
     private void flush(ServerStreamListener listener, BufferAllocator streamAllocator, VectorLoader loader,
                        Map<String, FieldVector> vectorMap, List<Field> fieldList, int idx) {
@@ -302,7 +327,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     public void setFlightInfo(Ticket ticket, Schema schema) {
         final FlightInfo info = new FlightInfo(schema, FlightDescriptor.command(ticket.getBytes()),
-                Arrays.asList(new FlightEndpoint(ticket, location)), -1, -1);
+                List.of(new FlightEndpoint(ticket, location)), -1, -1);
         flightMap.put(ticket, info);
         logger.info("set flight info {}", info);
     }

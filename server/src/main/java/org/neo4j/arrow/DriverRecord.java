@@ -5,6 +5,9 @@ import org.neo4j.driver.internal.types.InternalTypeSystem;
 
 import java.util.List;
 
+/**
+ * Wraps the Records returned by the Neo4jDriver.
+ */
 public class DriverRecord implements RowBasedRecord {
     private final Record record;
 

@@ -5,6 +5,12 @@ import org.neo4j.graphdb.Result;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * A wrapper around the raw Record returned via the Transaction API.
+ * <p>
+ * Since the Transaction API basically gives us opaque objects, we need to do lots of type checking
+ * and casting. (This is frustrating.)
+ */
 public class CypherRecord implements RowBasedRecord {
 
     private final Map<String, Value> map;

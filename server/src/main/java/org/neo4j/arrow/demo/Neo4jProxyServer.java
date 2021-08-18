@@ -13,7 +13,8 @@ import org.neo4j.driver.AuthTokens;
 import java.util.concurrent.TimeUnit;
 
 /**
- * A simple implementation of a Neo4j Arrow Service.
+ * A simple implementation of a Neo4j Arrow Service. Acts as a stand-alone bridge or proxy to a
+ * remote Neo4j instance, offering Cypher-only services. (No native GDS integration.)
  */
 public class Neo4jProxyServer {
     private static final org.slf4j.Logger logger;
@@ -27,7 +28,7 @@ public class Neo4jProxyServer {
     }
 
     public static void main(String[] args) throws Exception {
-        long timeout = 5;
+        long timeout = 15;
         TimeUnit unit = TimeUnit.MINUTES;
 
         final BufferAllocator bufferAllocator = new RootAllocator(Config.maxGlobalMemory);
