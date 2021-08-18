@@ -126,5 +126,24 @@ Some high level TODOs not in code comments:
 - [ ] Property filters (label-based, rel-type based)
 
 ## TODO's pulled from the code
-> last updated 18 Aug 2021
+> last updated 18 Aug 2021 via [todo.sh](./todo.sh)
 
+- [ ] TODO: get Cypher username/password from Context? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
+- [ ] TODO: better mapping support for generic Cypher values? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
+- [ ] TODO: fallback to raw bytes? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
+- [ ] TODO: fallback to raw bytes? [GdsActionHandler.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsActionHandler.java)
+- [ ] TODO: validation / constraints of values? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
+- [ ] TODO: assert our minimum schema? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
+- [ ] TODO: INT? Does it exist? [GdsRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsRecord.java)
+- [ ] TODO: INT_ARRAY? [GdsRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsRecord.java)
+- [ ] TODO: String? Object? What should we do? [GdsRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsRecord.java)
+- [ ] TODO: apply "filters" to labels or types...for now just get all [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: inspect the schema via the Graph instance...need to change the Job message type [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: support more than 1 property in the request. Use first filter for now as label filter [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: GDS lets us batch access to lists of nodes...future opportunity? [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: pull in reference to LoginContext and use it in the Transaction [Neo4jTransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/Neo4jTransactionApiJob.java)
+- [ ] TODO: standardize on matching logic? case sensitive/insensitive? [StatusHandler.java](./src/main/java/org/neo4j/arrow/action/StatusHandler.java)
+- [ ] TODO: make an auth handler that isn't this silly [HorribleBasicAuthValidator.java](./src/main/java/org/neo4j/arrow/auth/HorribleBasicAuthValidator.java)
+- [ ] TODO: do we need to allocate explicitly? [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
+- [ ] TODO: handle batches of records to decrease frequency of calls [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
+- [ ] TODO: refactor to using fixed arrays for speed [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
