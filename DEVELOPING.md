@@ -1,10 +1,19 @@
 # So you wanna hack on neo4j-arrow?
 
 You'll need:
-* A JDK11 distro
-* Familiarity with Gradle
+* A JDK11 [distro](https://adoptopenjdk.net/)
+* Familiarity with [Gradle](https://gradle.org/)
 * Comfort with Java's async `CompletableFuture` framework
-* An iron will?
+
+## Project Core Values
+The following drive decision-making with respect to scope of `neo4j-arrow`:
+
+1. **Performance** -- consumers or producers of data should be able to read or 
+   update the graph as fast as the network can transmit bytes
+2. **Simplicity** -- how easily can a Data Scientist/Engineer get the data they 
+   need from the graph?
+3. **Interoperability** -- can the data be easily used/stored/retransmitted by 
+   the tools Data Scientists/Engineers already use
 
 ## Project Structure
 The code is broken up into multiple projects.
@@ -103,14 +112,22 @@ format (in utf-8):
 ```
 
 ### Action Handlers
-TBD
+Action Handlers define new Arrow Flight RPC action types available, provide 
+descriptions of the action offered, and perform any servicing of the actions 
+when called by clients.
+
+The way `neo4j-arrow` uses actions is primarily around Job control: 
+submitting new stream-producing jobs and checking on their status.
+
+Any new action handler gets registered with the App (or Producer).
 
 ### Row-based Records
 This is part of the "secret sauce" to adapting Arrow to Neo4j. For now, the 
 short description is this is where any mapping of native "types" (from Neo4j 
 Driver Records, GDS values, etc.) to a generalized type occurs.
 
-TBD
+Supporting the flexibility provided by Bolt/Packstream is fundamentally 
+opposed to the 
 
 ## TODO!
 Some high level TODOs not in code comments:
@@ -124,6 +141,8 @@ Some high level TODOs not in code comments:
 - [ ] Multiple node property support for GDS Jobs
 - [ ] Relationship properties!
 - [ ] Property filters (label-based, rel-type based)
+- [ ] Pivot away from RPC actions and just expose Graphs as discoverable 
+  flights?
 
 ## TODO's pulled from the code
 > last updated 18 Aug 2021 via [todo.sh](./todo.sh)
