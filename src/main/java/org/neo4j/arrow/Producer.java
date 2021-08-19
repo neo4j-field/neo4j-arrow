@@ -24,11 +24,16 @@ import org.neo4j.arrow.job.JobSummary;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -91,31 +96,32 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         // XXX: need to investigate optimal pre-allocation of memory for streams
         logger.info("producing stream for ticket {}", ticket);
-        BufferAllocator streamAllocator = allocator.newChildAllocator(
+        final BufferAllocator streamAllocator = allocator.newChildAllocator(
                 String.format("stream-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                1024L, Config.maxStreamMemory);
+                256L * 1024L * 1024L, Config.maxStreamMemory);
         if (streamAllocator == null) {
             logger.error("Oh no!", new Exception("Couldn't create child allocator!"));
             listener.error(CallStatus.INTERNAL.withDescription("Failed to create child memory allocator")
                     .toRuntimeException());
         }
 
-        try {
-            final VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), streamAllocator);
+        // We need to dynamically build out our vectors based on the identified schema
+        final Map<String, FieldVector> vectorMap = new ConcurrentHashMap<>();
+        // Complex things like Lists need special writers to fill them :-(
+        final Map<String, BaseWriter.ListWriter> writerMap = new ConcurrentHashMap<>();
+        // Track current batch size
+        final AtomicInteger cnt = new AtomicInteger(0);
+        // Our flushing Future
+        final AtomicReference<CompletableFuture<Void>> flushRef = new AtomicReference<>(CompletableFuture.runAsync(() -> {}));
+
+        try (VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), streamAllocator)) {
             final VectorLoader loader = new VectorLoader(root);
-            final AtomicInteger cnt = new AtomicInteger(0);
-
-            // We need to dynamically build out our vectors based on the identified schema
-            final HashMap<String, FieldVector> vectorMap = new HashMap<>();
-            // Complex things like Lists need special writers to fill them :-(
-            final Map<String, BaseWriter.ListWriter> writerMap = new ConcurrentHashMap<>();
-
             logger.info("using schema: {}", info.getSchema().toJson());
 
-            // TODO: do we need to allocate explicitly?
+            // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
             for (Field field : fieldList) {
-                FieldVector fieldVector = root.getVector(field);
+                FieldVector fieldVector = field.createVector(streamAllocator);
                 fieldVector.setInitialCapacity(Config.arrowBatchSize);
                 fieldVector.allocateNew();
                 vectorMap.put(field.getName(), fieldVector);
@@ -132,8 +138,10 @@ public class Producer implements FlightProducer, AutoCloseable {
                     int idx = cnt.getAndIncrement();
 
                     // TODO: refactor to using fixed arrays for speed
-                    for (Field field : fieldList) {
-                        final RowBasedRecord.Value value = record.get(field.getName());
+                    //for (Field field : fieldList) {
+                    for (int n=0; n< fieldList.size(); n++) {
+                        final Field field = fieldList.get(n);
+                        final RowBasedRecord.Value value = record.get(n);
                         final FieldVector vector = vectorMap.get(field.getName());
 
                         if (vector instanceof IntVector) {
@@ -196,14 +204,25 @@ public class Producer implements FlightProducer, AutoCloseable {
                         }
                     }
 
+                    // Flush at our batch size limit and reset our batch states.
                     if ((idx + 1) == Config.arrowBatchSize) {
-                        flush(listener, streamAllocator, loader, vectorMap, fieldList, idx);
+                        // yolo?
+                        final List<ValueVector> fieldVectors = new ArrayList<>();
+                        for (Field field : fieldList) {
+                            final FieldVector vector = vectorMap.get(field.getName());
+                            fieldVectors.add(vector);
+                        }
+                        flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
+                            logger.info("flushing...");
+                            flush(listener, streamAllocator, loader, fieldVectors, idx);
+                        }));
                         cnt.set(0);
                         writerMap.clear();
-                        vectorMap.values().clear();
+                        vectorMap.clear();
 
+                        // Reset FieldVectors and allocate fresh memory
                         for (Field field : fieldList) {
-                            FieldVector fieldVector = root.getVector(field);
+                            FieldVector fieldVector = field.createVector(streamAllocator);
                             fieldVector.setInitialCapacity(Config.arrowBatchSize);
                             fieldVector.allocateNew();
                             vectorMap.put(field.getName(), fieldVector);
@@ -219,32 +238,46 @@ public class Producer implements FlightProducer, AutoCloseable {
             });
 
             // Add a job cancellation hook
-            listener.setOnCancelHandler(() -> job.cancel(true));
+            listener.setOnCancelHandler(() -> {
+                logger.info("client disconnected or cancelled stream");
+                job.cancel(true);
+            });
 
             // For now, we just block until the job finishes and then tell the client we're complete
-            JobSummary summary = job.get(15, TimeUnit.MINUTES);
+            JobSummary summary = () -> "unknown";
+            try {
+                summary = job.get(15, TimeUnit.MINUTES);
+            } catch (Exception e) {
+                job.cancel(true);
+            }
 
             // Final flush
-            if (cnt.get() > 0)
-                flush(listener, streamAllocator, loader, vectorMap, fieldList, cnt.decrementAndGet());
+            if (cnt.get() > 0) {
+                final List<ValueVector> fieldVectors = new ArrayList<>();
+                for (Field field : fieldList) {
+                    final FieldVector vector = vectorMap.get(field.getName());
+                    fieldVectors.add(vector);
+                }
+                flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
+                    logger.info("flushing remainder...");
+                    flush(listener, streamAllocator, loader, fieldVectors, cnt.decrementAndGet());
+                }));
+            }
 
-            logger.info("finished get_stream, summary: {}", summary);
-
+            // Wait for all flushes.
+            flushRef.get().thenRun(() -> logger.info("flushing complete!")).toCompletableFuture().join();
+            vectorMap.values().forEach(ValueVector::close);
             listener.completed();
-            flightMap.remove(ticket);
-            AutoCloseables.close(writerMap.values());
-            AutoCloseables.close(vectorMap.values());
-            AutoCloseables.close(root);
-
         } catch (Exception e) {
             e.printStackTrace();
             logger.error("ruh row", e);
             throw CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException();
         } finally {
             try {
+                flightMap.remove(ticket);
                 AutoCloseables.close(job, streamAllocator);
             } catch (Exception e) {
-                logger.error("problem when auto-closing after get_stream", e);
+                logger.error("Problem when auto-closing after get_stream", e);
             }
         }
     }
@@ -252,49 +285,49 @@ public class Producer implements FlightProducer, AutoCloseable {
     /**
      * Flush out our vectors into the stream. At this point, all data is Arrow-based.
      *
-     * @param listener reference to the {@link org.apache.arrow.flight.FlightProducer.ServerStreamListener}
+     * @param listener reference to the {@link ServerStreamListener}
      * @param streamAllocator reference to the stream's memory allocator
      * @param loader reference to the {@link VectorLoader}
-     * @param vectorMap reference to the {@link Producer}'s map of field names to {@link FieldVector}s
-     * @param fieldList list of {@link Field}s
+     * @param vectors
      * @param idx offset within the stream
      */
     private void flush(ServerStreamListener listener, BufferAllocator streamAllocator, VectorLoader loader,
-                       Map<String, FieldVector> vectorMap, List<Field> fieldList, int idx) {
+                       List<ValueVector> vectors, int idx) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
-        for (Field field : fieldList) {
-            final FieldVector vector = vectorMap.get(field.getName());
-            logger.debug(String.format("batching vector %s: %s", field.getName(), vector.toString()));
-            vector.setValueCount(idx + 1);
+        try {
+            for (ValueVector vector : vectors) {
+                logger.debug("flushing vector {}", vector.getName());
+                vector.setValueCount(idx + 1);
+                nodes.add(new ArrowFieldNode(idx + 1, 0));
 
-            nodes.add(new ArrowFieldNode(idx + 1, 0));
+                if (vector instanceof BaseListVector) {
+                    // Variable-width ListVectors have some special crap we need to deal with
+                    if (vector instanceof ListVector) {
+                        ((ListVector) vector).setLastSet(idx + 1);
+                        buffers.add(vector.getValidityBuffer());
+                        buffers.add(vector.getOffsetBuffer());
+                    } else {
+                        buffers.add(vector.getValidityBuffer());
+                    }
 
-            if (vector instanceof BaseListVector) {
-                // Variable-width ListVectors have some special crap we need to deal with
-                if (vector instanceof ListVector) {
-                    ((ListVector) vector).setLastSet(idx + 1);
-                    buffers.add(vector.getValidityBuffer());
-                    buffers.add(vector.getOffsetBuffer());
+                    for (FieldVector child : ((BaseListVector)vector).getChildrenFromFields()) {
+                        logger.debug("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
+                        nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
+                        buffers.addAll(List.of(child.getBuffers(false)));
+                    }
+
                 } else {
-                    buffers.add(vector.getValidityBuffer());
-                }
-
-                for (FieldVector child : vector.getChildrenFromFields()) {
-                    logger.debug("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
-                    nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
-                    buffers.addAll(List.of(child.getBuffers(false)));
-                }
-
-            } else {
-                for (ArrowBuf buf : vector.getBuffers(false)) {
-                    logger.debug("adding buf {} for vector {}", buf, vector.getName());
-                    buffers.add(buf);
+                    for (ArrowBuf buf : vector.getBuffers(false)) {
+                        logger.debug("adding buf {} for vector {}", buf, vector.getName());
+                        buffers.add(buf);
+                    }
                 }
             }
+        } catch (Exception e) {
+            logger.error("error preparing batch", e);
         }
-
         logger.debug("ready to batch {} nodes with {} buffers", nodes.size(), buffers.size());
 
         // The actual data transmission...
@@ -304,9 +337,14 @@ public class Producer implements FlightProducer, AutoCloseable {
             logger.info(String.format("put batch of %,d rows", batch.getLength()));
             logger.debug("{}", streamAllocator);
         } catch (Exception e) {
-            e.printStackTrace();
             logger.error(e.getMessage(), e);
             listener.error(CallStatus.UNKNOWN.withDescription("unknown error during batching").toRuntimeException());
+        }
+
+        // We need to close our reference to the ValueVector to decrement the ref count in the
+        // underlying buffers.
+        for (ValueVector vector : vectors) {
+            vector.close();
         }
     }
 

@@ -66,7 +66,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     }
 
     protected void onCompletion(JobSummary summary) {
-        logger.info("Completed job {}", firstRecord);
+        logger.info("Completed job {}", jobId);
         setStatus(Status.COMPLETE);
         jobSummary.complete(summary);
     }
@@ -75,7 +75,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         if (!futureConsumer.isDone())
             futureConsumer.complete(consumer);
         else
-            logger.error("consumer already supplied for job {}", this);
+            logger.error("Consumer already supplied for job {}", this);
     }
 
 

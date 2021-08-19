@@ -35,13 +35,11 @@ public class Client implements AutoCloseable {
     }
 
     final private BufferAllocator allocator;
-    final private Location location;
     final private FlightClient client;
     final private CredentialCallOption option;
 
     public Client(BufferAllocator allocator, Location location) {
         this.allocator = allocator;
-        this.location = location;
 
         client = FlightClient.builder()
                 .allocator(allocator)
@@ -112,7 +110,7 @@ public class Client implements AutoCloseable {
             } catch (FlightRuntimeException runtimeException) {
                 if (runtimeException.status().code() != FlightStatusCode.NOT_FOUND)
                     throw runtimeException;
-                Thread.sleep(100);
+                Thread.sleep(1000);
             }
             retries--;
         }
@@ -129,7 +127,7 @@ public class Client implements AutoCloseable {
                 if (runtimeException.status().code() != FlightStatusCode.NOT_FOUND)
                     throw runtimeException;
                 logger.info("waiting before trying again...");
-                Thread.sleep(100);
+                Thread.sleep(1000);
             }
             retries--;
         }
@@ -142,7 +140,7 @@ public class Client implements AutoCloseable {
 
         try {
             logger.info("starting client connection to {}", location.getUri());
-            allocator = new RootAllocator(Integer.MAX_VALUE);
+            allocator = new RootAllocator(Long.MAX_VALUE);
             client = new Client(allocator, location);
 
             CypherMessage msg = new CypherMessage("neo4j", "UNWIND range(1, $rows) AS row\n" +
