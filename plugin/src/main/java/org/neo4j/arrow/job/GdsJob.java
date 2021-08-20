@@ -3,6 +3,7 @@ package org.neo4j.arrow.job;
 import org.neo4j.arrow.GdsRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.graphalgo.NodeLabel;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
@@ -51,28 +52,32 @@ public class GdsJob extends Job {
             // TODO: inspect the schema via the Graph instance...need to change the Job message type
             final PrimitiveLongIterator iterator = graph.nodeIterator();
 
-            // TODO: support more than 1 property in the request. Use first filter for now as label filter
-            final String propertyName = msg.getProperties().get(0);
-            final NodeProperties properties = store.nodePropertyValues(propertyName);
-
-            if (properties == null) {
-                log.error("no node property found for %s", propertyName);
-                return false;
+            // Make sure we have the requested node properties
+            for (String key : msg.getProperties()) {
+                if (!store.hasNodeProperty(store.nodeLabels(), key)) {
+                    log.error("no node property found for %s", key);
+                    return false;
+                }
             }
+            final String[] keys = msg.getProperties().toArray(new String[0]);
+            final NodeProperties[] propertiesArray = new NodeProperties[keys.length];
+            for (int i=0; i<keys.length; i++)
+                propertiesArray[i] = store.nodePropertyValues(keys[i]);
 
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
-            onFirstRecord(GdsRecord.wrap(nodeId, propertyName, properties));
-            log.info("got first record");
-            log.info(String.format("  %s -> %s", propertyName, properties.valueType()));
+            onFirstRecord(GdsRecord.wrap(nodeId, keys, propertiesArray));
+            log.debug("got first record");
+            for (int i=0; i<keys.length; i++)
+                log.info("  %s -> %s", keys[i], propertiesArray[i].valueType());
 
             final Consumer<RowBasedRecord> consumer = futureConsumer.join();
 
             // Blast off!
             // TODO: GDS lets us batch access to lists of nodes...future opportunity?
-            consumer.accept(GdsRecord.wrap(nodeId, propertyName, properties));
+            consumer.accept(GdsRecord.wrap(nodeId, keys, propertiesArray));
             while (iterator.hasNext()) {
-                consumer.accept(GdsRecord.wrap(iterator.next(), propertyName, properties));
+                consumer.accept(GdsRecord.wrap(iterator.next(), keys, propertiesArray));
             }
 
             log.info("finishing stream");
@@ -95,7 +100,7 @@ public class GdsJob extends Job {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
         future.cancel(true);
     }
 }
