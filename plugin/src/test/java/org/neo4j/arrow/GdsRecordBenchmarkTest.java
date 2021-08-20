@@ -107,7 +107,7 @@ public class GdsRecordBenchmarkTest {
     }
 
     @Test
-    @Timeout(value = 1, unit = TimeUnit.MINUTES)
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
     public void testSpeed() throws Exception {
         final BufferAllocator serverAllocator = new RootAllocator(Integer.MAX_VALUE);
         final BufferAllocator clientAllocator = new RootAllocator(Integer.MAX_VALUE);
@@ -119,7 +119,7 @@ public class GdsRecordBenchmarkTest {
              Client client = new Client(clientAllocator, location)) {
 
             app.registerHandler(new GdsActionHandler(
-                    (msg, mode, username, password) -> new NoOpJob(1_000_000, signal),
+                    (msg, mode, username, password) -> new NoOpJob(20_000_000, signal),
                     log));
             app.start();
 

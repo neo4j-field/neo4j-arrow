@@ -60,14 +60,14 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     }
 
     protected void onFirstRecord(RowBasedRecord record) {
-        logger.info("First record received {}", firstRecord);
+        logger.debug("First record received {}", firstRecord);
         setStatus(Status.PRODUCING);
         firstRecord.complete(record);
     }
 
     protected void onCompletion(JobSummary summary) {
-        logger.info("Completed job {}", jobId);
         setStatus(Status.COMPLETE);
+        logger.debug("{} complete", jobId);
         jobSummary.complete(summary);
     }
 
@@ -90,6 +90,10 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     @Override
     public boolean isDone() {
         return jobSummary.isDone();
+    }
+
+    public String getJobId() {
+        return jobId;
     }
 
     @Override

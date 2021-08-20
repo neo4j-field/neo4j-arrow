@@ -15,6 +15,7 @@ import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.TransferPair;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
@@ -97,8 +98,11 @@ public class Producer implements FlightProducer, AutoCloseable {
         // XXX: need to investigate optimal pre-allocation of memory for streams
         logger.info("producing stream for ticket {}", ticket);
         final BufferAllocator streamAllocator = allocator.newChildAllocator(
-                String.format("stream-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                256L * 1024L * 1024L, Config.maxStreamMemory);
+                String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
+                64L * 1024L * 1024L, Config.maxStreamMemory);
+        final BufferAllocator transmitAllocator = allocator.newChildAllocator(
+                String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
+                64L * 1024L * 1024L, Config.maxStreamMemory);
         if (streamAllocator == null) {
             logger.error("Oh no!", new Exception("Couldn't create child allocator!"));
             listener.error(CallStatus.INTERNAL.withDescription("Failed to create child memory allocator")
@@ -106,7 +110,7 @@ public class Producer implements FlightProducer, AutoCloseable {
         }
 
         // We need to dynamically build out our vectors based on the identified schema
-        final Map<String, FieldVector> vectorMap = new ConcurrentHashMap<>();
+        final List<FieldVector> vectorList = new ArrayList<>();
         // Complex things like Lists need special writers to fill them :-(
         final Map<String, BaseWriter.ListWriter> writerMap = new ConcurrentHashMap<>();
         // Track current batch size
@@ -124,7 +128,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 FieldVector fieldVector = field.createVector(streamAllocator);
                 fieldVector.setInitialCapacity(Config.arrowBatchSize);
                 fieldVector.allocateNew();
-                vectorMap.put(field.getName(), fieldVector);
+                vectorList.add(fieldVector);
             }
 
             // Signal the client that we're about to start the stream
@@ -142,7 +146,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     for (int n=0; n< fieldList.size(); n++) {
                         final Field field = fieldList.get(n);
                         final RowBasedRecord.Value value = record.get(n);
-                        final FieldVector vector = vectorMap.get(field.getName());
+                        final FieldVector vector = vectorList.get(n);
 
                         if (vector instanceof IntVector) {
                             ((IntVector) vector).set(idx, value.asInt());
@@ -207,26 +211,31 @@ public class Producer implements FlightProducer, AutoCloseable {
                     // Flush at our batch size limit and reset our batch states.
                     if ((idx + 1) == Config.arrowBatchSize) {
                         // yolo?
-                        final List<ValueVector> fieldVectors = new ArrayList<>();
-                        for (Field field : fieldList) {
-                            final FieldVector vector = vectorMap.get(field.getName());
-                            fieldVectors.add(vector);
+                        final ArrayList<ValueVector> copy = new ArrayList<>();
+                        for (ValueVector vector : vectorList) {
+                            TransferPair tp = vector.getTransferPair(transmitAllocator);
+                            tp.transfer();
+                            copy.add(tp.getTo());
                         }
                         flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
-                            logger.info("flushing...");
-                            flush(listener, streamAllocator, loader, fieldVectors, idx);
+                            logger.debug("flushing...");
+                            flush(listener, transmitAllocator, loader, copy, idx);
                         }));
                         cnt.set(0);
-                        writerMap.clear();
-                        vectorMap.clear();
-
+                        //writerMap.clear();
+                        //vectorList.clear();
+                        vectorList.forEach(FieldVector::reAlloc);
+                        writerMap.values().forEach(writer -> writer.setPosition(0));
+/*
                         // Reset FieldVectors and allocate fresh memory
                         for (Field field : fieldList) {
                             FieldVector fieldVector = field.createVector(streamAllocator);
                             fieldVector.setInitialCapacity(Config.arrowBatchSize);
-                            fieldVector.allocateNew();
-                            vectorMap.put(field.getName(), fieldVector);
+                            fieldVector.reAlloc();
+                            vectorList.add(fieldVector);
                         }
+*/
+
                     }
                 } catch (Exception e) {
                     if (errored.compareAndSet(false, true)) {
@@ -253,20 +262,19 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Final flush
             if (cnt.get() > 0) {
-                final List<ValueVector> fieldVectors = new ArrayList<>();
-                for (Field field : fieldList) {
-                    final FieldVector vector = vectorMap.get(field.getName());
-                    fieldVectors.add(vector);
+                final ArrayList<ValueVector> copy = new ArrayList<>();
+                for (FieldVector vector : vectorList) {
+                    copy.add(vector);
                 }
                 flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
-                    logger.info("flushing remainder...");
-                    flush(listener, streamAllocator, loader, fieldVectors, cnt.decrementAndGet());
+                    logger.debug("flushing remainder...");
+                    flush(listener, transmitAllocator, loader, copy, cnt.decrementAndGet());
                 }));
             }
 
             // Wait for all flushes.
-            flushRef.get().thenRun(() -> logger.info("flushing complete!")).toCompletableFuture().join();
-            vectorMap.values().forEach(ValueVector::close);
+            flushRef.get().thenRun(() -> logger.debug("flushing complete!")).toCompletableFuture().join();
+            vectorList.forEach(FieldVector::close);
             listener.completed();
         } catch (Exception e) {
             e.printStackTrace();
@@ -275,7 +283,7 @@ public class Producer implements FlightProducer, AutoCloseable {
         } finally {
             try {
                 flightMap.remove(ticket);
-                AutoCloseables.close(job, streamAllocator);
+                AutoCloseables.close(job, streamAllocator, transmitAllocator);
             } catch (Exception e) {
                 logger.error("Problem when auto-closing after get_stream", e);
             }
@@ -284,7 +292,6 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     /**
      * Flush out our vectors into the stream. At this point, all data is Arrow-based.
-     *
      * @param listener reference to the {@link ServerStreamListener}
      * @param streamAllocator reference to the stream's memory allocator
      * @param loader reference to the {@link VectorLoader}
@@ -292,7 +299,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      * @param idx offset within the stream
      */
     private void flush(ServerStreamListener listener, BufferAllocator streamAllocator, VectorLoader loader,
-                       List<ValueVector> vectors, int idx) {
+                       ArrayList<ValueVector> vectors, int idx) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
