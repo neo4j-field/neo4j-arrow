@@ -1,9 +1,7 @@
 package org.neo4j.arrow;
 
-import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
