@@ -63,8 +63,8 @@ public class GdsRecordBenchmarkTest {
             1f, 2f, 3f, 4f, 5f, 6f }; // 256
 
     private static RowBasedRecord getRecord() {
-        final RowBasedRecord record = new GdsRecord(1, List.of("embedding"),
-                List.of(GdsRecord.wrapFloatArray(PAYLOAD)));
+        final RowBasedRecord record = new GdsNodeRecord(1, new String[] {"embedding"},
+                new RowBasedRecord.Value[] {GdsNodeRecord.wrapFloatArray(PAYLOAD)});
         return record;
     }
 
@@ -119,12 +119,12 @@ public class GdsRecordBenchmarkTest {
              Client client = new Client(clientAllocator, location)) {
 
             app.registerHandler(new GdsActionHandler(
-                    (msg, mode, username, password) -> new NoOpJob(20_000_000, signal),
+                    (msg, mode, username, password) -> new NoOpJob(2_000_000, signal),
                     log));
             app.start();
 
             final long start = System.currentTimeMillis();
-            final GdsMessage msg = new GdsMessage("neo4j", "mygraph", List.of("fastRp"), List.of());
+            final GdsMessage msg = new GdsMessage("neo4j", "mygraph", GdsMessage.RequestType.NODE, List.of("fastRp"), List.of());
             final Action action = new Action(GdsActionHandler.NODE_PROPS_ACTION, msg.serialize());
             client.run(action);
             final long stop = signal.join();

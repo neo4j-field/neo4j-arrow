@@ -9,7 +9,7 @@ import java.util.List;
 public class GdsMessageTest {
     @Test
     public void testGdsMessageSerialization() throws IOException {
-        final GdsMessage msg = new GdsMessage("db1", "graph1", List.of("prop1", "prop2"), List.of("filter1"));
+        final GdsMessage msg = new GdsMessage("db1", "graph1", GdsMessage.RequestType.NODE, List.of("prop1", "prop2"), List.of("filter1"));
         final byte[] bytes = msg.serialize();
 
         final GdsMessage msg2 = GdsMessage.deserialize(bytes);

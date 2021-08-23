@@ -67,7 +67,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
 
     protected void onCompletion(JobSummary summary) {
         setStatus(Status.COMPLETE);
-        logger.debug("{} complete", jobId);
+        logger.info("Job {} completed", jobId);
         jobSummary.complete(summary);
     }
 

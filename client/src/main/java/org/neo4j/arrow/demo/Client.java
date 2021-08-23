@@ -66,7 +66,7 @@ public class Client implements AutoCloseable {
 
             while (stream.next()) {
                 try (ArrowRecordBatch batch = unloader.getRecordBatch()) {
-                    logger.info("got batch, sized: {}", batch.getLength());
+                    logger.debug("got batch, sized: {}", batch.getLength());
                     loader.load(batch);
                     cnt += batch.getLength();
                     for (FieldVector vector : root.getFieldVectors())
@@ -75,7 +75,7 @@ public class Client implements AutoCloseable {
                         logger.info(String.format("Current Row @ %,d: [fields:%s, batchLen: %,d]",
                                 cnt, root.getSchema().getFields(), batch.getLength()));
                         for (FieldVector vector : root.getFieldVectors()) {
-                            logger.info(String.format("vector %s: %,d bytes", vector.getName(), vector.getBufferSize()));
+                            logger.debug(String.format("vector %s: %,d bytes", vector.getName(), vector.getBufferSize()));
                         }
                     }
                 }

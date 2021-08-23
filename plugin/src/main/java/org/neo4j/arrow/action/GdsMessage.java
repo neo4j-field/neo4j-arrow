@@ -18,8 +18,21 @@ public class GdsMessage {
 
     static private final ObjectMapper mapper = new ObjectMapper();
 
+    public enum RequestType {
+        NODE("node"),
+        RELATIONSHIP("relationship");
+
+        final String type;
+
+        RequestType(String type) {
+            this.type = type;
+        }
+    }
+
     public static final String JSON_KEY_DATABASE_NAME = "db";
     public static final String JSON_KEY_GRAPH_NAME = "graph";
+    // TODO: "type" is pretty vague...needs a better name
+    public static final String JSON_KEY_REQUEST_TYPE = "type";
     public static final String JSON_KEY_FILTER_LIST = "filters";
     public static final String JSON_KEY_PROPERTY_LIST = "properties";
 
@@ -27,6 +40,8 @@ public class GdsMessage {
     private final String dbName;
     /** Name of the Graph (projection) from the Graph Catalog. Required. */
     private final String graphName;
+    /** Type of data request: either "node" or "relationship". */
+    private final RequestType requestType;
     /** List of "filters" to apply to the Graph when generating results. Optional. */
     private final List<String> filters;
     /** List of properties to read or write. Optional for reads (Can be empty for "all" properties
@@ -34,9 +49,10 @@ public class GdsMessage {
      */
     private final List<String> properties;
 
-    public GdsMessage(String dbName, String graphName, List<String> properties, List<String> filters) {
+    public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters) {
         this.dbName = dbName;
         this.graphName = graphName;
+        this.requestType = requestType;
         this.properties = properties;
         this.filters = filters;
 
@@ -52,6 +68,7 @@ public class GdsMessage {
             return mapper.writeValueAsString(
                     Map.of(JSON_KEY_DATABASE_NAME, dbName,
                             JSON_KEY_GRAPH_NAME, graphName,
+                            JSON_KEY_REQUEST_TYPE, requestType,
                             JSON_KEY_FILTER_LIST, filters,
                             JSON_KEY_PROPERTY_LIST, properties))
                     .getBytes(StandardCharsets.UTF_8);
@@ -74,6 +91,9 @@ public class GdsMessage {
         // TODO: assert our minimum schema?
         final String graphName = params.get(JSON_KEY_GRAPH_NAME).toString();
 
+        final RequestType requestType = RequestType.valueOf(
+                params.getOrDefault(JSON_KEY_REQUEST_TYPE, RequestType.NODE).toString());
+
         List<String> filters = List.of();
         Object obj = params.getOrDefault(JSON_KEY_FILTER_LIST, filters);
         if (obj instanceof List) {
@@ -86,7 +106,7 @@ public class GdsMessage {
             properties = ((List<?>)obj).stream().map(Object::toString).collect(Collectors.toList());
         }
 
-        return new GdsMessage(dbName, graphName, properties, filters);
+        return new GdsMessage(dbName, graphName, requestType, properties, filters);
     }
 
     public String getDbName() {
@@ -96,6 +116,8 @@ public class GdsMessage {
     public String getGraphName() {
         return graphName;
     }
+
+    public RequestType getRequestType() { return requestType; }
 
     public List<String> getFilters() {
         return filters;
@@ -108,8 +130,9 @@ public class GdsMessage {
     @Override
     public String toString() {
         return "GdsMessage{" +
-                "dbName='" + dbName + '\'' +
-                ", graphName='" + graphName + '\'' +
+                "db='" + dbName + '\'' +
+                ", graph='" + graphName + '\'' +
+                ", type='" + requestType + '\'' +
                 ", filters=" + filters +
                 ", properties=" + properties +
                 '}';

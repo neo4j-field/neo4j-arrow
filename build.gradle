@@ -12,6 +12,7 @@ repositories {
 
 project.ext {
     arrowFlightGrpc = 'org.apache.arrow:flight-grpc:5.0.0'
+    arrowCompression = 'org.apache.arrow:arrow-compression:5.0.0'
     neo4j = [
         driverVersion: '4.3.3',
         serverVersion: '4.3.3',
@@ -24,7 +25,8 @@ project.ext {
 dependencies {
     implementation (
             [group: 'org.slf4j', name: 'slf4j-api', version: project.ext.sl4jVersion],
-            project.ext.arrowFlightGrpc
+            project.ext.arrowFlightGrpc,
+            project.ext.arrowCompression
     )
     testImplementation (
             [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: project.ext.jupiterVersion],
