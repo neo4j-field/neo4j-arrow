@@ -93,7 +93,7 @@ project(':client') {
     version = parent.version
 
     application {
-        mainClass.set("org.neo4j.arrow.Client")
+        mainClass.set("org.neo4j.arrow.demo.Client")
     }
 
     repositories {
@@ -104,7 +104,8 @@ project(':client') {
         implementation (
                 rootProject,
                 rootProject.ext.arrowFlightGrpc,
-                project(':common')
+                project(':common'),
+                project(':plugin')
         )
         runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion
     }
@@ -245,6 +246,7 @@ project(':plugin') {
         )
         testImplementation (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
+                [group: 'org.junit.jupiter', name: 'junit-jupiter-params', version: rootProject.ext.jupiterVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
                 project(':client'),
                 rootProject.ext.arrowFlightGrpc

@@ -222,7 +222,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                             final ValueVector to = tp.getTo();
                             copy.add(to);
                         }
-                        logger.info("adding flusher (depth={})", flushers.incrementAndGet());
+                        logger.debug("adding flusher (depth={})", flushers.incrementAndGet());
                         flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
                             logger.debug("flushing..");
                             flush(listener, loader, copy, idx);
@@ -328,10 +328,7 @@ public class Producer implements FlightProducer, AutoCloseable {
         try (ArrowRecordBatch batch = new ArrowRecordBatch(idx + 1, nodes, buffers,
                 CompressionUtil.createBodyCompression(new Lz4CompressionCodec()))) {
             loader.load(batch);
-            final long start = System.currentTimeMillis();
             listener.putNext();
-            logger.info(String.format("batched %,d rows in %,d ms", batch.getLength(),
-                    System.currentTimeMillis() - start));
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());

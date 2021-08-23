@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 
 import java.util.ArrayList;
@@ -50,11 +51,6 @@ public abstract class GdsRecord implements RowBasedRecord {
             @Override
             public List<Double> asDoubleList() {
                 return values.stream().mapToDouble(Long::doubleValue).boxed().collect(Collectors.toList());
-            }
-
-            @Override
-            public double[] asDoubleArray() {
-                return null;
             }
 
             @Override
@@ -109,11 +105,6 @@ public abstract class GdsRecord implements RowBasedRecord {
                 return IntStream.range(0, floats.length)
                         .mapToObj(idx -> (double) floats[idx])
                         .collect(Collectors.toList());
-            }
-
-            @Override
-            public double[] asDoubleArray() {
-                return null;
             }
 
             @Override

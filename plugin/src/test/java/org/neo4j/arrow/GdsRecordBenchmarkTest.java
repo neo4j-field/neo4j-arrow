@@ -7,6 +7,9 @@ import org.apache.arrow.memory.RootAllocator;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.demo.Client;
@@ -18,6 +21,11 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.stream.DoubleStream;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 /**
  * A simple local perf test, nothing fancy. Just make sure data can flow and flow effectively. Used
@@ -33,39 +41,29 @@ public class GdsRecordBenchmarkTest {
         log = new Log4jLogProvider(System.out).getLog(GdsRecordBenchmarkTest.class);
     }
 
-    // 256 floats!
-    private static final float[] PAYLOAD = {
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 10
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 20
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 30
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 40
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 50
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 60
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 70
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 80
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 90
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 100
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 110
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 120
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 130
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 140
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 150
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 160
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 170
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 180
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 190
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 200
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 210
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 220
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 230
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 240
-            1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, // 250
-            1f, 2f, 3f, 4f, 5f, 6f }; // 256
+    private static RowBasedRecord getRecord(String type) {
+        switch (type) {
+            case "float":
+                float[] data = new float[256];
+                for (int i=0; i<256; i++)
+                    data[i] = (float)i;
+                return new GdsNodeRecord(1, new String[] {"embedding"},
+                        new RowBasedRecord.Value[] { GdsRecord.wrapFloatArray(data) },
+                        Function.identity());
+            case "double":
+                return new GdsNodeRecord(1, new String[] {"embedding"},
+                        new RowBasedRecord.Value[] {
+                                GdsRecord.wrapDoubleArray(
+                                        IntStream.range(1, 256).boxed().mapToDouble(Integer::doubleValue).toArray())
+                        }, Function.identity());
+            case "long":
+                return new GdsNodeRecord(1, new String[] {"embedding"},
+                        new RowBasedRecord.Value[] {
+                                GdsRecord.wrapLongArray(LongStream.range(1, 256).toArray())
+                        }, Function.identity());
+        }
 
-    private static RowBasedRecord getRecord() {
-        final RowBasedRecord record = new GdsNodeRecord(1, new String[] {"embedding"},
-                new RowBasedRecord.Value[] {GdsNodeRecord.wrapFloatArray(PAYLOAD)});
-        return record;
+        throw new RuntimeException("bad type");
     }
 
     private class NoOpJob extends Job {
@@ -73,14 +71,14 @@ public class GdsRecordBenchmarkTest {
         final CompletableFuture<Integer> future;
         final int numResults;
 
-        public NoOpJob(int numResults, CompletableFuture<Long> signal) {
+        public NoOpJob(int numResults, CompletableFuture<Long> signal, String type) {
             super();
             this.numResults = numResults;
 
             future = CompletableFuture.supplyAsync(() -> {
                 try {
                     log.info("Job starting");
-                    final RowBasedRecord record = getRecord();
+                    final RowBasedRecord record = getRecord(type);
                     onFirstRecord(record);
                     log.info("Job feeding");
                     Consumer<RowBasedRecord> consumer = super.futureConsumer.join();
@@ -106,9 +104,18 @@ public class GdsRecordBenchmarkTest {
         public void close() {}
     }
 
-    @Test
-    @Timeout(value = 5, unit = TimeUnit.MINUTES)
-    public void testSpeed() throws Exception {
+    private static Stream<Arguments> provideDifferentNativeArrays() {
+        return Stream.of(
+                Arguments.of("long"),
+                Arguments.of("float"),
+                Arguments.of("double")
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideDifferentNativeArrays")
+    //@Timeout(value = 5, unit = TimeUnit.MINUTES)
+    public void testSpeed(String type) throws Exception {
         final BufferAllocator serverAllocator = new RootAllocator(Integer.MAX_VALUE);
         final BufferAllocator clientAllocator = new RootAllocator(Integer.MAX_VALUE);
 
@@ -119,7 +126,8 @@ public class GdsRecordBenchmarkTest {
              Client client = new Client(clientAllocator, location)) {
 
             app.registerHandler(new GdsActionHandler(
-                    (msg, mode, username, password) -> new NoOpJob(2_000_000, signal),
+                    (msg, mode, username, password) ->
+                            new NoOpJob(2_000_000, signal, type),
                     log));
             app.start();
 

@@ -68,7 +68,7 @@ public class GdsJob extends Job {
         future = CompletableFuture.supplyAsync(() -> {
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
-            onFirstRecord(GdsNodeRecord.wrap(nodeId, keys, propertiesArray));
+            onFirstRecord(GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId));
             log.debug("got first record");
             for (int i=0; i<keys.length; i++)
                 log.info("  %s -> %s", keys[i], propertiesArray[i].valueType());
@@ -78,9 +78,9 @@ public class GdsJob extends Job {
             // Blast off!
             // TODO: GDS lets us batch access to lists of nodes...future opportunity?
             final long start = System.currentTimeMillis();
-            consumer.accept(GdsNodeRecord.wrap(nodeId, keys, propertiesArray));
+            consumer.accept(GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId));
             while (iterator.hasNext()) {
-                consumer.accept(GdsNodeRecord.wrap(iterator.next(), keys, propertiesArray));
+                consumer.accept(GdsNodeRecord.wrap(iterator.next(), keys, propertiesArray, graph::toOriginalNodeId));
             }
             final long delta = System.currentTimeMillis() - start;
 

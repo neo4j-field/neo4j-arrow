@@ -12,13 +12,12 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.neo4j.arrow.Config;
-import org.neo4j.arrow.action.CypherActionHandler;
-import org.neo4j.arrow.action.CypherMessage;
-import org.neo4j.arrow.action.StatusHandler;
+import org.neo4j.arrow.action.*;
 import org.neo4j.arrow.job.Job;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 public class Client implements AutoCloseable {
@@ -133,20 +132,31 @@ public class Client implements AutoCloseable {
         }
     }
 
+    public static Action getAction(String[] args) {
+        if (args != null && args.length > 0 && args[0].equalsIgnoreCase("gds")) {
+            GdsMessage msg = new GdsMessage("neo4j", "mygraph", GdsMessage.RequestType.NODE,
+                    List.of("embedding"), List.of());
+            return new Action(GdsActionHandler.NODE_PROPS_ACTION, msg.serialize());
+        } else {
+            CypherMessage msg = new CypherMessage("neo4j", "UNWIND range(1, $rows) AS row\n" +
+                    "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
+                    Map.of("rows", 1_000_000, "dimension", 128));
+            return new Action(CypherActionHandler.CYPHER_READ_ACTION, msg.serialize());
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         final Location location = Location.forGrpcInsecure(Config.host, Config.port);
         BufferAllocator allocator = null;
         Client client = null;
+
+        Action action = getAction(args);
 
         try {
             logger.info("starting client connection to {}", location.getUri());
             allocator = new RootAllocator(Long.MAX_VALUE);
             client = new Client(allocator, location);
 
-            CypherMessage msg = new CypherMessage("neo4j", "UNWIND range(1, $rows) AS row\n" +
-                    "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
-                    Map.of("rows", 1_000_000, "dimension", 128));
-            Action action = new Action(CypherActionHandler.CYPHER_READ_ACTION, msg.serialize());
             client.run(action);
             logger.info("client finished!");
         } finally {

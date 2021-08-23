@@ -6,6 +6,7 @@ import org.neo4j.graphalgo.api.nodeproperties.ValueType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * Wrapper around a record of Nodes and properties from the in-memory graph in GDS.
@@ -19,14 +20,16 @@ import java.util.Objects;
 public class GdsNodeRecord extends GdsRecord {
     /** Represents the underlying node id */
     private final Value nodeId;
+    private Function<Long, Long> nodeIdResolver;
 
-    protected GdsNodeRecord(long nodeId, String[] keys, Value[] values) {
+    protected GdsNodeRecord(long nodeId, String[] keys, Value[] values, Function<Long, Long> nodeIdResolver) {
         super(keys, values);
-        this.nodeId = wrapScalar(ValueType.LONG, nodeId);
+        this.nodeId = wrapScalar(ValueType.LONG, nodeIdResolver.apply(nodeId));
+        this.nodeIdResolver = nodeIdResolver;
     }
 
-    protected GdsNodeRecord(long nodeId, List<String> keys, List<Value> values) {
-        this(nodeId, keys.toArray(new String[0]), values.toArray(new Value[0]));
+    protected GdsNodeRecord(long nodeId, List<String> keys, List<Value> values, Function<Long, Long> nodeIdResolver) {
+        this(nodeId, keys.toArray(new String[0]), values.toArray(new Value[0]), nodeIdResolver);
     }
 
     /**
@@ -37,16 +40,18 @@ public class GdsNodeRecord extends GdsRecord {
      * @param properties a reference to the {@link NodeProperties} interface for resolving the value
      * @return a new {@link GdsNodeRecord}
      */
-    public static GdsNodeRecord wrap(long nodeId, String fieldName, NodeProperties properties) {
-        return wrap(nodeId, new String[] { fieldName }, new NodeProperties[] { properties });
+    public static GdsNodeRecord wrap(long nodeId, String fieldName, NodeProperties properties,
+                                     Function<Long, Long> nodeIdResolver) {
+        return wrap(nodeId, new String[] { fieldName }, new NodeProperties[] { properties }, nodeIdResolver);
     }
 
-    public static GdsNodeRecord wrap(long nodeId, List<String> fieldNames, List<NodeProperties> propertiesList) {
-        return wrap(nodeId, fieldNames.toArray(new String[0]),
-                propertiesList.toArray(new NodeProperties[0]));
+    public static GdsNodeRecord wrap(long nodeId, List<String> fieldNames, List<NodeProperties> propertiesList,
+                                     Function<Long, Long> nodeIdResolver) {
+        return wrap(nodeId, fieldNames.toArray(new String[0]), propertiesList.toArray(new NodeProperties[0]), nodeIdResolver);
     }
 
-    public static GdsNodeRecord wrap(long nodeId, String[] fieldNames, NodeProperties[] propertiesArray) {
+    public static GdsNodeRecord wrap(long nodeId, String[] fieldNames, NodeProperties[] propertiesArray,
+                                     Function<Long, Long> nodeIdResolver) {
         final Value[] values = new Value[propertiesArray.length];
 
         assert fieldNames.length == values.length;
@@ -78,7 +83,7 @@ public class GdsNodeRecord extends GdsRecord {
             }
             values[i] = value;
         }
-        return new GdsNodeRecord(nodeId, fieldNames, values);
+        return new GdsNodeRecord(nodeId, fieldNames, values, nodeIdResolver);
     }
 
     @Override
