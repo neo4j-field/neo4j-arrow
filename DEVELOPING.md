@@ -39,6 +39,19 @@ On top of the core Flight concepts of `FlightServer`s and `FlightProducer`s,
 the `neo4j-arrow` project adds the concept of `Job`s and `ActionHandler`s 
 along with `RowBasedRecord`s.
 
+A quick cheat-sheet:
+* The `Producer` brokers `Actions` to `ActionHandlers` and requests to 
+  consume streams of data
+  * _If you want to customize the core streaming logic, look here._
+* `ActionHandlers` interpret RPC call, turning their `Action` bodies/payloads 
+  into `Messages` and use them to create `Jobs`.
+  * _If you want to create new `Actions`, build an `ActionHandler` and a new 
+    type of `Job`. Up to you how you deal with messages/payloads._
+* `Jobs` unofficially 
+
+> There's no formal interface or abstract class for `Messages` at the moment,
+> ...consider them POJOs?
+
 ### Jobs
 Jobs encapsulate the lifecycle of getting data in/out of the backend, which 
 in this case is Neo4j. Jobs have a very simplified state machine at their core:
@@ -126,8 +139,10 @@ This is part of the "secret sauce" to adapting Arrow to Neo4j. For now, the
 short description is this is where any mapping of native "types" (from Neo4j 
 Driver Records, GDS values, etc.) to a generalized type occurs.
 
-Supporting the flexibility provided by Bolt/Packstream is fundamentally 
-opposed to the 
+Other than the core `Producer` logic dealing with putting bytes on the wire, 
+this is one of the hotter code paths ripe for optimization. The `Value` 
+interface is designed to help translate the raw underlying scalar or array 
+value (no map support yet) into the appropriate Arrow `FieldVector`.
 
 ## TODO!
 Some high level TODOs not in code comments:
