@@ -19,8 +19,8 @@ public class GdsMessage {
     static private final ObjectMapper mapper = new ObjectMapper();
 
     public enum RequestType {
-        NODE("node"),
-        RELATIONSHIP("relationship");
+        node("node"),
+        relationship("relationship");
 
         final String type;
 
@@ -92,7 +92,7 @@ public class GdsMessage {
         final String graphName = params.get(JSON_KEY_GRAPH_NAME).toString();
 
         final RequestType requestType = RequestType.valueOf(
-                params.getOrDefault(JSON_KEY_REQUEST_TYPE, RequestType.NODE).toString());
+                params.getOrDefault(JSON_KEY_REQUEST_TYPE, RequestType.node).toString());
 
         List<String> filters = List.of();
         Object obj = params.getOrDefault(JSON_KEY_FILTER_LIST, filters);
