@@ -60,7 +60,7 @@ public class ArrowService extends LifecycleAdapter {
 
         app.registerHandler(new CypherActionHandler(
                 (msg, mode, username, password) ->
-                        new Neo4jTransactionApiJob(msg, mode, dbms, log)));
+                        new Neo4jTransactionApiJob(msg, username.get(), dbms, log)));
         app.registerHandler(new GdsActionHandler(
                 (msg, mode, username, password) ->
                         new GdsJob(msg, username.get(), log), log));

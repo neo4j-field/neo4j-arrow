@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -29,6 +30,8 @@ public class NativeAuthValidator
 
     private static final Base64.Encoder encoder = Base64.getEncoder();
     private static final Base64.Decoder decoder = Base64.getDecoder();
+
+    public static ConcurrentHashMap<String, LoginContext> contextMap = new ConcurrentHashMap<>();
 
     public NativeAuthValidator(Supplier<AuthManager> authManager, Log log) {
         this.authManager = authManager;
@@ -109,7 +112,9 @@ public class NativeAuthValidator
 
         switch (context.subject().getAuthenticationResult()) {
             case SUCCESS:
-                return () -> username;
+                // XXX: this is HORRIBLE /facepalm
+                contextMap.put(context.subject().username(), context);
+                return () -> context.subject().username();
             default:
                 throw CallStatus.UNAUTHENTICATED.withDescription("invalid username or password").toRuntimeException();
         }

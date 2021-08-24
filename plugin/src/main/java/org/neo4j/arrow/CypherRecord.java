@@ -23,7 +23,7 @@ public class CypherRecord implements RowBasedRecord {
         this.keys.addAll(this.map.keySet());
     }
 
-    protected static CypherRecord wrap(Map<String, Object> map) {
+    public static CypherRecord wrap(Map<String, Object> map) {
         return new CypherRecord(map);
     }
 
@@ -43,7 +43,7 @@ public class CypherRecord implements RowBasedRecord {
             @Override
             public int size() {
                 if (obj instanceof List)
-                    return ((List)obj).size();
+                    return ((List<?>)obj).size();
                 return 1;
             }
 
@@ -91,7 +91,7 @@ public class CypherRecord implements RowBasedRecord {
             @Override
             public List<Object> asList() {
                 if (obj instanceof List<?>) {
-                    return (List<Object>) obj;
+                    return new ArrayList<>(((List<?>) obj));
                 }
                 return List.of();
             }
@@ -127,7 +127,7 @@ public class CypherRecord implements RowBasedRecord {
                     return list.stream()
                             .mapToDouble(o -> wrapObject(o).asDouble())
                             .boxed()
-                            .map(d -> d.floatValue())
+                            .map(Double::floatValue)
                             .collect(Collectors.toList());
                 }
                 return List.of();

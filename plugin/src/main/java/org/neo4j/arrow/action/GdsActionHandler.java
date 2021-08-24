@@ -8,7 +8,6 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.Producer;
 import org.neo4j.arrow.RowBasedRecord;
-import org.neo4j.arrow.job.GdsJob;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.JobCreator;
 import org.neo4j.logging.Log;
@@ -54,6 +53,7 @@ public class GdsActionHandler implements ActionHandler {
     public Outcome handle(FlightProducer.CallContext context, Action action, Producer producer) {
         // XXX: assumption is we've set the peer identity to the username...
         // XXX: see org.neo4j.arrow.auth.NativeAuthValidator for details.
+
         final String username = context.peerIdentity();
         log.info("user '%s' attempting a GDS action: %s", username, action.getType());
         GdsMessage msg;

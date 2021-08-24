@@ -74,6 +74,7 @@ public class CypherActionHandler implements ActionHandler {
 
                 CompletableFuture.supplyAsync(() -> {
                     try {
+                        logger.info("waiting for first record for job {}", job.getJobId());
                         return Optional.of(futureRecord.get());
                     } catch (InterruptedException e) {
                         logger.error("Interrupted getting first record", e);
@@ -84,10 +85,12 @@ public class CypherActionHandler implements ActionHandler {
                 }).thenAcceptAsync(maybeRecord -> {
                     if (maybeRecord.isEmpty()) {
                         // XXX: need handling of this problem :-(
+                        logger.error("for some reason we didn't get a record for job {}", job.getJobId());
                         producer.deleteFlight(ticket);
                         return;
                     }
                     final RowBasedRecord record = (RowBasedRecord) maybeRecord.get();
+                    logger.info("got first record for job {}", job.getJobId());
 
                     final List<Field> fields = new ArrayList<>();
                     record.keys().stream().forEach(fieldName -> {

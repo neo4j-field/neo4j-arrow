@@ -1,17 +1,25 @@
 package org.neo4j.arrow.job;
 
+import org.apache.arrow.flight.CallStatus;
 import org.neo4j.arrow.CypherRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.CypherMessage;
+import org.neo4j.arrow.auth.ArrowConnectionInfo;
+import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
+import org.neo4j.internal.kernel.api.security.LoginContext;
+import org.neo4j.kernel.api.KernelTransaction;
+import org.neo4j.kernel.api.security.AuthManager;
+import org.neo4j.kernel.api.security.AuthToken;
+import org.neo4j.kernel.api.security.exception.InvalidAuthTokenException;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.logging.Log;
 
-import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Interact with the Database directly via the Transaction API and Cypher.
@@ -19,46 +27,53 @@ import java.util.concurrent.atomic.AtomicLong;
 public class Neo4jTransactionApiJob extends Job {
 
     private final CompletableFuture<JobSummary> future;
-    private final GraphDatabaseAPI api;
-    private final Log log;
 
-    public Neo4jTransactionApiJob(CypherMessage msg, Mode mode, DatabaseManagementService dbms, Log log) {
+    public Neo4jTransactionApiJob(CypherMessage msg, String username, DatabaseManagementService dbms, Log log) {
         super();
-        this.log = log;
-        this.api = (GraphDatabaseAPI) dbms.database(msg.getDatabase());
+
+        final LoginContext context = NativeAuthValidator.contextMap.get(username);
+
+        if (context == null)
+            throw CallStatus.UNAUTHENTICATED.withDescription("no existing login context for user")
+                    .toRuntimeException();
 
         // TODO: pull in reference to LoginContext and use it in the Transaction
         future = CompletableFuture.supplyAsync(() -> {
-            try (Transaction tx = api.beginTx()) {
+            final GraphDatabaseAPI api = (GraphDatabaseAPI) dbms.database(msg.getDatabase());
+            log.info("Starting neo4j Tx job for cypher:\n%s", msg.getCypher().trim());
 
-                log.info("Starting neo4j Tx job for cypher:\n%s", msg.getCypher());
+            try (Transaction tx = api.beginTransaction(KernelTransaction.Type.EXPLICIT, context)) {
                 try (Result result = tx.execute(msg.getCypher(), msg.getParams())) {
-                    AtomicLong cnt = new AtomicLong(1);
-                    ArrayList<String> fields = new ArrayList(result.columns());
 
-                    result.accept(row -> {
-                        long i = cnt.getAndIncrement();
-                        RowBasedRecord record = CypherRecord.wrap(row, fields);
-                        if (i == 1) {
-                            log.debug("(arrow) first record seen for stream with fields " + record.keys());
-                            for (String field : record.keys()) {
-                                log.info(String.format("(arrow)  %s -> %s", field, record.get(field).type()));
-                            }
-                            onFirstRecord(record);
-                        }
+                    // Get the first record.
+                    if (!result.hasNext()) {
+                        // XXX we currently assume we get data. no data is boring!
+                        throw CallStatus.NOT_FOUND.withDescription("no data returned for job").toRuntimeException();
+                    }
+                    CypherRecord record = CypherRecord.wrap(result.next());
+                    onFirstRecord(record);
 
-                        futureConsumer.join().accept(record);
-                        return true;
-                    });
+                    // Start consuming the initial result, then iterate through the rest
+                    final Consumer<RowBasedRecord> consumer = futureConsumer.join();
+                    while (result.hasNext()) {
+                        consumer.accept(CypherRecord.wrap(result.next()));
+                    }
+                    log.info("completed processing cypher results");
+                } catch (Exception e) {
+                    log.error("crap", e);
+                    throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
                 } finally {
                     tx.commit();
                 }
+            } catch (Exception e) {
+                log.error("crap", e);
+                throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
             }
             return summarize();
         }).thenApplyAsync(summary -> {
             onCompletion(summary);
             return summary;
-        }).toCompletableFuture();
+        });
     }
 
     private JobSummary summarize() {
