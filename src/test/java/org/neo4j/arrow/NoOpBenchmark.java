@@ -115,7 +115,7 @@ public class NoOpBenchmark {
 
                 @Override
                 public double[] asDoubleArray() {
-                    return null;
+                    return PAYLOAD;
                 }
 
                 @Override
