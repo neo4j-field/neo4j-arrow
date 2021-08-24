@@ -30,7 +30,7 @@ public class Config {
 
     /** Arrow Batch Size controls the size of the transmitted vectors.*/
     public final static int arrowBatchSize = Math.abs(Integer.parseInt(
-            System.getenv().getOrDefault("ARROW_BATCH_SIZE", Integer.toString(25_000))
+            System.getenv().getOrDefault("ARROW_BATCH_SIZE", Integer.toString(1_000))
     ));
 
     /** Bolt fetch size controls how many Records we PULL at a given time. Should be set lower

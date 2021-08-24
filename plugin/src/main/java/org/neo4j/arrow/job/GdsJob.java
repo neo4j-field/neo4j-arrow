@@ -4,6 +4,7 @@ import org.apache.arrow.flight.CallStatus;
 import org.neo4j.arrow.GdsNodeRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.graphalgo.NodeLabel;
 import org.neo4j.graphalgo.api.Graph;
 import org.neo4j.graphalgo.api.GraphStore;
 import org.neo4j.graphalgo.api.NodeProperties;
@@ -12,9 +13,11 @@ import org.neo4j.graphalgo.core.loading.ImmutableCatalogRequest;
 import org.neo4j.graphalgo.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.logging.Log;
 
+import java.util.Collection;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -41,12 +44,18 @@ public class GdsJob extends Job {
                 .graphStore();
         log.info("got graphstore for graph named %s", msg.getGraphName());
 
-        // TODO: apply "filters" to labels or types...for now just get all
-        final Graph graph = store
-                .getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
+        Graph graph;
+        if (msg.getRequestType() == GdsMessage.RequestType.node) {
+            final Collection<NodeLabel> labels = msg.getFilters()
+                    .stream().map(NodeLabel::of).collect(Collectors.toUnmodifiableList());
+            graph = labels.size() > 0 ? store.getGraph(labels, store.relationshipTypes(), Optional.empty())
+                    : store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
+        } else {
+            throw CallStatus.UNIMPLEMENTED.withDescription("can't do rels yet :'(").toRuntimeException();
+        }
         log.info("got graph for labels %s, relationship types %s", store.nodeLabels(), store.relationshipTypes());
 
-        // TODO: inspect the schema via the Graph instance...need to change the Job message type
+        // TODO: logic for rels
         final PrimitiveLongIterator iterator = graph.nodeIterator();
 
         // Make sure we have the requested node properties
@@ -68,7 +77,8 @@ public class GdsJob extends Job {
         future = CompletableFuture.supplyAsync(() -> {
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
-            onFirstRecord(GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId));
+            GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId);
+            onFirstRecord(record);
             log.debug("got first record");
             for (int i=0; i<keys.length; i++)
                 log.info("  %s -> %s", keys[i], propertiesArray[i].valueType());
@@ -78,14 +88,13 @@ public class GdsJob extends Job {
             // Blast off!
             // TODO: GDS lets us batch access to lists of nodes...future opportunity?
             final long start = System.currentTimeMillis();
-            consumer.accept(GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId));
+            consumer.accept(record);
             while (iterator.hasNext()) {
                 consumer.accept(GdsNodeRecord.wrap(iterator.next(), keys, propertiesArray, graph::toOriginalNodeId));
             }
             final long delta = System.currentTimeMillis() - start;
 
-            log.info("finishing stream, duration %,d ms", delta);
-            onCompletion(() -> "done");
+            onCompletion(() -> String.format("finished GDS stream, duration %,d ms", delta));
             return true;
         }).exceptionally(throwable -> {
             log.error(throwable.getMessage(), throwable);
