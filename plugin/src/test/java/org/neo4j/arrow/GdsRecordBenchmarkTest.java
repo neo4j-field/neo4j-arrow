@@ -126,9 +126,7 @@ public class GdsRecordBenchmarkTest {
              Client client = new Client(clientAllocator, location)) {
 
             app.registerHandler(new GdsActionHandler(
-                    (msg, mode, username, password) ->
-                            new NoOpJob(2_000_000, signal, type),
-                    log));
+                    (msg, mode, username) -> new NoOpJob(2_000_000, signal, type), log));
             app.start();
 
             final long start = System.currentTimeMillis();

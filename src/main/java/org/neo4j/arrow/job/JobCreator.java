@@ -24,8 +24,7 @@ public interface JobCreator<T> {
      * @param msg a {@link Job}-specific message
      * @param mode the mode, e.g. READ vs WRITE
      * @param username optional username for the caller
-     * @param password optional password for the caller
      * @return new {@link Job}
      */
-    Job newJob(T msg, Job.Mode mode, Optional<String> username, Optional<String> password);
+    Job newJob(T msg, Job.Mode mode, Optional<String> username);
 }

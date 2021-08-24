@@ -59,11 +59,9 @@ public class ArrowService extends LifecycleAdapter {
                 new BasicCallHeaderAuthenticator(new NativeAuthValidator(authManager, log)));
 
         app.registerHandler(new CypherActionHandler(
-                (msg, mode, username, password) ->
-                        new Neo4jTransactionApiJob(msg, username.get(), dbms, log)));
+                (msg, mode, username) -> new Neo4jTransactionApiJob(msg, username.get(), dbms, log)));
         app.registerHandler(new GdsActionHandler(
-                (msg, mode, username, password) ->
-                        new GdsJob(msg, username.get(), log), log));
+                (msg, mode, username) -> new GdsJob(msg, username.get(), log), log));
     }
 
     @Override

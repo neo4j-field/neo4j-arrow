@@ -37,8 +37,8 @@ public class Neo4jProxyServer {
                 Location.forGrpcInsecure(Config.host, Config.port));
 
         final CypherActionHandler cypherHandler = new CypherActionHandler(
-                (cypherMsg, mode, username, password) ->
-                        new AsyncDriverJob(cypherMsg, mode, AuthTokens.basic(username.get(), password.get())));
+                (cypherMsg, mode, username) ->
+                        new AsyncDriverJob(cypherMsg, mode, AuthTokens.basic(Config.username, Config.password)));
         app.registerHandler(cypherHandler);
 
         app.start();

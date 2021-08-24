@@ -64,9 +64,7 @@ public class CypherActionHandler implements ActionHandler {
 
         switch (action.getType()) {
             case CYPHER_READ_ACTION:
-                final Job job = jobCreator.newJob(msg, Job.Mode.READ,
-                        // TODO: get Cypher username/password from Context?
-                        Optional.of("neo4j"), Optional.of("password"));
+                final Job job = jobCreator.newJob(msg, Job.Mode.READ, Optional.of("neo4j"));
                 final Ticket ticket = producer.ticketJob(job);
 
                 /* We need to wait for the first record to discern our final schema */
