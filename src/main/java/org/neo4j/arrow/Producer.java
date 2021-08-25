@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -129,24 +130,28 @@ public class Producer implements FlightProducer, AutoCloseable {
             final AtomicBoolean errored = new AtomicBoolean(false);
 
             // TODO: partition control?
-            final int maxPartitions = Runtime.getRuntime().availableProcessors() > 3 ?
-                    Runtime.getRuntime().availableProcessors() - 2 : 1;
+            final int maxPartitions = 2;
 
             // Map<String, BaseWriter.ListWriter> writerMap
             final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
             final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
             final AtomicInteger[] partitionedCnts = new AtomicInteger[maxPartitions];
+            final Semaphore[] partitionedSemaphores = new Semaphore[maxPartitions];
+            final Semaphore allocatorMutex = new Semaphore(1);
+            final Semaphore transferMutex = new Semaphore(1);
 
             // wasteful, but pre-init for now
             for (int i=0; i<maxPartitions; i++) {
+                partitionedSemaphores[i] = new Semaphore(1);
                 partitionedWriters[i] = new HashMap<>();
                 partitionedCnts[i] = new AtomicInteger(0);
                 partitionedVectorList[i] = new ArrayList<>(0);
             }
 
             job.consume((record, partitionId) -> {
+                final int partition = partitionId % maxPartitions;
                 try {
-                    final int partition = partitionId % maxPartitions;
+                    partitionedSemaphores[partition].acquire();
 
                     final AtomicInteger cnt = partitionedCnts[partition];
                     final int idx = cnt.getAndIncrement();
@@ -156,15 +161,18 @@ public class Producer implements FlightProducer, AutoCloseable {
                     if (idx == 0) {
                         // (re)init field vectors
                         if (vectorList.size() == 0) {
-                            for (Field field : fieldList) {
-                                FieldVector fieldVector = field.createVector(streamAllocator);
-                                fieldVector.setInitialCapacity(Config.arrowBatchSize);
-                                fieldVector.allocateNew();
-                                vectorList.add(fieldVector);
+                            logger.info("configuring partition {}", partition);
+                            try {
+                                allocatorMutex.acquire();
+                                for (Field field : fieldList) {
+                                    FieldVector fieldVector = field.createVector(streamAllocator);
+                                    fieldVector.setInitialCapacity(Config.arrowBatchSize);
+                                    fieldVector.allocateNew();
+                                    vectorList.add(fieldVector);
+                                }
+                            } finally {
+                                allocatorMutex.release();
                             }
-                        } else {
-                            vectorList.forEach(ValueVector::allocateNew);
-                            writerMap.values().forEach(writer -> writer.setPosition(0));
                         }
                     }
 
@@ -238,11 +246,15 @@ public class Producer implements FlightProducer, AutoCloseable {
                     if ((idx + 1) == Config.arrowBatchSize) {
                         // yolo?
                         final ArrayList<ValueVector> copy = new ArrayList<>();
-                        for (FieldVector vector : vectorList) {
-                            final TransferPair tp = vector.getTransferPair(transmitAllocator);
-                            tp.transfer();
-                            final ValueVector to = tp.getTo();
-                            copy.add(to);
+                        try {
+                            transferMutex.acquire();
+                            for (FieldVector vector : vectorList) {
+                                final TransferPair tp = vector.getTransferPair(transmitAllocator);
+                                tp.transfer();
+                                copy.add(tp.getTo());
+                            }
+                        } finally {
+                            transferMutex.release();
                         }
                         logger.debug("adding flusher (depth={})", flushers.incrementAndGet());
                         flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
@@ -251,6 +263,13 @@ public class Producer implements FlightProducer, AutoCloseable {
                             flushers.decrementAndGet();
                         }));
                         cnt.set(0);
+                        try {
+                            allocatorMutex.acquire();
+                            vectorList.forEach(ValueVector::allocateNewSafe);
+                        } finally {
+                            allocatorMutex.release();
+                        }
+                        writerMap.values().forEach(writer -> writer.setPosition(0));
                     }
                 } catch (Exception e) {
                     if (errored.compareAndSet(false, true)) {
@@ -258,6 +277,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                         job.cancel(true);
                         listener.error(CallStatus.UNKNOWN.withDescription(e.getMessage()).toRuntimeException());
                     }
+                } finally {
+                    partitionedSemaphores[partition].release();
                 }
             });
 
@@ -269,10 +290,15 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                 if (cnt.get() > 0) {
                     final ArrayList<ValueVector> copy = new ArrayList<>();
-                    for (FieldVector vector : partitionedVectorList[i]) {
-                        TransferPair tp = vector.getTransferPair(transmitAllocator);
-                        tp.transfer();
-                        copy.add(tp.getTo());
+                    try {
+                        transferMutex.acquire();
+                        for (FieldVector vector : partitionedVectorList[i]) {
+                            TransferPair tp = vector.getTransferPair(transmitAllocator);
+                            tp.transfer();
+                            copy.add(tp.getTo());
+                        }
+                    } finally {
+                        transferMutex.release();
                     }
                     flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
                         logger.debug("flushing remainder...");
@@ -281,15 +307,15 @@ public class Producer implements FlightProducer, AutoCloseable {
                 }
             }
 
-            // Close any open FieldVectors
-            for (List<FieldVector> vectorList : partitionedVectorList)
-                vectorList.forEach(FieldVector::close);
-
             // Wait for all flushes...up to 15 mins
             logger.info("waiting for flush to complete...");
             flushRef.get().get(15, TimeUnit.MINUTES);
             logger.info("flushing complete");
             listener.completed();
+
+            // Close any open FieldVectors
+            for (List<FieldVector> vectorList : partitionedVectorList)
+                vectorList.forEach(FieldVector::close);
 
         } catch (Exception e) {
             e.printStackTrace();

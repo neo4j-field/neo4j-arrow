@@ -21,6 +21,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * A relatively simple NoOp test mostly for producing flamegraphs and doing some light integration testing.
@@ -61,51 +62,6 @@ public class NoOpBenchmark {
                 @Override
                 public int size() {
                     return doubleList.size();
-                }
-
-                @Override
-                public int asInt() {
-                    return 1;
-                }
-
-                @Override
-                public long asLong() {
-                    return 1L;
-                }
-
-                @Override
-                public float asFloat() {
-                    return 1.0f;
-                }
-
-                @Override
-                public double asDouble() {
-                    return 1.0d;
-                }
-
-                @Override
-                public String asString() {
-                    return "1";
-                }
-
-                @Override
-                public List<Object> asList() {
-                    return List.of();
-                }
-
-                @Override
-                public List<Integer> asIntList() {
-                    return null;
-                }
-
-                @Override
-                public List<Long> asLongList() {
-                    return null;
-                }
-
-                @Override
-                public List<Float> asFloatList() {
-                    return null;
                 }
 
                 @Override
@@ -150,9 +106,12 @@ public class NoOpBenchmark {
                 final RowBasedRecord record = new NoOpRecord();
                 onFirstRecord(record);
                 logger.info("Job feeding");
+
                 BiConsumer<RowBasedRecord, Integer> consumer = super.futureConsumer.join();
-                for (int i=0; i<numResults; i++)
-                    consumer.accept(record, 1);
+                IntStream.range(1, numResults)
+                        .parallel()
+                        .forEach(i -> consumer.accept(record, i));
+
                 signal.complete(System.currentTimeMillis());
                 logger.info("Job finished");
                 onCompletion(() -> "done");
@@ -202,14 +161,11 @@ public class NoOpBenchmark {
 
     @Test
     public void testSpeed() throws Exception {
-        final BufferAllocator serverAllocator = new RootAllocator(Integer.MAX_VALUE);
-        final BufferAllocator clientAllocator = new RootAllocator(Integer.MAX_VALUE);
-
         final Location location = Location.forGrpcInsecure("localhost", 12345);
         final CompletableFuture<Long> signal = new CompletableFuture<>();
 
-        try (App app = new App(serverAllocator, location);
-             Client client = new Client(clientAllocator, location)) {
+        try (App app = new App(new RootAllocator(Integer.MAX_VALUE), location);
+             Client client = new Client(new RootAllocator(Integer.MAX_VALUE), location)) {
 
             app.registerHandler(new NoOpHandler(signal));
             app.start();
