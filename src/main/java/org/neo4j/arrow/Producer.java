@@ -130,7 +130,8 @@ public class Producer implements FlightProducer, AutoCloseable {
             final AtomicBoolean errored = new AtomicBoolean(false);
 
             // TODO: partition control?
-            final int maxPartitions = 2;
+            final int maxPartitions = Runtime.getRuntime().availableProcessors() > 2 ?
+                    Runtime.getRuntime().availableProcessors() - 2 : 1;
 
             // Map<String, BaseWriter.ListWriter> writerMap
             final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
