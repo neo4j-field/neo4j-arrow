@@ -34,7 +34,9 @@ project to see if Arrow can help solve a few rough spots for us.
    transaction/job capabilities.
 
 > Some inspiring propaganda for the cause:
+> 
 > [It's time to retire the CSV](https://www.bitsondisk.com/writing/2021/retire-the-csv/)
+> 
 > [Graphistry uses Arrow](https://www.kdnuggets.com/2018/01/supercharging-visualization-apache-arrow.html?utm_content=buffer38573&utm_medium=social&utm_source=twitter.com&utm_campaign=buffer)
 
 ### Problem 1: Moving "Big Data"
@@ -69,10 +71,11 @@ properties, such as node embeddings, have a few choices today:
 4. Use alternative integrations like the Neo4j Streams (Apache Kafka) 
    integration
 
+5. Use Spark and the Spark Connector to do the above 
+
 In all the above cases, the user needs to either write orchestration code 
-around our drivers (which subjectively is quite cumbersome and full of 
-footguns) OR needs access to the filesystem along with additional Neo4j 
-plugins like APOC, etc. In this latter case, users of Aura are effectively SOL.
+around Neo4j drivers, rely on file system access, or rely on 3rd party 
+technologies that may not be available.
 
 We can do better!
 
@@ -172,6 +175,10 @@ official driver. Whatever that means.)
 
 The problem is: _it simply cannot handle bulk data!_
 
+> Note: The issue has been reported to the maintainer and should be fixed in 
+> the next release. However, the performance isn't improved versus the Neo4j 
+> driver.
+
 Given the following query:
 
 ```cypher
@@ -224,17 +231,23 @@ easily be _over 2x as fast_.
 > shortly, it's possible to _beat the Java Driver_ if we use known width 
 > data structures. (Bolt, keep in mind, assumes Lists are heterogeneous.)
 
+#### Beating Java: Talking to GDS Directly
+The current Java Driver performance far outpaces the Python Driver. A 
+Cypher-based Arrow job can keep up with the Java Driver and outpace it when 
+we can define a definitive schema.
+
+What if we bypass Cypher altogether? If we talk to the in-memory GDS graph, 
+we have a defined schema!
+
+> TODO: fill in the details here...for now check out the demo IPython notebook:
+> [PyArrow Demo.ipynb](./PyArrow%20Demo.ipynb)
+
 ### Problem 3: Batch Jobs
 While not top core concern here, Arrow Flight offers an extensible RPC 
-framework that, in theory, could satisfy some of the workflow around this (but 
-not the persistence & Job control). The API, in my opinion, is important 
-enough that it is worthwhile looking into how friendly we can make it.
-
-> While there's an active PRD around the concept of "jobs," it doesn't solve
-> the bulk data-over-the-wire issues. The current design is for running long 
-> write-based workloads like data loads or GDS algos. This is fine...but 
-> given Bolt and Cypher have no concepts yet of "jobs", we're starting 
-> effectively from scratch.
+framework that, in theory, could satisfy parts of the workflow around this 
+only requiring some work for persistence & Job control. The API, in my 
+opinion, is well-designed enough that it is worthwhile looking into how 
+friendly we can make it.
 
 The concept of Arrow Flight RPC "actions" along with the basic "get"/"set" 
 stream features feel like solid building blocks.
