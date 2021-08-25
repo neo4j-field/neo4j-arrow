@@ -5,7 +5,7 @@ import org.neo4j.arrow.RowBasedRecord;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
  * The abstract base class for neo4j-arrow Jobs.
@@ -44,7 +44,8 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     private final AtomicReference<Status> jobStatus = new AtomicReference<>(Status.PENDING);
     private final CompletableFuture<JobSummary> jobSummary = new CompletableFuture<>();
     private final CompletableFuture<RowBasedRecord> firstRecord = new CompletableFuture<>();
-    protected final CompletableFuture<Consumer<RowBasedRecord>> futureConsumer = new CompletableFuture<>();
+    /** Provides a {@link BiConsumer} taking a {@link RowBasedRecord} with data and a partition id {@link Integer} */
+    protected final CompletableFuture<BiConsumer<RowBasedRecord, Integer>> futureConsumer = new CompletableFuture<>();
     private final String jobId;
 
     protected Job() {
@@ -71,7 +72,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         jobSummary.complete(summary);
     }
 
-    public void consume(Consumer<RowBasedRecord> consumer) {
+    public void consume(BiConsumer<RowBasedRecord, Integer> consumer) {
         if (!futureConsumer.isDone())
             futureConsumer.complete(consumer);
         else

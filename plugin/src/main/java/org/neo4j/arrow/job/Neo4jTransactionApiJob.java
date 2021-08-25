@@ -4,22 +4,17 @@ import org.apache.arrow.flight.CallStatus;
 import org.neo4j.arrow.CypherRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.CypherMessage;
-import org.neo4j.arrow.auth.ArrowConnectionInfo;
 import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
 import org.neo4j.internal.kernel.api.security.LoginContext;
 import org.neo4j.kernel.api.KernelTransaction;
-import org.neo4j.kernel.api.security.AuthManager;
-import org.neo4j.kernel.api.security.AuthToken;
-import org.neo4j.kernel.api.security.exception.InvalidAuthTokenException;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.logging.Log;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
-import java.util.function.Supplier;
+import java.util.function.BiConsumer;
 
 /**
  * Interact with the Database directly via the Transaction API and Cypher.
@@ -54,9 +49,9 @@ public class Neo4jTransactionApiJob extends Job {
                     onFirstRecord(record);
 
                     // Start consuming the initial result, then iterate through the rest
-                    final Consumer<RowBasedRecord> consumer = futureConsumer.join();
+                    final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
                     while (result.hasNext()) {
-                        consumer.accept(CypherRecord.wrap(result.next()));
+                        consumer.accept(CypherRecord.wrap(result.next()), 1);
                     }
                     log.info("completed processing cypher results");
                 } catch (Exception e) {

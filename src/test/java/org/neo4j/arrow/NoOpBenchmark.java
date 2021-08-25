@@ -19,7 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 /**
@@ -51,7 +51,7 @@ public class NoOpBenchmark {
             1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d, 9d, 10d,
             1d, 2d, 3d, 4d, 5d, 6d, 7d, 8d };
 
-    private class NoOpRecord implements RowBasedRecord {
+    private static class NoOpRecord implements RowBasedRecord {
 
         @Override
         public Value get(int index) {
@@ -136,7 +136,7 @@ public class NoOpBenchmark {
         }
     }
 
-    private class NoOpJob extends Job {
+    private static class NoOpJob extends Job {
 
         final CompletableFuture<Integer> future;
         final int numResults;
@@ -150,9 +150,9 @@ public class NoOpBenchmark {
                 final RowBasedRecord record = new NoOpRecord();
                 onFirstRecord(record);
                 logger.info("Job feeding");
-                Consumer<RowBasedRecord> consumer = super.futureConsumer.join();
+                BiConsumer<RowBasedRecord, Integer> consumer = super.futureConsumer.join();
                 for (int i=0; i<numResults; i++)
-                    consumer.accept(record);
+                    consumer.accept(record, 1);
                 signal.complete(System.currentTimeMillis());
                 logger.info("Job finished");
                 onCompletion(() -> "done");
@@ -166,12 +166,11 @@ public class NoOpBenchmark {
         }
 
         @Override
-        public void close() throws Exception {
-
+        public void close() {
         }
     }
 
-    private class NoOpHandler implements ActionHandler {
+    private static class NoOpHandler implements ActionHandler {
 
         final CompletableFuture<Long> signal;
         NoOpHandler(CompletableFuture<Long> signal) {
@@ -195,7 +194,7 @@ public class NoOpBenchmark {
             producer.setFlightInfo(ticket, new Schema(
                     List.of(new Field("embedding",
                             FieldType.nullable(new ArrowType.FixedSizeList(PAYLOAD.length)),
-                            Arrays.asList(new Field("embedding",
+                            List.of(new Field("embedding",
                                     FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)), null))))));
             return Outcome.success(new Result(ticket.serialize().array()));
         }

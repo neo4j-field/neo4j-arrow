@@ -16,7 +16,7 @@ import org.neo4j.logging.Log;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 /**
@@ -83,14 +83,14 @@ public class GdsJob extends Job {
             for (int i=0; i<keys.length; i++)
                 log.info("  %s -> %s", keys[i], propertiesArray[i].valueType());
 
-            final Consumer<RowBasedRecord> consumer = futureConsumer.join();
+            final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
 
             // Blast off!
             // TODO: GDS lets us batch access to lists of nodes...future opportunity?
             final long start = System.currentTimeMillis();
-            consumer.accept(record);
+            consumer.accept(record, 1);
             while (iterator.hasNext()) {
-                consumer.accept(GdsNodeRecord.wrap(iterator.next(), keys, propertiesArray, graph::toOriginalNodeId));
+                consumer.accept(GdsNodeRecord.wrap(iterator.next(), keys, propertiesArray, graph::toOriginalNodeId), 1);
             }
             final long delta = System.currentTimeMillis() - start;
 

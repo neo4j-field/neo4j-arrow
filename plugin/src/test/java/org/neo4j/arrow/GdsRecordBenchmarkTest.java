@@ -4,8 +4,10 @@ import org.apache.arrow.flight.Action;
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.util.AutoCloseables;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -20,9 +22,8 @@ import org.neo4j.logging.log4j.Log4jLogProvider;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
-import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
@@ -42,10 +43,11 @@ public class GdsRecordBenchmarkTest {
     }
 
     private static RowBasedRecord getRecord(String type) {
+        final int size = 128;
         switch (type) {
             case "float":
-                float[] data = new float[256];
-                for (int i=0; i<256; i++)
+                float[] data = new float[size];
+                for (int i=0; i<size; i++)
                     data[i] = (float)i;
                 return new GdsNodeRecord(1, new String[] {"embedding"},
                         new RowBasedRecord.Value[] { GdsRecord.wrapFloatArray(data) },
@@ -54,19 +56,19 @@ public class GdsRecordBenchmarkTest {
                 return new GdsNodeRecord(1, new String[] {"embedding"},
                         new RowBasedRecord.Value[] {
                                 GdsRecord.wrapDoubleArray(
-                                        IntStream.range(1, 256).boxed().mapToDouble(Integer::doubleValue).toArray())
+                                        IntStream.range(1, size).boxed().mapToDouble(Integer::doubleValue).toArray())
                         }, Function.identity());
             case "long":
                 return new GdsNodeRecord(1, new String[] {"embedding"},
                         new RowBasedRecord.Value[] {
-                                GdsRecord.wrapLongArray(LongStream.range(1, 256).toArray())
+                                GdsRecord.wrapLongArray(LongStream.range(1, size).toArray())
                         }, Function.identity());
         }
 
         throw new RuntimeException("bad type");
     }
 
-    private class NoOpJob extends Job {
+    private static class NoOpJob extends Job {
 
         final CompletableFuture<Integer> future;
         final int numResults;
@@ -81,9 +83,9 @@ public class GdsRecordBenchmarkTest {
                     final RowBasedRecord record = getRecord(type);
                     onFirstRecord(record);
                     log.info("Job feeding");
-                    Consumer<RowBasedRecord> consumer = super.futureConsumer.join();
+                    BiConsumer<RowBasedRecord, Integer> consumer = super.futureConsumer.join();
                     for (int i = 0; i < numResults; i++)
-                        consumer.accept(record);
+                        consumer.accept(record, 1);
                     signal.complete(System.currentTimeMillis());
                     log.info("Job finished");
                     onCompletion(() -> "done");
@@ -114,19 +116,16 @@ public class GdsRecordBenchmarkTest {
 
     @ParameterizedTest
     @MethodSource("provideDifferentNativeArrays")
-    //@Timeout(value = 5, unit = TimeUnit.MINUTES)
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
     public void testSpeed(String type) throws Exception {
-        final BufferAllocator serverAllocator = new RootAllocator(Integer.MAX_VALUE);
-        final BufferAllocator clientAllocator = new RootAllocator(Integer.MAX_VALUE);
-
         final Location location = Location.forGrpcInsecure("localhost", 12345);
         final CompletableFuture<Long> signal = new CompletableFuture<>();
 
-        try (App app = new App(serverAllocator, location);
-             Client client = new Client(clientAllocator, location)) {
+        try (App app = new App(new RootAllocator(Integer.MAX_VALUE), location);
+             Client client = new Client(new RootAllocator(Integer.MAX_VALUE), location)) {
 
             app.registerHandler(new GdsActionHandler(
-                    (msg, mode, username) -> new NoOpJob(2_000_000, signal, type), log));
+                    (msg, mode, username) -> new NoOpJob(1_000_000, signal, type), log));
             app.start();
 
             final long start = System.currentTimeMillis();
@@ -137,7 +136,7 @@ public class GdsRecordBenchmarkTest {
             final long stop = signal.join();
             log.info(String.format("Client Lifecycle Time: %,d ms", stop - start));
 
-            app.awaitTermination(1, TimeUnit.SECONDS);
+            app.awaitTermination(5, TimeUnit.SECONDS);
         }
     }
 }

@@ -2,8 +2,6 @@ package org.neo4j.arrow.action;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.neo4j.arrow.GdsRecord;
-import org.neo4j.arrow.RowBasedRecord;
 
 import java.io.IOException;
 import java.util.List;

@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
  * Implementation of a Neo4jJob that uses an AsyncSession via the Neo4j Java Driver.
@@ -55,9 +55,9 @@ public class AsyncDriverJob extends Job {
                     final Record firstRecord = resultCursor.peekAsync().toCompletableFuture().join();
                     onFirstRecord(DriverRecord.wrap(firstRecord));
 
-                    final Consumer<RowBasedRecord> consumer = futureConsumer.join();
+                    final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
                     return resultCursor.forEachAsync(record ->
-                            consumer.accept(DriverRecord.wrap(record)));
+                            consumer.accept(DriverRecord.wrap(record), 1));
                 }).whenCompleteAsync((resultSummary, throwable) -> {
                     if (throwable != null) {
                         setStatus(Status.ERROR);

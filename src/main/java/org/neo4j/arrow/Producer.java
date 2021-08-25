@@ -32,7 +32,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -94,12 +93,6 @@ public class Producer implements FlightProducer, AutoCloseable {
             return;
         }
 
-        // We need to dynamically build out our vectors based on the identified schema
-        final List<FieldVector> vectorList = new ArrayList<>();
-        // Complex things like Lists need special writers to fill them :-(
-        final Map<String, BaseWriter.ListWriter> writerMap = new HashMap<>();
-        // Track current batch size
-        final AtomicInteger cnt = new AtomicInteger(0);
         // Track number of outstanding Flush jobs
         final AtomicInteger flushers = new AtomicInteger(0);
         // Our flushing Future
@@ -119,12 +112,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
-            for (Field field : fieldList) {
-                FieldVector fieldVector = field.createVector(streamAllocator);
-                fieldVector.setInitialCapacity(Config.arrowBatchSize);
-                fieldVector.allocateNew();
-                vectorList.add(fieldVector);
-            }
+
 
             // Add a job cancellation hook
             listener.setOnCancelHandler(() -> {
@@ -140,13 +128,47 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: handle batches of records to decrease frequency of calls
             final AtomicBoolean errored = new AtomicBoolean(false);
 
-            AtomicLong lapsed = new AtomicLong(0);
-            job.consume(record -> {
+            // TODO: partition control?
+            final int maxPartitions = Runtime.getRuntime().availableProcessors() > 3 ?
+                    Runtime.getRuntime().availableProcessors() - 2 : 1;
+
+            // Map<String, BaseWriter.ListWriter> writerMap
+            final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
+            final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
+            final AtomicInteger[] partitionedCnts = new AtomicInteger[maxPartitions];
+
+            // wasteful, but pre-init for now
+            for (int i=0; i<maxPartitions; i++) {
+                partitionedWriters[i] = new HashMap<>();
+                partitionedCnts[i] = new AtomicInteger(0);
+                partitionedVectorList[i] = new ArrayList<>(0);
+            }
+
+            job.consume((record, partitionId) -> {
                 try {
+                    final int partition = partitionId % maxPartitions;
+
+                    final AtomicInteger cnt = partitionedCnts[partition];
                     final int idx = cnt.getAndIncrement();
+                    final List<FieldVector> vectorList = partitionedVectorList[partition];
+                    final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
+
+                    if (idx == 0) {
+                        // (re)init field vectors
+                        if (vectorList.size() == 0) {
+                            for (Field field : fieldList) {
+                                FieldVector fieldVector = field.createVector(streamAllocator);
+                                fieldVector.setInitialCapacity(Config.arrowBatchSize);
+                                fieldVector.allocateNew();
+                                vectorList.add(fieldVector);
+                            }
+                        } else {
+                            vectorList.forEach(ValueVector::allocateNew);
+                            writerMap.values().forEach(writer -> writer.setPosition(0));
+                        }
+                    }
 
                     // TODO: refactor to using fixed arrays for speed
-                    //for (Field field : fieldList) {
                     for (int n=0; n<fieldList.size(); n++) {
                         final Field field = fieldList.get(n);
                         final RowBasedRecord.Value value = record.get(n);
@@ -229,8 +251,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                             flushers.decrementAndGet();
                         }));
                         cnt.set(0);
-                        vectorList.forEach(ValueVector::allocateNew);
-                        writerMap.values().forEach(writer -> writer.setPosition(0));
                     }
                 } catch (Exception e) {
                     if (errored.compareAndSet(false, true)) {
@@ -244,20 +264,26 @@ public class Producer implements FlightProducer, AutoCloseable {
             job.get();
 
             // Final flush
-            if (cnt.get() > 0) {
-                final ArrayList<ValueVector> copy = new ArrayList<>();
-                for (FieldVector vector : vectorList) {
-                    TransferPair tp = vector.getTransferPair(transmitAllocator);
-                    tp.transfer();
-                    copy.add(tp.getTo());
+            for (int i=0; i<maxPartitions; i++) {
+                final AtomicInteger cnt = partitionedCnts[i];
+
+                if (cnt.get() > 0) {
+                    final ArrayList<ValueVector> copy = new ArrayList<>();
+                    for (FieldVector vector : partitionedVectorList[i]) {
+                        TransferPair tp = vector.getTransferPair(transmitAllocator);
+                        tp.transfer();
+                        copy.add(tp.getTo());
+                    }
+                    flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
+                        logger.debug("flushing remainder...");
+                        flush(listener, loader, copy, cnt.decrementAndGet());
+                    }));
                 }
-                flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
-                    logger.debug("flushing remainder...");
-                    flush(listener, loader, copy, cnt.decrementAndGet());
-                }));
             }
 
-            vectorList.forEach(FieldVector::close);
+            // Close any open FieldVectors
+            for (List<FieldVector> vectorList : partitionedVectorList)
+                vectorList.forEach(FieldVector::close);
 
             // Wait for all flushes...up to 15 mins
             logger.info("waiting for flush to complete...");
@@ -341,7 +367,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     /**
      * Ticket a Job and add it to the jobMap.
-     * @param job
+     * @param job instance of a Job
      * @return new Ticket
      */
     public Ticket ticketJob(Job job) {
@@ -375,7 +401,7 @@ public class Producer implements FlightProducer, AutoCloseable {
     @Override
     public void listFlights(CallContext context, Criteria criteria, StreamListener<FlightInfo> listener) {
         logger.debug("listFlights called: context={}, criteria={}", context, criteria);
-        flightMap.values().stream().forEach(listener::onNext);
+        flightMap.values().forEach(listener::onNext);
         listener.onCompleted();
     }
 
