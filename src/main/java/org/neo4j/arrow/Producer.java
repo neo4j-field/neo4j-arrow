@@ -129,9 +129,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: handle batches of records to decrease frequency of calls
             final AtomicBoolean errored = new AtomicBoolean(false);
 
-            // TODO: partition control?
-            final int maxPartitions = Runtime.getRuntime().availableProcessors() > 2 ?
-                    Runtime.getRuntime().availableProcessors() - 2 : 1;
+            final int maxPartitions = Config.arrowMaxPartitions;
 
             // Map<String, BaseWriter.ListWriter> writerMap
             final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
@@ -162,7 +160,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                     if (idx == 0) {
                         // (re)init field vectors
                         if (vectorList.size() == 0) {
-                            logger.info("configuring partition {}", partition);
                             try {
                                 allocatorMutex.acquire();
                                 for (Field field : fieldList) {
@@ -248,6 +245,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         // yolo?
                         final ArrayList<ValueVector> copy = new ArrayList<>();
                         try {
+                            allocatorMutex.acquire();
                             transferMutex.acquire();
                             for (FieldVector vector : vectorList) {
                                 final TransferPair tp = vector.getTransferPair(transmitAllocator);
@@ -256,20 +254,29 @@ public class Producer implements FlightProducer, AutoCloseable {
                             }
                         } finally {
                             transferMutex.release();
+                            allocatorMutex.release();
                         }
                         logger.debug("adding flusher (depth={})", flushers.incrementAndGet());
                         flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
-                            logger.debug("flushing..");
-                            flush(listener, loader, copy, idx);
+                            try {
+                                transferMutex.acquire();
+                                logger.debug("flushing..");
+                                flush(listener, loader, copy, idx);
+                            } catch (InterruptedException e) {
+                                logger.error("failed to acquire semaphore", e);
+                            } finally {
+                                transferMutex.release();
+                            }
                             flushers.decrementAndGet();
                         }));
                         cnt.set(0);
                         try {
                             allocatorMutex.acquire();
-                            vectorList.forEach(ValueVector::allocateNewSafe);
+                            vectorList.forEach(ValueVector::close);
                         } finally {
                             allocatorMutex.release();
                         }
+                        vectorList.clear();
                         writerMap.values().forEach(writer -> writer.setPosition(0));
                     }
                 } catch (Exception e) {
@@ -292,6 +299,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 if (cnt.get() > 0) {
                     final ArrayList<ValueVector> copy = new ArrayList<>();
                     try {
+                        allocatorMutex.acquire();
                         transferMutex.acquire();
                         for (FieldVector vector : partitionedVectorList[i]) {
                             TransferPair tp = vector.getTransferPair(transmitAllocator);
@@ -300,26 +308,46 @@ public class Producer implements FlightProducer, AutoCloseable {
                         }
                     } finally {
                         transferMutex.release();
+                        allocatorMutex.release();
                     }
                     flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
-                        logger.debug("flushing remainder...");
-                        flush(listener, loader, copy, cnt.decrementAndGet());
+                        try {
+                            try {
+                                transferMutex.acquire();
+                            } catch (InterruptedException e) {
+                                logger.error("failed to acquire semaphore", e);
+                            }
+                            logger.debug("flushing remainder...");
+                            flush(listener, loader, copy, cnt.decrementAndGet());
+                        } finally {
+                            transferMutex.release();
+                        }
                     }));
                 }
             }
 
             // Wait for all flushes...up to 15 mins
-            logger.info("waiting for flush to complete...");
+            logger.info("waiting for flush to complete...{} flushers outstanding", flushers.get());
             flushRef.get().get(15, TimeUnit.MINUTES);
             logger.info("flushing complete");
             listener.completed();
 
+            // Close writers
+            for (Map<String, BaseWriter.ListWriter> writerMap : partitionedWriters) {
+                writerMap.values().forEach(writer -> {
+                    try {
+                        writer.close();
+                    } catch (Exception e) {
+                        logger.error("error closing writer", e);
+                    }
+                });
+            }
+
             // Close any open FieldVectors
             for (List<FieldVector> vectorList : partitionedVectorList)
-                vectorList.forEach(FieldVector::close);
+                vectorList.forEach(FieldVector::clear);
 
         } catch (Exception e) {
-            e.printStackTrace();
             logger.error("ruh row", e);
             throw CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException();
         } finally {

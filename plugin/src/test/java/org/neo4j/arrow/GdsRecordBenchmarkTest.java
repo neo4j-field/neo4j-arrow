@@ -84,8 +84,11 @@ public class GdsRecordBenchmarkTest {
                     onFirstRecord(record);
                     log.info("Job feeding");
                     BiConsumer<RowBasedRecord, Integer> consumer = super.futureConsumer.join();
-                    for (int i = 0; i < numResults; i++)
-                        consumer.accept(record, 1);
+
+                    IntStream.range(1, numResults).parallel().forEach(i -> {
+                        consumer.accept(record, i);
+                    });
+
                     signal.complete(System.currentTimeMillis());
                     log.info("Job finished");
                     onCompletion(() -> "done");
@@ -121,8 +124,8 @@ public class GdsRecordBenchmarkTest {
         final Location location = Location.forGrpcInsecure("localhost", 12345);
         final CompletableFuture<Long> signal = new CompletableFuture<>();
 
-        try (App app = new App(new RootAllocator(Integer.MAX_VALUE), location);
-             Client client = new Client(new RootAllocator(Integer.MAX_VALUE), location)) {
+        try (App app = new App(new RootAllocator(4L * 1024 * 1024 * 1024), location);
+             Client client = new Client(new RootAllocator(4L * 1024 * 1024 * 1024), location)) {
 
             app.registerHandler(new GdsActionHandler(
                     (msg, mode, username) -> new NoOpJob(1_000_000, signal, type), log));

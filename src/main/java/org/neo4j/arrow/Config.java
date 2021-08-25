@@ -26,12 +26,18 @@ public class Config {
             System.getenv().getOrDefault("MAX_MEM_GLOBAL", Long.toString(Long.MAX_VALUE))));
     /** Maximum native memory allowed to be allocated by a single stream */
     public final static long maxStreamMemory = Math.abs(Long.parseLong(
-            System.getenv().getOrDefault("MAX_MEM_STREAM",  Long.toString(Integer.MAX_VALUE))));
+            System.getenv().getOrDefault("MAX_MEM_STREAM",  Long.toString(Long.MAX_VALUE))));
 
     /** Arrow Batch Size controls the size of the transmitted vectors.*/
     public final static int arrowBatchSize = Math.abs(Integer.parseInt(
             System.getenv().getOrDefault("ARROW_BATCH_SIZE", Integer.toString(1_000))
     ));
+
+    /** Arrow parallelism */
+    public final static int arrowMaxPartitions = Math.abs(Integer.parseInt(
+            System.getenv().getOrDefault("ARROW_MAX_PARTITIONS",
+                    String.valueOf(Runtime.getRuntime().availableProcessors() > 2 ?
+                        Runtime.getRuntime().availableProcessors() - 2 : 1))));
 
     /** Bolt fetch size controls how many Records we PULL at a given time. Should be set lower
      * than the Arrow Batch size.

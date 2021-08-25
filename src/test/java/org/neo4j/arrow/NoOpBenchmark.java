@@ -164,8 +164,10 @@ public class NoOpBenchmark {
         final Location location = Location.forGrpcInsecure("localhost", 12345);
         final CompletableFuture<Long> signal = new CompletableFuture<>();
 
-        try (App app = new App(new RootAllocator(Integer.MAX_VALUE), location);
-             Client client = new Client(new RootAllocator(Integer.MAX_VALUE), location)) {
+        App app = new App(new RootAllocator(Long.MAX_VALUE), location);
+        Client client = new Client(new RootAllocator(Long.MAX_VALUE), location);
+
+        try {
 
             app.registerHandler(new NoOpHandler(signal));
             app.start();
@@ -177,6 +179,10 @@ public class NoOpBenchmark {
             logger.info(String.format("Client Lifecycle Time: %,d ms", stop - start));
 
             app.awaitTermination(1, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
+        app.close();
+        client.close();
     }
 }
