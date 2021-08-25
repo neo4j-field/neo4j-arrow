@@ -153,9 +153,11 @@ Some high level TODOs not in code comments:
 - [ ] Dockerize the standalone server app
 
 * GDS Native Support
-- [ ] Multiple node property support for GDS Jobs
+- [X] Multiple node property support for GDS Jobs
 - [ ] Relationship properties!
 - [ ] Property filters (label-based, rel-type based)
+  - [X] node labels
+  - [ ] rel types
 - [ ] Pivot away from RPC actions and just expose Graphs as discoverable 
   flights?
 
