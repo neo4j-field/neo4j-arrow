@@ -117,7 +117,7 @@ approximate raw payload of 1.9M vectors is approximately 1.8 GiB or greater.
 
 ## Figure 1: Visualizing the Results
 
-![Average of Best 3 Results](./figure1.png)
+![Average of Best 3 Results](./figure1.png?raw=true)
 
 # Conclusions
 This test focused on a specific use-case: _streaming homogenous feature 
