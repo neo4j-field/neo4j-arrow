@@ -10,6 +10,8 @@ This is some tire kicking of the [Apache Arrow](https://arrow.apache.org/)
 project to see if Arrow can help solve a few rough spots for us.
 
 ## tl;dr: just give me some links!
+* A [recent benchmark](./speed/26-aug-2021) showing Neo4j-Arrow is _**18x
+  faster** than the Java Driver and **463x faster** than the Python driver!!!_
 * Details on design and how to hack on it: [DEVELOPING.md](./DEVELOPING.md)
 * The kitchen sink: [server-side neo4j-arrow plugin](./plugin/)
 * Neo4j Arrow proxy: [stand-alone server](./server/) (works with Aura, I think)
