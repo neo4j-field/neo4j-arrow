@@ -18,23 +18,28 @@ Date: 26 Aug 2021
   * GCP e2-standard-8 (8 vCPUs, 32 GB memory)
   * Zone northamerica-northeast1-a
 * **Data**
-  * (PaySim)[https://storage.googleapis.com/neo4j-paysim/paysim-07may2021.dump]
+  * [PaySim](https://storage.googleapis.com/neo4j-paysim/paysim-07may2021.dump)
   * 1,892,751 Nodes
   * 5,576,578 Relationships
 
 ### The Graph Projection
+The graph projection isn't complicated: it's just the entire graph :-)
 ```cypher
 CALL gds.graph.create('mygraph', '*', '*');
 ```
+From a cold start, this should take about `1,480 ms`.
 
 ### The Embeddings
+
 ```cypher
 CALL gds.fastRP.mutate('mygraph', {
-    concurrency: 20,
+    concurrency: 28,
     embeddingDimension: 256,
     mutateProperty: 'n'
 });
 ```
+
+From a cold start, this should take about `4,670 ms`.
 
 ## Methodology
 
