@@ -114,7 +114,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
 
-            listener.setUseZeroCopy(true);
+            // listener.setUseZeroCopy(true);
             // Add a job cancellation hook
             listener.setOnCancelHandler(() -> {
                 logger.info("client disconnected or cancelled stream");
