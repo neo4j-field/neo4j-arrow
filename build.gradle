@@ -64,6 +64,7 @@ project(':common') {
         filter {
             includeTestsMatching "org.neo4j.arrow.*"
         }
+        jvmArgs '-XX:MaxDirectMemorySize=8g'
     }
 
     dependencies {
@@ -209,6 +210,7 @@ project(':plugin') {
         filter {
             includeTestsMatching "org.neo4j.arrow.*"
         }
+        jvmArgs '-XX:MaxDirectMemorySize=8g'
     }
 
     repositories {

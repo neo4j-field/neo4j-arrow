@@ -77,6 +77,8 @@ public class Client implements AutoCloseable {
                             logger.debug(String.format("vector %s: %,d bytes", vector.getName(), vector.getBufferSize()));
                         }
                     }
+                    for (FieldVector vector : root.getFieldVectors())
+                        vector.close();
                 }
             }
         } catch (Exception e) {

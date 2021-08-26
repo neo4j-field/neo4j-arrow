@@ -43,7 +43,7 @@ public class GdsRecordBenchmarkTest {
     }
 
     private static RowBasedRecord getRecord(String type) {
-        final int size = 128;
+        final int size = 256;
         switch (type) {
             case "float":
                 float[] data = new float[size];
@@ -124,8 +124,8 @@ public class GdsRecordBenchmarkTest {
         final Location location = Location.forGrpcInsecure("localhost", 12345);
         final CompletableFuture<Long> signal = new CompletableFuture<>();
 
-        try (App app = new App(new RootAllocator(4L * 1024 * 1024 * 1024), location);
-             Client client = new Client(new RootAllocator(4L * 1024 * 1024 * 1024), location)) {
+        try (App app = new App(new RootAllocator(Long.MAX_VALUE), location);
+             Client client = new Client(new RootAllocator(Long.MAX_VALUE), location)) {
 
             app.registerHandler(new GdsActionHandler(
                     (msg, mode, username) -> new NoOpJob(1_000_000, signal, type), log));

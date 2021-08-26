@@ -114,7 +114,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
 
-
+            listener.setUseZeroCopy(true);
             // Add a job cancellation hook
             listener.setOnCancelHandler(() -> {
                 logger.info("client disconnected or cancelled stream");
@@ -164,9 +164,15 @@ public class Producer implements FlightProducer, AutoCloseable {
                         if (vectorList.size() == 0) {
                             for (Field field : fieldList) {
                                 FieldVector fieldVector = field.createVector(streamAllocator);
-                                fieldVector.setInitialCapacity(Config.arrowBatchSize);
-                                fieldVector.allocateNew();
                                 vectorList.add(fieldVector);
+                            }
+                        }
+                        for (FieldVector fieldVector : vectorList) {
+                            int retries = 1000;
+                            fieldVector.setInitialCapacity(Config.arrowBatchSize);
+                            while (!fieldVector.allocateNewSafe() && --retries > 0) {
+                                logger.error("failed to allocate memory for field {}", fieldVector.getName());
+                                try { Thread.sleep(100); } catch (Exception ignored) {};
                             }
                         }
                     }
@@ -265,8 +271,15 @@ public class Producer implements FlightProducer, AutoCloseable {
                             flushers.decrementAndGet();
                         }));
                         cnt.set(0);
-                        vectorList.forEach(ValueVector::close);
-                        writerMap.values().forEach(writer -> writer.setPosition(0));
+                        vectorList.forEach(FieldVector::clear);
+                        writerMap.values().forEach(writer -> {
+                            try {
+                                writer.close();
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        });
+                        writerMap.clear();
                     }
                 } catch (Exception e) {
                     if (errored.compareAndSet(false, true)) {
