@@ -13,11 +13,11 @@ import org.neo4j.graphalgo.core.loading.ImmutableCatalogRequest;
 import org.neo4j.graphalgo.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.logging.Log;
 
-import java.util.Collection;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -88,10 +88,24 @@ public class GdsJob extends Job {
             // Blast off!
             // TODO: GDS lets us batch access to lists of nodes...future opportunity?
             final long start = System.currentTimeMillis();
-            consumer.accept(record, 1);
-            while (iterator.hasNext()) {
-                consumer.accept(GdsNodeRecord.wrap(iterator.next(), keys, propertiesArray, graph::toOriginalNodeId), 1);
-            }
+            consumer.accept(record, 0);
+
+            var s = Spliterators.spliterator(new PrimitiveIterator.OfLong() {
+                @Override
+                public long nextLong() {
+                    return iterator.next();
+                }
+
+                @Override
+                public boolean hasNext() {
+                    return iterator.hasNext();
+                }
+            }, graph.nodeCount() - 1, 0);
+
+            StreamSupport.stream(s, true).parallel().forEach(i -> {
+                    consumer.accept(GdsNodeRecord.wrap(i, keys, propertiesArray, graph::toOriginalNodeId), i.intValue());
+            });
+
             final long delta = System.currentTimeMillis() - start;
 
             onCompletion(() -> String.format("finished GDS stream, duration %,d ms", delta));

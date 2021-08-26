@@ -44,6 +44,8 @@ test {
     filter {
         includeTestsMatching "org.neo4j.arrow.*"
     }
+    jvmArgs '-XX:MaxDirectMemorySize=8g'
+
 }
 
 project(':common') {
