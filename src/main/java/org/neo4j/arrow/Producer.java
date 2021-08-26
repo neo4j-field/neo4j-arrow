@@ -100,13 +100,13 @@ public class Producer implements FlightProducer, AutoCloseable {
         final AtomicReference<CompletableFuture<Void>> flushRef =
                 new AtomicReference<>(CompletableFuture.runAsync(() -> {}));
 
-        try (BufferAllocator streamAllocator = allocator.newChildAllocator(
+        try (BufferAllocator baseAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
                 64L * 1024L * 1024L, Config.maxStreamMemory);
              BufferAllocator transmitAllocator = allocator.newChildAllocator(
                      String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
                      64L * 1024L * 1024L, Config.maxStreamMemory);
-                VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), streamAllocator)) {
+                VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
             logger.debug("using schema: {}", info.getSchema().toJson());
@@ -134,6 +134,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             // Map<String, BaseWriter.ListWriter> writerMap
             final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
             final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
+            final BufferAllocator[] bufferAllocators = new BufferAllocator[maxPartitions];
             final AtomicInteger[] partitionedCnts = new AtomicInteger[maxPartitions];
             final Semaphore[] partitionedSemaphores = new Semaphore[maxPartitions];
             final Semaphore allocatorMutex = new Semaphore(1);
@@ -141,6 +142,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // wasteful, but pre-init for now
             for (int i=0; i<maxPartitions; i++) {
+                bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%d", i), 0, Long.MAX_VALUE);
                 partitionedSemaphores[i] = new Semaphore(1);
                 partitionedWriters[i] = new HashMap<>();
                 partitionedCnts[i] = new AtomicInteger(0);
@@ -151,7 +153,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 final int partition = partitionId % maxPartitions;
                 try {
                     partitionedSemaphores[partition].acquire();
-
+                    final BufferAllocator streamAllocator = bufferAllocators[partition];
                     final AtomicInteger cnt = partitionedCnts[partition];
                     final int idx = cnt.getAndIncrement();
                     final List<FieldVector> vectorList = partitionedVectorList[partition];
@@ -160,16 +162,11 @@ public class Producer implements FlightProducer, AutoCloseable {
                     if (idx == 0) {
                         // (re)init field vectors
                         if (vectorList.size() == 0) {
-                            try {
-                                allocatorMutex.acquire();
-                                for (Field field : fieldList) {
-                                    FieldVector fieldVector = field.createVector(streamAllocator);
-                                    fieldVector.setInitialCapacity(Config.arrowBatchSize);
-                                    fieldVector.allocateNew();
-                                    vectorList.add(fieldVector);
-                                }
-                            } finally {
-                                allocatorMutex.release();
+                            for (Field field : fieldList) {
+                                FieldVector fieldVector = field.createVector(streamAllocator);
+                                fieldVector.setInitialCapacity(Config.arrowBatchSize);
+                                fieldVector.allocateNew();
+                                vectorList.add(fieldVector);
                             }
                         }
                     }
@@ -245,7 +242,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                         // yolo?
                         final ArrayList<ValueVector> copy = new ArrayList<>();
                         try {
-                            allocatorMutex.acquire();
                             transferMutex.acquire();
                             for (FieldVector vector : vectorList) {
                                 final TransferPair tp = vector.getTransferPair(transmitAllocator);
@@ -254,7 +250,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                             }
                         } finally {
                             transferMutex.release();
-                            allocatorMutex.release();
                         }
                         logger.debug("adding flusher (depth={})", flushers.incrementAndGet());
                         flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
@@ -270,13 +265,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                             flushers.decrementAndGet();
                         }));
                         cnt.set(0);
-                        try {
-                            allocatorMutex.acquire();
-                            vectorList.forEach(ValueVector::close);
-                        } finally {
-                            allocatorMutex.release();
-                        }
-                        vectorList.clear();
+                        vectorList.forEach(ValueVector::close);
                         writerMap.values().forEach(writer -> writer.setPosition(0));
                     }
                 } catch (Exception e) {
@@ -299,7 +288,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                 if (cnt.get() > 0) {
                     final ArrayList<ValueVector> copy = new ArrayList<>();
                     try {
-                        allocatorMutex.acquire();
                         transferMutex.acquire();
                         for (FieldVector vector : partitionedVectorList[i]) {
                             TransferPair tp = vector.getTransferPair(transmitAllocator);
@@ -308,7 +296,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                         }
                     } finally {
                         transferMutex.release();
-                        allocatorMutex.release();
                     }
                     flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
                         try {
@@ -346,6 +333,9 @@ public class Producer implements FlightProducer, AutoCloseable {
             // Close any open FieldVectors
             for (List<FieldVector> vectorList : partitionedVectorList)
                 vectorList.forEach(FieldVector::clear);
+
+            for (BufferAllocator allocator : bufferAllocators)
+                allocator.close();
 
         } catch (Exception e) {
             logger.error("ruh row", e);
