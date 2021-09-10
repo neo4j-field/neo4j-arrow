@@ -27,13 +27,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -62,12 +58,24 @@ public class Producer implements FlightProducer, AutoCloseable {
     /* All registered Action handlers */
     final protected Map<String, ActionHandler> handlerMap = new ConcurrentHashMap<>();
 
-    public Producer(BufferAllocator allocator, Location location) {
+    public Producer(BufferAllocator parentAllocator, Location location) {
         this.location = location;
-        this.allocator = allocator;
+        this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer", 0, Long.MAX_VALUE);
 
         // Default event handlers
         handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
+    }
+
+    private static class FlushWork {
+        public final List<ValueVector> vectors;
+        public final int vectorDimension;
+        private FlushWork(List<ValueVector> vectors, int vectorDimension) {
+            this.vectors = vectors;
+            this.vectorDimension = vectorDimension;
+        }
+        public static FlushWork from(List<ValueVector> vectors, int vectorDimension) {
+            return new FlushWork(vectors, vectorDimension);
+        }
     }
 
     /**
@@ -93,12 +101,6 @@ public class Producer implements FlightProducer, AutoCloseable {
             listener.error(CallStatus.NOT_FOUND.withDescription("No flight for ticket").toRuntimeException());
             return;
         }
-
-        // Track number of outstanding Flush jobs
-        final AtomicInteger flushers = new AtomicInteger(0);
-        // Our flushing Future
-        final AtomicReference<CompletableFuture<Void>> flushRef =
-                new AtomicReference<>(CompletableFuture.runAsync(() -> {}));
 
         try (BufferAllocator baseAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
@@ -129,32 +131,53 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: handle batches of records to decrease frequency of calls
             final AtomicBoolean errored = new AtomicBoolean(false);
 
+            // Tunable partition size...
+            // TODO: figure out ideal way to set a good default based on host
             final int maxPartitions = Config.arrowMaxPartitions;
 
             // Map<String, BaseWriter.ListWriter> writerMap
             final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
             final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
             final BufferAllocator[] bufferAllocators = new BufferAllocator[maxPartitions];
-            final AtomicInteger[] partitionedCnts = new AtomicInteger[maxPartitions];
+            final AtomicInteger[] partitionedCounts = new AtomicInteger[maxPartitions];
             final Semaphore[] partitionedSemaphores = new Semaphore[maxPartitions];
-            final Semaphore allocatorMutex = new Semaphore(1);
             final Semaphore transferMutex = new Semaphore(1);
 
-            // wasteful, but pre-init for now
+            // Our work queue for multiple producers, but a single consumer
+            final BlockingDeque<FlushWork> workQueue = new LinkedBlockingDeque<>();
+            final AtomicBoolean isFeeding = new AtomicBoolean(true);
+            final CompletableFuture<Void> flushJob = CompletableFuture.runAsync(() -> {
+               while (isFeeding.get() || workQueue.size() > 0) {
+                   try {
+                       final FlushWork work = workQueue.pollFirst(1, TimeUnit.SECONDS);
+                       if (work != null) {
+                           transferMutex.acquire();
+                           flush(listener, loader, work.vectors, work.vectorDimension);
+                           transferMutex.release();
+                       }
+                   } catch (InterruptedException e) {
+                       logger.error("flush job interrupted!");
+                   }
+               }
+            });
+
+            // Wasteful, but pre-init for now
             for (int i=0; i<maxPartitions; i++) {
                 bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%d", i), 0, Long.MAX_VALUE);
                 partitionedSemaphores[i] = new Semaphore(1);
                 partitionedWriters[i] = new HashMap<>();
-                partitionedCnts[i] = new AtomicInteger(0);
+                partitionedCounts[i] = new AtomicInteger(0);
                 partitionedVectorList[i] = new ArrayList<>(0);
             }
 
-            job.consume((record, partitionId) -> {
-                final int partition = partitionId % maxPartitions;
+            // Core job logic
+            job.consume((record, partitionKey) -> {
+                // Trivial partitioning scheme...
+                final int partition = partitionKey % maxPartitions;
                 try {
                     partitionedSemaphores[partition].acquire();
                     final BufferAllocator streamAllocator = bufferAllocators[partition];
-                    final AtomicInteger cnt = partitionedCnts[partition];
+                    final AtomicInteger cnt = partitionedCounts[partition];
                     final int idx = cnt.getAndIncrement();
                     final List<FieldVector> vectorList = partitionedVectorList[partition];
                     final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
@@ -178,6 +201,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
 
                     // TODO: refactor to using fixed arrays for speed
+                    // Our translation guts...CPU intensive
                     for (int n=0; n<fieldList.size(); n++) {
                         final Field field = fieldList.get(n);
                         final RowBasedRecord.Value value = record.get(n);
@@ -245,8 +269,9 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                     // Flush at our batch size limit and reset our batch states.
                     if ((idx + 1) == Config.arrowBatchSize) {
-                        // yolo?
+                        // Yolo?
                         final ArrayList<ValueVector> copy = new ArrayList<>();
+                        final int vectorSize = idx + 1;
                         try {
                             transferMutex.acquire();
                             for (FieldVector vector : vectorList) {
@@ -257,19 +282,11 @@ public class Producer implements FlightProducer, AutoCloseable {
                         } finally {
                             transferMutex.release();
                         }
-                        logger.debug("adding flusher (depth={})", flushers.incrementAndGet());
-                        flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
-                            try {
-                                transferMutex.acquire();
-                                logger.debug("flushing..");
-                                flush(listener, loader, copy, idx);
-                            } catch (InterruptedException e) {
-                                logger.error("failed to acquire semaphore", e);
-                            } finally {
-                                transferMutex.release();
-                            }
-                            flushers.decrementAndGet();
-                        }));
+
+                        // Queue the flush work
+                        workQueue.add(FlushWork.from(copy, vectorSize));
+
+                        // Reset our partition state
                         cnt.set(0);
                         vectorList.forEach(FieldVector::clear);
                         writerMap.values().forEach(writer -> {
@@ -292,69 +309,61 @@ public class Producer implements FlightProducer, AutoCloseable {
                 }
             });
 
+            // This should block until all data from the Job is prepared for the stream
             job.get();
 
-            // Final flush
+            // Final flush of stragglers...
             for (int i=0; i<maxPartitions; i++) {
-                final AtomicInteger cnt = partitionedCnts[i];
+                final int partition = i;
 
-                if (cnt.get() > 0) {
+                final List<FieldVector> vectorList = partitionedVectorList[partition];
+                final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
+                final int vectorSize = partitionedCounts[partition].get();
+
+                if (vectorSize > 0) {
                     final ArrayList<ValueVector> copy = new ArrayList<>();
                     try {
                         transferMutex.acquire();
-                        for (FieldVector vector : partitionedVectorList[i]) {
-                            TransferPair tp = vector.getTransferPair(transmitAllocator);
+                        for (FieldVector vector : partitionedVectorList[partition]) {
+                            final TransferPair tp = vector.getTransferPair(transmitAllocator);
                             tp.transfer();
                             copy.add(tp.getTo());
                         }
                     } finally {
                         transferMutex.release();
                     }
-                    flushRef.getAndUpdate(future -> future.thenRunAsync(() -> {
-                        try {
-                            try {
-                                transferMutex.acquire();
-                            } catch (InterruptedException e) {
-                                logger.error("failed to acquire semaphore", e);
-                            }
-                            logger.debug("flushing remainder...");
-                            flush(listener, loader, copy, cnt.decrementAndGet());
-                        } finally {
-                            transferMutex.release();
-                        }
-                    }));
+                    workQueue.add(FlushWork.from(copy, vectorSize));
                 }
-            }
-
-            // Wait for all flushes...up to 15 mins
-            logger.info("waiting for flush to complete...{} flushers outstanding", flushers.get());
-            flushRef.get().get(15, TimeUnit.MINUTES);
-            logger.info("flushing complete");
-            listener.completed();
-
-            // Close writers
-            for (Map<String, BaseWriter.ListWriter> writerMap : partitionedWriters) {
+                vectorList.forEach(FieldVector::close);
                 writerMap.values().forEach(writer -> {
                     try {
                         writer.close();
                     } catch (Exception e) {
-                        logger.error("error closing writer", e);
+                        e.printStackTrace();
                     }
                 });
             }
 
-            // Close any open FieldVectors
-            for (List<FieldVector> vectorList : partitionedVectorList)
-                vectorList.forEach(FieldVector::clear);
+            if (!isFeeding.compareAndSet(true, false)) {
+                logger.error("invalid state: expected isFeeding == true");
+                listener.error(CallStatus.INTERNAL.withDescription("unexpected state").toRuntimeException());
+                return;
+            }
+            logger.info("waiting up to 5 mins for flushing to finish...");
+            flushJob.get(5, TimeUnit.MINUTES);
+            logger.info("flushing complete");
 
+            // Close the allocators for each partition
             for (BufferAllocator allocator : bufferAllocators)
                 allocator.close();
 
         } catch (Exception e) {
             logger.error("ruh row", e);
-            throw CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException();
+            listener.error(CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException());
         } finally {
+            logger.info("finishing getStream for ticket {}", ticket);
             flightMap.remove(ticket);
+            listener.completed();
         }
     }
 
@@ -368,22 +377,22 @@ public class Producer implements FlightProducer, AutoCloseable {
      * @param listener reference to the {@link ServerStreamListener}
      * @param loader reference to the {@link VectorLoader}
      * @param vectors
-     * @param idx offset within the stream
+     * @param dimension dimension of the vectors
      */
-    private void flush(ServerStreamListener listener, VectorLoader loader, List<ValueVector> vectors, int idx) {
+    private void flush(ServerStreamListener listener, VectorLoader loader, List<ValueVector> vectors, int dimension) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
         try {
             for (ValueVector vector : vectors) {
                 logger.debug("flushing vector {}", vector.getName());
-                vector.setValueCount(idx + 1);
-                nodes.add(new ArrowFieldNode(idx + 1, 0));
+                vector.setValueCount(dimension);
+                nodes.add(new ArrowFieldNode(dimension, 0));
 
                 if (vector instanceof BaseListVector) {
                     // Variable-width ListVectors have some special crap we need to deal with
                     if (vector instanceof ListVector) {
-                        ((ListVector) vector).setLastSet(idx + 1);
+                        ((ListVector) vector).setLastSet(dimension);
                         buffers.add(vector.getValidityBuffer());
                         buffers.add(vector.getOffsetBuffer());
                     } else {
@@ -406,10 +415,9 @@ public class Producer implements FlightProducer, AutoCloseable {
         } catch (Exception e) {
             logger.error("error preparing batch", e);
         }
-        logger.debug("ready to batch {} nodes with {} buffers", nodes.size(), buffers.size());
 
         // The actual data transmission...
-        try (ArrowRecordBatch batch = new ArrowRecordBatch(idx + 1, nodes, buffers,
+        try (ArrowRecordBatch batch = new ArrowRecordBatch(dimension, nodes, buffers,
                 CompressionUtil.createBodyCompression(new Lz4CompressionCodec()))) {
             loader.load(batch);
             listener.putNext();
@@ -418,8 +426,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());
         }
 
-        // We need to close our reference to the ValueVector to decrement the ref count in the
-        // underlying buffers.
+        // We need to close our reference to the ValueVector to decrement the ref count in the underlying buffers.
         vectors.forEach(ValueVector::close);
     }
 

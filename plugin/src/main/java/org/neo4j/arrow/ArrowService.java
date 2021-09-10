@@ -12,7 +12,7 @@ import org.neo4j.arrow.job.GdsJob;
 import org.neo4j.arrow.job.Neo4jTransactionApiJob;
 import org.neo4j.configuration.GraphDatabaseSettings;
 import org.neo4j.dbms.api.DatabaseManagementService;
-import org.neo4j.graphalgo.compat.GraphDatabaseApiProxy;
+import org.neo4j.gds.compat.GraphDatabaseApiProxy;
 import org.neo4j.kernel.api.security.AuthManager;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;

@@ -1,6 +1,6 @@
 package org.neo4j.arrow;
 
-import org.neo4j.graphalgo.api.nodeproperties.ValueType;
+import org.neo4j.gds.api.nodeproperties.ValueType;
 
 import java.util.Arrays;
 import java.util.List;

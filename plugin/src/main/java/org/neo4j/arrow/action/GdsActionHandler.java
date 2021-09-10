@@ -60,7 +60,6 @@ public class GdsActionHandler implements ActionHandler {
         try {
             msg = GdsMessage.deserialize(action.getBody());
         } catch (IOException e) {
-            e.printStackTrace();
             return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
         }
 

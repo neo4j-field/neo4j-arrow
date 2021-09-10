@@ -108,7 +108,7 @@ public class NoOpBenchmark {
                 logger.info("Job feeding");
 
                 BiConsumer<RowBasedRecord, Integer> consumer = super.futureConsumer.join();
-                IntStream.range(1, numResults)
+                IntStream.range(1, numResults + 1)
                         .parallel()
                         .forEach(i -> consumer.accept(record, i));
 
@@ -168,7 +168,6 @@ public class NoOpBenchmark {
         Client client = new Client(new RootAllocator(Long.MAX_VALUE), location);
 
         try {
-
             app.registerHandler(new NoOpHandler(signal));
             app.start();
 

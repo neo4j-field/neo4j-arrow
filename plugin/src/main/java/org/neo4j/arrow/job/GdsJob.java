@@ -4,13 +4,13 @@ import org.apache.arrow.flight.CallStatus;
 import org.neo4j.arrow.GdsNodeRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.GdsMessage;
-import org.neo4j.graphalgo.NodeLabel;
-import org.neo4j.graphalgo.api.Graph;
-import org.neo4j.graphalgo.api.GraphStore;
-import org.neo4j.graphalgo.api.NodeProperties;
-import org.neo4j.graphalgo.core.loading.GraphStoreCatalog;
-import org.neo4j.graphalgo.core.loading.ImmutableCatalogRequest;
-import org.neo4j.graphalgo.core.utils.collection.primitive.PrimitiveLongIterator;
+import org.neo4j.gds.NodeLabel;
+import org.neo4j.gds.api.Graph;
+import org.neo4j.gds.api.GraphStore;
+import org.neo4j.gds.api.NodeProperties;
+import org.neo4j.gds.core.loading.GraphStoreCatalog;
+import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
+import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.logging.Log;
 
 import java.util.*;
@@ -102,22 +102,22 @@ public class GdsJob extends Job {
                 }
             }, graph.nodeCount() - 1, 0);
 
-            StreamSupport.stream(s, true).parallel().forEach(i -> {
-                    consumer.accept(GdsNodeRecord.wrap(i, keys, propertiesArray, graph::toOriginalNodeId), i.intValue());
-            });
+            StreamSupport.stream(s, true).parallel()
+                    .forEach(i -> consumer.accept(
+                            GdsNodeRecord.wrap(i, keys, propertiesArray, graph::toOriginalNodeId), i.intValue()));
 
             final long delta = System.currentTimeMillis() - start;
 
-            onCompletion(() -> String.format("finished GDS stream, duration %,d ms", delta));
+            onCompletion(() -> String.format("finished generating GDS stream, duration %,d ms", delta));
             return true;
         }).exceptionally(throwable -> {
             log.error(throwable.getMessage(), throwable);
             return false;
         }).handleAsync((aBoolean, throwable) -> {
-            log.info("job completed. result: " + (aBoolean == null ? "failed" : "ok!"));
+            log.info("gds job completed. result: " + (aBoolean == null ? "failed" : "ok!"));
             if (throwable != null)
                 log.error(throwable.getMessage(), throwable);
-            return false;
+            return true;
         });
     }
 

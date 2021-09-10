@@ -16,7 +16,7 @@ project.ext {
     neo4j = [
         driverVersion: '4.3.3',
         serverVersion: '4.3.3',
-        gdsVersion: '1.6.4',
+        gdsVersion: '1.7.0-alpha06',
     ]
     jupiterVersion = '5.7.0'
     sl4jVersion = '1.7.31'
