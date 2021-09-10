@@ -76,7 +76,7 @@ class Neo4jArrow:
         params = {
             'db': database,
             'graph': graph,
-            'type': 'NODE',
+            'type': 'node',
             'properties': properties,
             'filters': filters,
         }
