@@ -20,12 +20,10 @@ import java.util.function.Function;
 public class GdsNodeRecord extends GdsRecord {
     /** Represents the underlying node id */
     private final Value nodeId;
-    private Function<Long, Long> nodeIdResolver;
 
     protected GdsNodeRecord(long nodeId, String[] keys, Value[] values, Function<Long, Long> nodeIdResolver) {
         super(keys, values);
         this.nodeId = wrapScalar(ValueType.LONG, nodeIdResolver.apply(nodeId));
-        this.nodeIdResolver = nodeIdResolver;
     }
 
     protected GdsNodeRecord(long nodeId, List<String> keys, List<Value> values, Function<Long, Long> nodeIdResolver) {
