@@ -13,8 +13,11 @@ import org.neo4j.kernel.api.KernelTransaction;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.logging.Log;
 
+import java.util.Spliterators;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.stream.StreamSupport;
 
 /**
  * Interact with the Database directly via the Transaction API and Cypher.
@@ -45,14 +48,18 @@ public class Neo4jTransactionApiJob extends Job {
                         // XXX we currently assume we get data. no data is boring!
                         throw CallStatus.NOT_FOUND.withDescription("no data returned for job").toRuntimeException();
                     }
-                    CypherRecord record = CypherRecord.wrap(result.next());
+                    final CypherRecord record = CypherRecord.wrap(result.next());
                     onFirstRecord(record);
 
                     // Start consuming the initial result, then iterate through the rest
                     final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
-                    while (result.hasNext()) {
-                        consumer.accept(CypherRecord.wrap(result.next()), 1);
-                    }
+                    consumer.accept(record, 0);
+
+                    // yolo this for now...could make lock free
+                    final AtomicInteger p = new AtomicInteger(0);
+                    final var s = Spliterators.spliteratorUnknownSize(result, 0);
+                    StreamSupport.stream(s, true).parallel()
+                                    .forEach(i -> consumer.accept(CypherRecord.wrap(i), p.incrementAndGet()));
                     log.info("completed processing cypher results");
                 } catch (Exception e) {
                     log.error("crap", e);
