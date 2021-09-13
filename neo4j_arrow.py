@@ -99,12 +99,15 @@ class Neo4jArrow:
         """Block until a given job (specified by a ticket) reaches a status."""
         start = _time.time()
         while _time.time() - start < timeout:
-            if self.status(ticket) == status:
-                return True
-            else:
-                _time.sleep(1)
+            try:
+                if self.status(ticket) == status:
+                    return True
+            except Exception as e:
+                print(f"no job (yet?): {e}")
+            _time.sleep(1)
         return False
     
-    def stream(self, ticket):
+    def stream(self, ticket, timeout=60):
         """Read the stream associated with the given ticket."""
+        self.wait_for_job(ticket, timeout=timeout)
         return self._client.do_get(ticket, options=self._options)
