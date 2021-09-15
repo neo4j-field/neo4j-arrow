@@ -30,7 +30,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         public String toString() {
             switch (this) {
                 case INITIALIZING:
-                    return "initializing";
+                    return "INITIALIZING";
                 case PENDING:
                     return "PENDING";
                 case COMPLETE:
