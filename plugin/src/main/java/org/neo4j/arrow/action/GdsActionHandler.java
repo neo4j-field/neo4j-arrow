@@ -65,7 +65,7 @@ public class GdsActionHandler implements ActionHandler {
 
         switch (action.getType()) {
             case NODE_PROPS_ACTION:
-                Job job = jobCreator.newJob(msg, Job.Mode.READ, Optional.of(username));
+                final Job job = jobCreator.newJob(msg, Job.Mode.READ, Optional.of(username));
                 final Ticket ticket = producer.ticketJob(job);
 
                 // We need to wait for the first record to discern our final schema

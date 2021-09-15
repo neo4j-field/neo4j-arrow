@@ -20,6 +20,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     }
 
     public enum Status {
+        INITIALIZING,
         PENDING,
         PRODUCING,
         COMPLETE,
@@ -28,6 +29,8 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         @Override
         public String toString() {
             switch (this) {
+                case INITIALIZING:
+                    return "initializing";
                 case PENDING:
                     return "PENDING";
                 case COMPLETE:
@@ -41,7 +44,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         }
     }
 
-    private final AtomicReference<Status> jobStatus = new AtomicReference<>(Status.PENDING);
+    private Status jobStatus = Status.INITIALIZING;
     private final CompletableFuture<JobSummary> jobSummary = new CompletableFuture<>();
     private final CompletableFuture<RowBasedRecord> firstRecord = new CompletableFuture<>();
     /** Provides a {@link BiConsumer} taking a {@link RowBasedRecord} with data and a partition id {@link Integer} */
@@ -52,24 +55,25 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         jobId = String.format("job-%d", jobCounter.getAndIncrement());
     }
 
-    public Status getStatus() {
-        return jobStatus.get();
+    public synchronized Status getStatus() {
+        return jobStatus;
     }
 
-    protected void setStatus(Status status) {
-        jobStatus.set(status);
+    // XXX making public for now...API needs some future rework
+    public synchronized void setStatus(Status status) {
+        jobStatus = status;
     }
 
     protected void onFirstRecord(RowBasedRecord record) {
         logger.debug("First record received {}", firstRecord);
-        setStatus(Status.PRODUCING);
         firstRecord.complete(record);
+        setStatus(Status.PENDING);
     }
 
     protected void onCompletion(JobSummary summary) {
-        setStatus(Status.COMPLETE);
         logger.info("Job {} completed", jobId);
         jobSummary.complete(summary);
+        setStatus(Status.COMPLETE);
     }
 
     public void consume(BiConsumer<RowBasedRecord, Integer> consumer) {

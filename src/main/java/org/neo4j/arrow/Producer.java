@@ -446,9 +446,17 @@ public class Producer implements FlightProducer, AutoCloseable {
     }
 
     public void setFlightInfo(Ticket ticket, Schema schema) {
+        final Job job = getJob(ticket);
+        if (job == null)
+            throw CallStatus.INTERNAL.withDescription("no job for flight???").toRuntimeException();
+        assert(job.getStatus() == Job.Status.PENDING || job.getStatus() == Job.Status.INITIALIZING);
+
         final FlightInfo info = new FlightInfo(schema, FlightDescriptor.command(ticket.getBytes()),
                 List.of(new FlightEndpoint(ticket, location)), -1, -1);
         flightMap.put(ticket, info);
+
+        // We need to flip the job status only after the flight map is updated otherwise we could race
+        job.setStatus(Job.Status.PRODUCING);
         logger.info("set flight info {}", info);
     }
 

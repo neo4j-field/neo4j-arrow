@@ -38,7 +38,7 @@ public class StatusHandler implements ActionHandler {
 
         try {
             final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(action.getBody()));
-            Job job = producer.getJob(ticket);
+            final Job job = producer.getJob(ticket);
             if (job != null) {
                 return Outcome.success(new Result(job.getStatus().toString().getBytes(StandardCharsets.UTF_8)));
             }
