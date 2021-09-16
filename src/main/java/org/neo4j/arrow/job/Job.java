@@ -61,11 +61,12 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
 
     // XXX making public for now...API needs some future rework
     public synchronized void setStatus(Status status) {
+        logger.info("status {} -> {}", jobStatus, status);
         jobStatus = status;
     }
 
     protected void onFirstRecord(RowBasedRecord record) {
-        logger.debug("First record received {}", firstRecord);
+        logger.info("First record received {}", firstRecord);
         firstRecord.complete(record);
         setStatus(Status.PENDING);
     }

@@ -104,10 +104,10 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         try (BufferAllocator baseAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                64L * 1024L * 1024L, Config.maxStreamMemory);
+                0, Config.maxStreamMemory);
              BufferAllocator transmitAllocator = allocator.newChildAllocator(
                      String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                     64L * 1024L * 1024L, Config.maxStreamMemory);
+                     0, Config.maxStreamMemory);
                 VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
@@ -147,7 +147,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             final BlockingDeque<FlushWork> workQueue = new LinkedBlockingDeque<>();
             final AtomicBoolean isFeeding = new AtomicBoolean(true);
             final CompletableFuture<Void> flushJob = CompletableFuture.runAsync(() -> {
-               while (isFeeding.get() || workQueue.size() > 0) {
+               while (isFeeding.get() || !workQueue.isEmpty()) {
                    try {
                        final FlushWork work = workQueue.pollFirst(1, TimeUnit.SECONDS);
                        if (work != null) {
@@ -157,6 +157,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                        }
                    } catch (InterruptedException e) {
                        logger.error("flush job interrupted!");
+                       return;
                    }
                }
             });
@@ -422,7 +423,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             loader.load(batch);
             listener.putNext();
         } catch (Exception e) {
-            logger.error(e.getMessage(), e);
+            // logger.error(e.getMessage(), e);
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());
         }
 

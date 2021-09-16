@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
 /**
@@ -52,12 +53,19 @@ public class AsyncDriverJob extends Job {
                     setStatus(Status.PRODUCING);
 
                     /* We need to inspect the first record and guess at a schema :-( */
-                    final Record firstRecord = resultCursor.peekAsync().toCompletableFuture().join();
-                    onFirstRecord(DriverRecord.wrap(firstRecord));
+                    final RowBasedRecord firstRecord = DriverRecord.wrap(
+                            resultCursor.peekAsync().toCompletableFuture().join());
+                    onFirstRecord(firstRecord);
 
                     final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
+
+                    // Hacky for now
                     return resultCursor.forEachAsync(record ->
-                            consumer.accept(DriverRecord.wrap(record), 1));
+                            CompletableFuture.runAsync(() -> {
+                                // Trying to find a "cheap" way to partition the data lock-free
+                                int partition = (int) (System.currentTimeMillis() & ((1 << 30) - 1));
+                                consumer.accept(DriverRecord.wrap(record), partition);
+                            }));
                 }).whenCompleteAsync((resultSummary, throwable) -> {
                     if (throwable != null) {
                         setStatus(Status.ERROR);

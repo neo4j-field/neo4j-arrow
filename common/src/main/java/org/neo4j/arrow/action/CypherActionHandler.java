@@ -59,6 +59,7 @@ public class CypherActionHandler implements ActionHandler {
         try {
             msg = CypherMessage.deserialize(action.getBody());
         } catch (IOException e) {
+            logger.error("failed to deserialize cypher action body", e);
             return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid CypherMessage"));
         }
 
@@ -117,10 +118,10 @@ public class CypherActionHandler implements ActionHandler {
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.Utf8()), null));
                                 break;
-                            case LIST:
+                            case DOUBLE_ARRAY:
                                 // Variable width List...suboptimal, but all we can do with Cypher :-( Assume Doubles for now.
                                 fields.add(new Field(fieldName,
-                                        FieldType.nullable(new ArrowType.List()),
+                                        FieldType.nullable(new ArrowType.FixedSizeList(256)), // XXX yolo
                                         List.of(new Field(fieldName,
                                                 FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
                                                 null))));

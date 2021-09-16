@@ -9,11 +9,12 @@ import org.neo4j.arrow.action.CypherActionHandler;
 import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.arrow.job.GdsJob;
-import org.neo4j.arrow.job.Neo4jTransactionApiJob;
+import org.neo4j.arrow.job.TransactionApiJob;
 import org.neo4j.configuration.GraphDatabaseSettings;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.compat.GraphDatabaseApiProxy;
 import org.neo4j.kernel.api.security.AuthManager;
+import org.neo4j.kernel.impl.query.QueryExecutionEngine;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.internal.LogService;
@@ -59,7 +60,7 @@ public class ArrowService extends LifecycleAdapter {
                 new BasicCallHeaderAuthenticator(new NativeAuthValidator(authManager, log)));
 
         app.registerHandler(new CypherActionHandler(
-                (msg, mode, username) -> new Neo4jTransactionApiJob(msg, username.get(), dbms, log)));
+                (msg, mode, username) -> new TransactionApiJob(msg, username.get(), dbms, log)));
         app.registerHandler(new GdsActionHandler(
                 (msg, mode, username) -> new GdsJob(msg, username.get(), log), log));
     }
@@ -83,7 +84,7 @@ public class ArrowService extends LifecycleAdapter {
         long timeout = 5;
         TimeUnit unit = TimeUnit.SECONDS;
 
-        log.info(String.format(">>>--[Arrow]--> stopping apps %d %s", timeout, unit));
+        log.info(String.format(">>>--[Arrow]--> waiting %d %s for jobs to complete", timeout, unit));
         CompletableFuture.runAsync(() -> {
             try {
                 app.awaitTermination(timeout, unit);

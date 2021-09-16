@@ -11,6 +11,7 @@ import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
+import org.neo4j.kernel.impl.query.QueryExecutionEngine;
 import org.neo4j.logging.Log;
 
 import java.util.*;
@@ -100,7 +101,7 @@ public class GdsJob extends Job {
                 public boolean hasNext() {
                     return iterator.hasNext();
                 }
-            }, graph.nodeCount() - 1, 0);
+            }, graph.nodeCount() - 1, Spliterator.IMMUTABLE | Spliterator.NONNULL);
 
             StreamSupport.stream(s, true).parallel()
                     .forEach(i -> consumer.accept(

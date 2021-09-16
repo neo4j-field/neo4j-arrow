@@ -1,32 +1,44 @@
 package org.neo4j.arrow.job;
 
 import org.apache.arrow.flight.CallStatus;
+import org.neo4j.arrow.Config;
 import org.neo4j.arrow.CypherRecord;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.CypherMessage;
 import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.dbms.api.DatabaseManagementService;
-import org.neo4j.graphdb.Result;
-import org.neo4j.graphdb.Transaction;
+import org.neo4j.graphdb.QueryStatistics;
 import org.neo4j.internal.kernel.api.security.LoginContext;
+import org.neo4j.kernel.GraphDatabaseQueryService;
 import org.neo4j.kernel.api.KernelTransaction;
+import org.neo4j.kernel.impl.coreapi.InternalTransaction;
+import org.neo4j.kernel.impl.factory.KernelTransactionFactory;
+import org.neo4j.kernel.impl.query.*;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.logging.Log;
+import org.neo4j.values.AnyValue;
+import org.neo4j.values.storable.Values;
+import org.neo4j.values.virtual.MapValue;
+import org.neo4j.values.virtual.VirtualValues;
 
-import java.util.Spliterators;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
-import java.util.stream.StreamSupport;
+import java.util.function.Supplier;
 
 /**
  * Interact with the Database directly via the Transaction API and Cypher.
  */
-public class Neo4jTransactionApiJob extends Job {
+public class TransactionApiJob extends Job {
 
     private final CompletableFuture<JobSummary> future;
 
-    public Neo4jTransactionApiJob(CypherMessage msg, String username, DatabaseManagementService dbms, Log log) {
+    public TransactionApiJob(CypherMessage msg, String username, DatabaseManagementService dbms, Log log) {
         super();
 
         final LoginContext context = NativeAuthValidator.contextMap.get(username);
@@ -40,36 +52,115 @@ public class Neo4jTransactionApiJob extends Job {
             final GraphDatabaseAPI api = (GraphDatabaseAPI) dbms.database(msg.getDatabase());
             log.info("Starting neo4j Tx job for cypher:\n%s", msg.getCypher().trim());
 
-            try (Transaction tx = api.beginTransaction(KernelTransaction.Type.EXPLICIT, context)) {
-                try (Result result = tx.execute(msg.getCypher(), msg.getParams())) {
+            // !!! XXX THERE BE DRAGONS HERE XXX !!!
+            final QueryExecutionEngine queryExecutionEngine = api.getDependencyResolver().resolveDependency(QueryExecutionEngine.class);
+            assert(queryExecutionEngine != null);
+            final Supplier<GraphDatabaseQueryService> queryServiceSupplier = () -> {
+                final GraphDatabaseQueryService queryService = api.getDependencyResolver().resolveDependency(GraphDatabaseQueryService.class);
+                assert(queryService != null);
+                return queryService;
+            };
+            KernelTransactionFactory kernelTransactionFactory = api.getDependencyResolver().resolveDependency(KernelTransactionFactory.class);
+            assert(kernelTransactionFactory != null);
+            final TransactionalContextFactory contextFactory = Neo4jTransactionalContextFactory.create(queryServiceSupplier, kernelTransactionFactory);
 
-                    // Get the first record.
-                    if (!result.hasNext()) {
-                        // XXX we currently assume we get data. no data is boring!
-                        throw CallStatus.NOT_FOUND.withDescription("no data returned for job").toRuntimeException();
+            try (InternalTransaction tx = api.beginTransaction(KernelTransaction.Type.EXPLICIT, context)) {
+
+                final List<AnyValue> values = new ArrayList<>();
+                final String[] keys = msg.getParams().keySet().toArray(new String[0]);
+                for (String key : keys)
+                    values.add(Values.of(msg.getParams().get(key), false));
+                final MapValue mv = VirtualValues.map(keys, values.toArray(new AnyValue[0]));
+
+                final TransactionalContext transactionalContext = contextFactory.newContext(tx, msg.getCypher(), mv);
+
+                final BlockingQueue<AnyValue[]> queue = new LinkedBlockingQueue<>();
+                final CompletableFuture<Void> feeding = new CompletableFuture<>();
+
+                final QueryExecution execution = queryExecutionEngine.executeQuery(
+                        msg.getCypher(), mv, transactionalContext, false, new QuerySubscriber() {
+
+                    AnyValue[] values = new AnyValue[0];
+
+                    @Override
+                    public void onResult(int numberOfFields) {
+                        log.info("started fetching results for job %s with %d fields", getJobId(), numberOfFields);
+                        values = new AnyValue[numberOfFields];
                     }
-                    final CypherRecord record = CypherRecord.wrap(result.next());
-                    onFirstRecord(record);
 
-                    // Start consuming the initial result, then iterate through the rest
-                    final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
-                    consumer.accept(record, 0);
+                    @Override
+                    public void onRecord() {
+                        // For now, we'll "zero" all entries every record
+                        Arrays.fill(values, Values.NO_VALUE);
+                    }
 
-                    // yolo this for now...could make lock free
-                    final AtomicInteger p = new AtomicInteger(0);
-                    final var s = Spliterators.spliteratorUnknownSize(result, 0);
-                    StreamSupport.stream(s, true).parallel()
-                                    .forEach(i -> consumer.accept(CypherRecord.wrap(i), p.incrementAndGet()));
-                    log.info("completed processing cypher results");
-                } catch (Exception e) {
-                    log.error("crap", e);
-                    throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
-                } finally {
-                    tx.commit();
+                    @Override
+                    public void onField(int offset, AnyValue value) {
+                        values[offset] = value;
+                    }
+
+                    @Override
+                    public void onRecordCompleted() {
+                        try {
+                            queue.add(Arrays.copyOf(values, values.length));
+                        } catch (Exception e) {
+                            log.error("failed to add work to the queue", e);
+                        }
+                    }
+
+                    @Override
+                    public void onError(Throwable throwable) {
+                        log.error("error consuming results", throwable);
+                    }
+
+                    @Override
+                    public void onResultCompleted(QueryStatistics statistics) {
+                        log.debug("finished fetching results for job %s, still %d items in queue", getJobId(), queue.size());
+                        feeding.complete(null);
+                    }
+                });
+
+                // Blast off!
+                execution.request(Long.MAX_VALUE);
+                final String[] fieldNames = execution.fieldNames();
+
+                // onFirstRecord
+                final CypherRecord firstRecord = CypherRecord.wrap(fieldNames, queue.take());
+                onFirstRecord(firstRecord);
+
+                // Feed the first record, then go hog wild
+                final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
+                consumer.accept(firstRecord, 0);
+
+                final CompletableFuture<?>[] futures = new CompletableFuture[Config.arrowMaxPartitions - 4];
+                for (int i=0; i<futures.length; i++) {
+                    final int partitionId = i;
+                    futures[i] = CompletableFuture.runAsync(() -> {
+                        try {
+                            while (!queue.isEmpty() || !feeding.isDone()) {
+                                final AnyValue[] work = queue.poll(30, TimeUnit.MILLISECONDS);
+                                if (work != null)
+                                    consumer.accept(CypherRecord.wrap(fieldNames, work), partitionId);
+                            }
+                        } catch (InterruptedException e) {
+                            log.debug("queue consumer interrupted");
+                        } catch (Exception e) {
+                            log.error("queue consumer errored: %s", e.getMessage());
+                            e.printStackTrace();
+                        }
+                    }).thenRunAsync(() -> log.info("completed queue worker task"));
                 }
+
+                // And we wait...
+                CompletableFuture.allOf(futures)
+                        .exceptionally(throwable -> {
+                            log.error("oh no...%s", throwable.getMessage());
+                            return null;
+                        })
+                        .join();
             } catch (Exception e) {
-                log.error("crap", e);
-                throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
+                throw CallStatus.INTERNAL.withDescription("failure during TransactionAPIJob")
+                        .withCause(e).toRuntimeException();
             }
             return summarize();
         }).thenApplyAsync(summary -> {
