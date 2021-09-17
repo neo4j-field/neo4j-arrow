@@ -67,18 +67,22 @@ public class TransactionApiJob extends Job {
                 final String[] keys = msg.getParams().keySet().toArray(new String[0]);
                 for (String key : keys)
                     values.add(Values.of(msg.getParams().get(key), false));
-                final MapValue mv = VirtualValues.map(keys, values.toArray(new AnyValue[0]));
+                final MapValue mv = keys.length > 0 ? VirtualValues.map(keys, values.toArray(new AnyValue[0])) : MapValue.EMPTY;
 
                 final TransactionalContext transactionalContext = contextFactory.newContext(tx, msg.getCypher(), mv);
                 // le sigh...TransactionalContext isn't AutoClosable
                 try {
                     final BlockingDeque<AnyValue[]> queue = new LinkedBlockingDeque<>();
                     final CompletableFuture<Void> feeding = new CompletableFuture<>();
+                    final CompletableFuture<AnyValue[]> firstRecordReady = new CompletableFuture<>();
 
                     final QueryExecution execution = queryExecutionEngine.executeQuery(
+                            // prePopulate isn't documented, but it seems to mean "should we lookup properties for Nodes/Rels"
+                            // even if they weren't requested? (e.g. if you MATCH (n) RETURN n, do you get n's props?
                             msg.getCypher(), mv, transactionalContext, false, new QuerySubscriber() {
 
                                 AnyValue[] values = new AnyValue[0];
+                                int rowNum = 0;
 
                                 @Override
                                 public void onResult(int numberOfFields) {
@@ -100,7 +104,24 @@ public class TransactionApiJob extends Job {
                                 @Override
                                 public void onRecordCompleted() {
                                     try {
-                                        queue.offerLast(Arrays.copyOf(values, values.length));
+                                        int spunout = 10;
+                                        final AnyValue[] copy = Arrays.copyOf(values, values.length);
+                                        while (!queue.offerLast(copy, 10, TimeUnit.SECONDS)) {
+                                            log.info("...timed out adding to queue. Trying again.");
+                                            spunout--;
+                                            if (spunout < 0) {
+                                                log.error("spunout adding to queue :-(");
+                                                break;
+                                            }
+                                        }
+
+                                        if (rowNum == 0) {
+                                            log.info("producer completing the firstRecordReady future");
+                                            firstRecordReady.complete(copy);
+                                        }
+                                        if (rowNum % 10_000 == 0)
+                                            log.info("added row %d (queue size = %d)", rowNum, queue.size());
+                                        rowNum++;
                                     } catch (Exception e) {
                                         log.error("failed to add work to the queue", e);
                                     }
@@ -113,24 +134,45 @@ public class TransactionApiJob extends Job {
 
                                 @Override
                                 public void onResultCompleted(QueryStatistics statistics) {
-                                    log.debug("finished fetching results for job %s, still %d items in queue", getJobId(), queue.size());
+                                    log.info("finished fetching results for job %s, still %d items in queue", getJobId(), queue.size());
                                     feeding.complete(null);
                                 }
                             });
 
-                    // Blast off!
-                    execution.request(Long.MAX_VALUE);
+                    // Blast off! Grab 1 record for now.
+                    execution.request(1);
                     final String[] fieldNames = execution.fieldNames();
 
+                    // XXX wtf seriously? this has no way to request all and not block?!
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            execution.consumeAll();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                        log.info("finished requesting all rows");
+                    });
+
                     // onFirstRecord
+                    log.info("...waiting for first item before blasting off 🚀");
                     // TODO: for now wait up to a minute for the first result...needs future work
-                    final AnyValue[] firstValues = queue.pollFirst(60, TimeUnit.SECONDS);
+                    AnyValue[] firstValues;
+                    try {
+                        firstValues = firstRecordReady.get(5, TimeUnit.SECONDS);
+                        log.info("first record should be ready!");
+                        for (AnyValue av : firstValues)
+                            log.info("av: " + av.getTypeName());
+                    } catch (Exception e) {
+                        log.error("bad news bears with the first record!");
+                        throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
+                    }
+
                     final CypherRecord firstRecord = CypherRecord.wrap(fieldNames, firstValues);
+                    log.info("processing first record...");
                     onFirstRecord(firstRecord);
 
                     // Feed the first record, then go hog wild
                     final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
-                    consumer.accept(firstRecord, 0);
 
                     final CompletableFuture<?>[] futures = new CompletableFuture[Config.arrowMaxPartitions];
                     for (int i = 0; i < futures.length; i++) {
@@ -138,7 +180,8 @@ public class TransactionApiJob extends Job {
                         futures[i] = CompletableFuture.runAsync(() -> {
                             try {
                                 while (!queue.isEmpty() || !feeding.isDone()) {
-                                    final AnyValue[] work = queue.pollFirst(30, TimeUnit.MILLISECONDS);
+                                    final AnyValue[] work = queue.pollFirst(10, TimeUnit.MILLISECONDS);
+                                    // TODO: wrap function should take our assumed schema to optimize
                                     if (work != null)
                                         consumer.accept(CypherRecord.wrap(fieldNames, work), partitionId);
                                 }
@@ -152,6 +195,7 @@ public class TransactionApiJob extends Job {
                     }
 
                     // And we wait...
+                    log.info("waiting for %d workers to complete...", futures.length);
                     CompletableFuture.allOf(futures)
                             .exceptionally(throwable -> {
                                 log.error("oh no...%s", throwable.getMessage());

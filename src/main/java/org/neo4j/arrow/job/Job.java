@@ -66,7 +66,7 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     }
 
     protected void onFirstRecord(RowBasedRecord record) {
-        logger.info("First record received {}", firstRecord);
+        logger.info("First record received {}", record);
         firstRecord.complete(record);
         setStatus(Status.PENDING);
     }

@@ -2,8 +2,7 @@ package org.neo4j.arrow;
 
 import org.neo4j.graphdb.Result;
 import org.neo4j.values.AnyValue;
-import org.neo4j.values.storable.NumberType;
-import org.neo4j.values.storable.NumberValue;
+import org.neo4j.values.storable.*;
 import org.neo4j.values.virtual.ListValue;
 
 import java.util.*;
@@ -17,6 +16,8 @@ import java.util.stream.IntStream;
  * and casting. (This is frustrating.)
  */
 public class CypherRecord implements RowBasedRecord {
+
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(CypherRecord.class);
 
     protected final Value[] valueArray;
     protected final String[] keyArray;
@@ -35,12 +36,17 @@ public class CypherRecord implements RowBasedRecord {
         }
     }
 
-    public static CypherRecord wrap(String[] keyArray, AnyValue[] anyValues) {
-        return new CypherRecord(
-                keyArray,
-                Arrays.stream(anyValues)
-                    .map(CypherRecord::wrapAnyValue)
-                    .toArray(Value[]::new));
+    public static CypherRecord wrap(String[] keyArray, AnyValue[] anyValues) throws Exception {
+        try {
+            return new CypherRecord(
+                    keyArray,
+                    Arrays.stream(anyValues)
+                            .map(CypherRecord::wrapAnyValue)
+                            .toArray(Value[]::new));
+        } catch (RuntimeException e) {
+            // TODO: new Exception class
+            throw new Exception(e);
+        }
     }
 
     public static CypherRecord wrap(Map<String, Object> map) {
@@ -94,7 +100,7 @@ public class CypherRecord implements RowBasedRecord {
         };
     }
 
-    protected static Value wrapIntegralListValue(ListValue listValue) {
+    protected static Value wrapIntegralList(ListValue listValue) {
         return new Value() {
             @Override
             public int size() {
@@ -128,7 +134,55 @@ public class CypherRecord implements RowBasedRecord {
         };
     }
 
-    protected static Value wrapFloatingPointListValue(ListValue listValue) {
+    protected static Value wrapFloatList(ListValue listValue) {
+        return new Value() {
+            @Override
+            public int size() {
+                return listValue.length();
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return Arrays.stream(listValue.asArray())
+                        .mapToDouble(val -> ((NumberValue)val).doubleValue())
+                        .boxed()
+                        .map(Double::floatValue)
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public float[] asFloatArray() {
+                // TODO: clean this Double to Float mess :-(
+                final float[] data = new float[listValue.length()];
+                final AnyValue[] anyValues = listValue.asArray();
+                for (int i=0; i<data.length; i++)
+                    data[i] = (float) ((NumberValue)anyValues[i]).doubleValue();
+                return data;
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return Arrays.stream(listValue.asArray())
+                        .mapToDouble(val -> ((NumberValue)val).doubleValue())
+                        .boxed()
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public double[] asDoubleArray() {
+                return Arrays.stream(listValue.asArray())
+                        .mapToDouble(val -> ((NumberValue)val).doubleValue())
+                        .toArray();
+            }
+
+            @Override
+            public Type type() {
+                return Type.FLOAT_ARRAY;
+            }
+        };
+    }
+
+    protected static Value wrapDoubleList(ListValue listValue) {
         return new Value() {
             @Override
             public int size() {
@@ -159,23 +213,69 @@ public class CypherRecord implements RowBasedRecord {
 
     protected static Value wrapListValue(ListValue listValue) {
         if (listValue.nonEmpty()) {
-            final AnyValue head = listValue.head();
-            if (head instanceof NumberValue) {
-                if (((NumberValue) head).numberType() == NumberType.INTEGRAL)
-                    return wrapIntegralListValue(listValue);
-                return wrapFloatingPointListValue(listValue);
+            switch (listValue.getTypeName()) {
+                case "IntegerArray":
+                case "LongArray":
+                case "ShortArray":
+                    return wrapIntegralList(listValue);
+                case "FloatArray":
+                    return wrapFloatList(listValue);
+                case "DoubleArray":
+                    return wrapDoubleList(listValue);
+                default:
+                    logger.error("only handles numeric lists :-( ({})", listValue);
+                    throw new RuntimeException("only handles numeric lists :-(");
             }
-            throw new RuntimeException("only handles numeric lists :-(");
         } else {
+            logger.error("can't handle empty lists yet :-(");
             throw new RuntimeException("can't handle empty lists yet :-(");
         }
     }
 
+    protected static Value wrapArrayValue(ArrayValue arrayValue) {
+        // TODO: object copy might be slow, check on this
+        if (arrayValue instanceof FloatArray) {
+            return GdsRecord.wrapFloatArray(((FloatArray) arrayValue).asObjectCopy());
+        } else if (arrayValue instanceof DoubleArray) {
+            return GdsRecord.wrapDoubleArray(((DoubleArray) arrayValue).asObjectCopy());
+        } else if (arrayValue instanceof IntArray) {
+            return GdsRecord.wrapIntArray(((IntArray) arrayValue).asObjectCopy());
+        } else if (arrayValue instanceof LongArray) {
+            return GdsRecord.wrapLongArray(((LongArray) arrayValue).asObjectCopy());
+        } // TODO: ShortArray
+        logger.error("unhandled ArrayValue of type {}", arrayValue.getTypeName());
+        return null;
+    }
+
+    protected static Value wrapStringValue(StringValue stringValue) {
+        return new Value() {
+            @Override
+            public String asString() {
+                return stringValue.stringValue();
+            }
+
+            @Override
+            public Type type() {
+                return Type.STRING;
+            }
+        };
+    }
+
     protected static Value wrapAnyValue(AnyValue anyValue) {
-        if (anyValue instanceof NumberValue) {
-            return wrapNumberValue((NumberValue)anyValue);
-        } else if (anyValue instanceof ListValue) {
-            return wrapListValue((ListValue) anyValue);
+        try {
+            if (anyValue instanceof NumberValue) {
+                return wrapNumberValue((NumberValue) anyValue);
+            } else if (anyValue instanceof StringValue) {
+                return wrapStringValue((StringValue) anyValue);
+            } else if (anyValue instanceof ListValue) {
+                return wrapListValue((ListValue) anyValue);
+            } else if (anyValue instanceof ArrayValue) {
+                return wrapArrayValue((ArrayValue) anyValue);
+            }
+            logger.error("crap...can't handle type {}", anyValue.getTypeName());
+        } catch (Exception e) {
+            logger.error("bad juju", e);
+            throw new RuntimeException(e);
         }
         throw new RuntimeException("only handles Numbers or List values :-(");
     }

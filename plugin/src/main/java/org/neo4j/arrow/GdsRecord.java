@@ -2,6 +2,7 @@ package org.neo4j.arrow;
 
 import org.neo4j.gds.api.nodeproperties.ValueType;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -53,13 +54,55 @@ public abstract class GdsRecord implements RowBasedRecord {
 
             @Override
             public Type type() {
-                return Type.LIST;
+                return Type.LONG_ARRAY;
+            }
+        };
+    }
+
+    protected static Value wrapIntArray(int[] ints) {
+        return new Value() {
+            @Override
+            public int size() {
+                return ints.length;
+            }
+
+            @Override
+            public List<Object> asList() {
+                return IntStream.range(0, ints.length)
+                        .boxed()
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return IntStream.range(0, ints.length)
+                        .boxed()
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return IntStream.range(0, ints.length)
+                        .mapToLong(i -> (long)i)
+                        .boxed()
+                        .collect(Collectors.toList());
+            }
+
+            @Override
+            public int[] asIntArray() {
+                return ints;
+            }
+
+            @Override
+            public Type type() {
+                return Type.INT_ARRAY;
             }
         };
     }
 
     protected static Value wrapFloatArray(float[] floats) {
         return new Value() {
+
             @Override
             public int size() {
                 return floats.length;
@@ -67,42 +110,29 @@ public abstract class GdsRecord implements RowBasedRecord {
 
             @Override
             public List<Object> asList() {
-                return IntStream.range(0, floats.length)
-                        .mapToObj(idx -> floats[idx])
-                        .collect(Collectors.toList());
-            }
-
-            @Override
-            public List<Integer> asIntList() {
-                return IntStream.range(0, floats.length)
-                        .mapToObj(idx -> Float.floatToIntBits(floats[idx]))
-                        .collect(Collectors.toList());
-            }
-
-            @Override
-            public List<Long> asLongList() {
-                return IntStream.range(0, floats.length)
-                        .mapToObj(idx -> Double.doubleToLongBits(floats[idx]))
-                        .collect(Collectors.toList());
+                return List.of(floats);
             }
 
             @Override
             public List<Float> asFloatList() {
-                return IntStream.range(0, floats.length)
-                        .mapToObj(idx -> floats[idx])
-                        .collect(Collectors.toList());
-            }
-
-            @Override
-            public float[] asFloatArray() {
-                return floats;
+                final ArrayList<Float> list = new ArrayList<>();
+                for (float f : floats)
+                    list.add(f);
+                return list;
             }
 
             @Override
             public List<Double> asDoubleList() {
-                return IntStream.range(0, floats.length)
-                        .mapToObj(idx -> (double) floats[idx])
-                        .collect(Collectors.toList());
+                return asFloatList().stream()
+                        .mapToDouble(Float::doubleValue).boxed().collect(Collectors.toList());
+            }
+
+            @Override
+            public double[] asDoubleArray() {
+                final double[] data = new double[floats.length];
+                for (int i=0; i<data.length; i++)
+                    data[i] = floats[i];
+                return data;
             }
 
             @Override
@@ -111,6 +141,7 @@ public abstract class GdsRecord implements RowBasedRecord {
             }
         };
     }
+
 
     protected static Value wrapDoubleArray(double[] doubles) {
         return new Value() {

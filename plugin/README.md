@@ -32,3 +32,31 @@ Grab an Arrow client, either:
 Docs are still coming together, but see the recent 
 [demo walk-through](../PyArrow%20Demo.ipynb) using the PyArrow-based client 
 for an example.
+
+## An Example using Docker
+Assuming you've got a local directory called `./plugins` that has GDS 1.7 
+and the `neo4j-arrow` jar file (and is readable by uid:gid 7474:7474):
+
+> Tune heap/pagecache as needed
+
+```shell
+#!/bin/sh
+HOST=0.0.0.0
+PORT=9999
+docker run --rm -it --name neo4j-test \
+        -e HOST="${HOST}" -e PORT=${PORT} \
+        -v "$(pwd)/plugins":/plugins \
+        -e NEO4J_AUTH=neo4j/password \
+        -e NEO4J_ACCEPT_LICENSE_AGREEMENT=yes \
+        -p 7687:7687 -p 7474:7474 \
+        -v "$(pwd)/data:/data" \
+        -p "${PORT}:${PORT}" \
+        -e NEO4J_dbms_memory_heap_initial__size=80g \
+        -e NEO4J_dbms_memory_heap_max__size=80g \
+        -e NEO4J_dbms_memory_pagecache_size=16g \
+        -e NEO4J_dbms_security_procedures_unrestricted="gds.*" \
+        -e NEO4J_dbms_jvm_additional=-Dio.netty.tryReflectionSetAccessible=true \
+        -e NEO4J_dbms_allow__upgrade=true \
+        -e NEO4J_gds_enterprise_license__file=/plugins/gds.txt \
+        neo4j:4.3.3-enterprise
+```

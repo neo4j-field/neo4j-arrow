@@ -118,10 +118,23 @@ public class CypherActionHandler implements ActionHandler {
                                 fields.add(new Field(fieldName,
                                         FieldType.nullable(new ArrowType.Utf8()), null));
                                 break;
-                            case DOUBLE_ARRAY:
-                                // Variable width List...suboptimal, but all we can do with Cypher :-( Assume Doubles for now.
+                            case LONG_ARRAY:
                                 fields.add(new Field(fieldName,
-                                        FieldType.nullable(new ArrowType.FixedSizeList(256)), // XXX yolo
+                                        FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
+                                        List.of(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.Int(Long.SIZE, true)),
+                                                null))));
+                                break;
+                            case FLOAT_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
+                                        List.of(new Field(fieldName,
+                                                FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)),
+                                                null))));
+                                break;
+                            case DOUBLE_ARRAY:
+                                fields.add(new Field(fieldName,
+                                        FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
                                         List.of(new Field(fieldName,
                                                 FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
                                                 null))));
