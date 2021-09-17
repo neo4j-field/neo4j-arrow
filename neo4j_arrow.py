@@ -17,6 +17,7 @@ _DEFAULT_PORT = int(env.get('NEO4J_ARROW_PORT', '9999'))
 pa.enable_signal_handlers(True)
 
 class JobStatus(Enum):
+    INITIALIZING = "INITIALIZING"
     PENDING = "PENDING"
     COMPLETE = "COMPLETE"
     ERROR = "ERROR"
