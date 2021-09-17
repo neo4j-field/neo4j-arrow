@@ -70,93 +70,97 @@ public class TransactionApiJob extends Job {
                 final MapValue mv = VirtualValues.map(keys, values.toArray(new AnyValue[0]));
 
                 final TransactionalContext transactionalContext = contextFactory.newContext(tx, msg.getCypher(), mv);
+                // le sigh...TransactionalContext isn't AutoClosable
+                try {
+                    final BlockingDeque<AnyValue[]> queue = new LinkedBlockingDeque<>();
+                    final CompletableFuture<Void> feeding = new CompletableFuture<>();
 
-                final BlockingDeque<AnyValue[]> queue = new LinkedBlockingDeque<>();
-                final CompletableFuture<Void> feeding = new CompletableFuture<>();
+                    final QueryExecution execution = queryExecutionEngine.executeQuery(
+                            msg.getCypher(), mv, transactionalContext, false, new QuerySubscriber() {
 
-                final QueryExecution execution = queryExecutionEngine.executeQuery(
-                        msg.getCypher(), mv, transactionalContext, false, new QuerySubscriber() {
+                                AnyValue[] values = new AnyValue[0];
 
-                    AnyValue[] values = new AnyValue[0];
+                                @Override
+                                public void onResult(int numberOfFields) {
+                                    log.info("started fetching results for job %s with %d fields", getJobId(), numberOfFields);
+                                    values = new AnyValue[numberOfFields];
+                                }
 
-                    @Override
-                    public void onResult(int numberOfFields) {
-                        log.info("started fetching results for job %s with %d fields", getJobId(), numberOfFields);
-                        values = new AnyValue[numberOfFields];
-                    }
+                                @Override
+                                public void onRecord() {
+                                    // For now, we'll "zero" all entries every record
+                                    Arrays.fill(values, Values.NO_VALUE);
+                                }
 
-                    @Override
-                    public void onRecord() {
-                        // For now, we'll "zero" all entries every record
-                        Arrays.fill(values, Values.NO_VALUE);
-                    }
+                                @Override
+                                public void onField(int offset, AnyValue value) {
+                                    values[offset] = value;
+                                }
 
-                    @Override
-                    public void onField(int offset, AnyValue value) {
-                        values[offset] = value;
-                    }
+                                @Override
+                                public void onRecordCompleted() {
+                                    try {
+                                        queue.offerLast(Arrays.copyOf(values, values.length));
+                                    } catch (Exception e) {
+                                        log.error("failed to add work to the queue", e);
+                                    }
+                                }
 
-                    @Override
-                    public void onRecordCompleted() {
-                        try {
-                            queue.offerLast(Arrays.copyOf(values, values.length));
-                        } catch (Exception e) {
-                            log.error("failed to add work to the queue", e);
-                        }
-                    }
+                                @Override
+                                public void onError(Throwable throwable) {
+                                    log.error("error consuming results", throwable);
+                                }
 
-                    @Override
-                    public void onError(Throwable throwable) {
-                        log.error("error consuming results", throwable);
-                    }
+                                @Override
+                                public void onResultCompleted(QueryStatistics statistics) {
+                                    log.debug("finished fetching results for job %s, still %d items in queue", getJobId(), queue.size());
+                                    feeding.complete(null);
+                                }
+                            });
 
-                    @Override
-                    public void onResultCompleted(QueryStatistics statistics) {
-                        log.debug("finished fetching results for job %s, still %d items in queue", getJobId(), queue.size());
-                        feeding.complete(null);
-                    }
-                });
+                    // Blast off!
+                    execution.request(Long.MAX_VALUE);
+                    final String[] fieldNames = execution.fieldNames();
 
-                // Blast off!
-                execution.request(Long.MAX_VALUE);
-                final String[] fieldNames = execution.fieldNames();
+                    // onFirstRecord
+                    // TODO: for now wait up to a minute for the first result...needs future work
+                    final AnyValue[] firstValues = queue.pollFirst(60, TimeUnit.SECONDS);
+                    final CypherRecord firstRecord = CypherRecord.wrap(fieldNames, firstValues);
+                    onFirstRecord(firstRecord);
 
-                // onFirstRecord
-                // TODO: for now wait up to a minute for the first result...needs future work
-                final AnyValue[] firstValues = queue.pollFirst(60, TimeUnit.SECONDS);
-                final CypherRecord firstRecord = CypherRecord.wrap(fieldNames, firstValues);
-                onFirstRecord(firstRecord);
+                    // Feed the first record, then go hog wild
+                    final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
+                    consumer.accept(firstRecord, 0);
 
-                // Feed the first record, then go hog wild
-                final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
-                consumer.accept(firstRecord, 0);
-
-                final CompletableFuture<?>[] futures = new CompletableFuture[Config.arrowMaxPartitions];
-                for (int i=0; i<futures.length; i++) {
-                    final int partitionId = i;
-                    futures[i] = CompletableFuture.runAsync(() -> {
-                        try {
-                            while (!queue.isEmpty() || !feeding.isDone()) {
-                                final AnyValue[] work = queue.pollFirst(30, TimeUnit.MILLISECONDS);
-                                if (work != null)
-                                    consumer.accept(CypherRecord.wrap(fieldNames, work), partitionId);
+                    final CompletableFuture<?>[] futures = new CompletableFuture[Config.arrowMaxPartitions];
+                    for (int i = 0; i < futures.length; i++) {
+                        final int partitionId = i;
+                        futures[i] = CompletableFuture.runAsync(() -> {
+                            try {
+                                while (!queue.isEmpty() || !feeding.isDone()) {
+                                    final AnyValue[] work = queue.pollFirst(30, TimeUnit.MILLISECONDS);
+                                    if (work != null)
+                                        consumer.accept(CypherRecord.wrap(fieldNames, work), partitionId);
+                                }
+                            } catch (InterruptedException e) {
+                                log.debug("queue consumer interrupted");
+                            } catch (Exception e) {
+                                log.error("queue consumer errored: %s", e.getMessage());
+                                e.printStackTrace();
                             }
-                        } catch (InterruptedException e) {
-                            log.debug("queue consumer interrupted");
-                        } catch (Exception e) {
-                            log.error("queue consumer errored: %s", e.getMessage());
-                            e.printStackTrace();
-                        }
-                    }).thenRunAsync(() -> log.debug("completed queue worker task"));
-                }
+                        }).thenRunAsync(() -> log.debug("completed queue worker task"));
+                    }
 
-                // And we wait...
-                CompletableFuture.allOf(futures)
-                        .exceptionally(throwable -> {
-                            log.error("oh no...%s", throwable.getMessage());
-                            return null;
-                        })
-                        .join();
+                    // And we wait...
+                    CompletableFuture.allOf(futures)
+                            .exceptionally(throwable -> {
+                                log.error("oh no...%s", throwable.getMessage());
+                                return null;
+                            })
+                            .join();
+                } finally { // transactional context
+                    transactionalContext.close();
+                }
             } catch (Exception e) {
                 throw CallStatus.INTERNAL.withDescription("failure during TransactionAPIJob")
                         .withCause(e).toRuntimeException();
