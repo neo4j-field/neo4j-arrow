@@ -24,10 +24,7 @@ import org.neo4j.values.virtual.VirtualValues;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -74,7 +71,7 @@ public class TransactionApiJob extends Job {
 
                 final TransactionalContext transactionalContext = contextFactory.newContext(tx, msg.getCypher(), mv);
 
-                final BlockingQueue<AnyValue[]> queue = new LinkedBlockingQueue<>();
+                final BlockingDeque<AnyValue[]> queue = new LinkedBlockingDeque<>();
                 final CompletableFuture<Void> feeding = new CompletableFuture<>();
 
                 final QueryExecution execution = queryExecutionEngine.executeQuery(
@@ -102,7 +99,7 @@ public class TransactionApiJob extends Job {
                     @Override
                     public void onRecordCompleted() {
                         try {
-                            queue.add(Arrays.copyOf(values, values.length));
+                            queue.offerLast(Arrays.copyOf(values, values.length));
                         } catch (Exception e) {
                             log.error("failed to add work to the queue", e);
                         }
@@ -125,20 +122,22 @@ public class TransactionApiJob extends Job {
                 final String[] fieldNames = execution.fieldNames();
 
                 // onFirstRecord
-                final CypherRecord firstRecord = CypherRecord.wrap(fieldNames, queue.take());
+                // TODO: for now wait up to a minute for the first result...needs future work
+                final AnyValue[] firstValues = queue.pollFirst(60, TimeUnit.SECONDS);
+                final CypherRecord firstRecord = CypherRecord.wrap(fieldNames, firstValues);
                 onFirstRecord(firstRecord);
 
                 // Feed the first record, then go hog wild
                 final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
                 consumer.accept(firstRecord, 0);
 
-                final CompletableFuture<?>[] futures = new CompletableFuture[Config.arrowMaxPartitions - 4];
+                final CompletableFuture<?>[] futures = new CompletableFuture[Config.arrowMaxPartitions];
                 for (int i=0; i<futures.length; i++) {
                     final int partitionId = i;
                     futures[i] = CompletableFuture.runAsync(() -> {
                         try {
                             while (!queue.isEmpty() || !feeding.isDone()) {
-                                final AnyValue[] work = queue.poll(30, TimeUnit.MILLISECONDS);
+                                final AnyValue[] work = queue.pollFirst(30, TimeUnit.MILLISECONDS);
                                 if (work != null)
                                     consumer.accept(CypherRecord.wrap(fieldNames, work), partitionId);
                             }
@@ -148,7 +147,7 @@ public class TransactionApiJob extends Job {
                             log.error("queue consumer errored: %s", e.getMessage());
                             e.printStackTrace();
                         }
-                    }).thenRunAsync(() -> log.info("completed queue worker task"));
+                    }).thenRunAsync(() -> log.debug("completed queue worker task"));
                 }
 
                 // And we wait...

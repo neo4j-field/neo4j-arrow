@@ -18,7 +18,7 @@ public class Neo4jDirectClient {
     private static final String cypher =
             System.getenv("GDS") != null
                     ? "CALL gds.graph.streamNodeProperty('mygraph', 'n')"
-                    : "UNWIND range(1, 1000000) AS row RETURN row, [_ IN range(1, 256) | rand()] as fauxEmbedding";
+                    : "UNWIND range(1, 10000000) AS row RETURN row, [_ IN range(1, 256) | rand()] as fauxEmbedding";
 
     public static void main(String[] args) {
         logger.info("Connecting to {} using Java Driver", Config.neo4jUrl);
