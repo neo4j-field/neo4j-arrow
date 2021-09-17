@@ -9,6 +9,9 @@
 This is some tire kicking of the [Apache Arrow](https://arrow.apache.org/)
 project to see if Arrow can help solve a few rough spots for us.
 
+> **NOTICE!** Currently you cannot use APOC with this library due to a class 
+> conflict. It's on the backlog...
+
 ## tl;dr: just give me some links!
 * A [recent benchmark](./speed/26-aug-2021) showing Neo4j-Arrow is _**18x
   faster** than the Java Driver and **463x faster** than the Python driver!!!_
@@ -212,37 +215,45 @@ and (de)serialization. The core implementation is predominantly C++ and
 outside the realm of the CPython interpreter.
 
 For comparison, the same Cypher that generates fake embeddings takes the 
-`neo4j-arrow` implementation, accessed via PyArrow, **only 11.5s** to return 
+`neo4j-arrow` implementation, accessed via PyArrow, **only 2s** to return 
 all the data and only using about 30% of a single CPU.
 
-> **That's 20x faster than using the official Python driver.**
+> **That's over 50x faster than using the official Python driver!**
 
-The best part about this: _it's a suboptimal implementation!_
+#### Beating the Java Driver
+Ok, what about the Java Driver, our gold standard in terms of performance?
 
-In short, as will (hopefully) be explained later in this write-up, this 
-implementation is using variable-width list vectors which add measurable 
-overhead to Arrow's batching. If implemented with fixed-width, i.e. assuming 
-a schema of arrays of floats or doubles for the embedding vectors, it can 
-easily be _over 2x as fast_.
+`neo4j-arrow` has you covered and can be about an order of magnitude faster!
 
-> _"But what about the Java Driver?"_ you may ask.
-> 
-> PyArrow is _as fast_, even with the suboptimal variable-width list vectors,
-> as the Java Driver running the same Cypher. The Java driver consumes 
-> multiple CPU cores and twice as much memory as the PyArrow. As you'll see 
-> shortly, it's possible to _beat the Java Driver_ if we use known width 
-> data structures. (Bolt, keep in mind, assumes Lists are heterogeneous.)
+"How?!," you may ask. How can this be?!
 
-#### Beating Java: Talking to GDS Directly
-The current Java Driver performance far outpaces the Python Driver. A 
-Cypher-based Arrow job can keep up with the Java Driver and outpace it when 
-we can define a definitive schema.
+If we tap into the APIs below the Bolt server, the non-public ones that the 
+Bolt server uses in conjunction with all our drivers, we can really speed 
+things up. In addition, relaxing ordering requirements (meaning we can 
+stream any row as it's ready to be streamed), means we can parallelize a lot 
+of the heavy lifting of converting Neo4j types into Arrow vectors.
 
+**As of 17 September 2021, I've been able to cross 500k rows/s using the 
+following cypher and `neo4j-arrow` on a 30-vcpu VM.**
+
+```
+WITH [ _ IN range(1, $dimension) | rand() ] AS fauxEmbedding
+UNWIND range(1, $rows) AS nodeId
+RETURN nodeId, fauxEmbedding;
+```
+
+The java driver? That takes able to hit little over 50k rows/s. 😁
+
+### TOO FAST, TOO FURIOUS: Talking to GDS Directly
 What if we bypass Cypher altogether? If we talk to the in-memory GDS graph, 
 we have a defined schema!
 
 > TODO: fill in the details here...for now check out the demo IPython notebook:
 > [PyArrow Demo.ipynb](./PyArrow%20Demo.ipynb)
+
+For now, I recommend you check out the [benchmarks](./speed/), but if we 
+bypass Cypher and stream from the GDS in-memory graph we can hit over 1M 
+256-degree vectors _per second_.
 
 ### Problem 3: Batch Jobs
 While not top core concern here, Arrow Flight offers an extensible RPC 
