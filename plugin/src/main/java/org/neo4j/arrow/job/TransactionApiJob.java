@@ -119,7 +119,7 @@ public class TransactionApiJob extends Job {
                                             log.info("producer completing the firstRecordReady future");
                                             firstRecordReady.complete(copy);
                                         }
-                                        if (rowNum % 10_000 == 0)
+                                        if (rowNum % 50_000 == 0)
                                             log.info("added row %d (queue size = %d)", rowNum, queue.size());
                                         rowNum++;
                                     } catch (Exception e) {
@@ -178,6 +178,7 @@ public class TransactionApiJob extends Job {
                     for (int i = 0; i < futures.length; i++) {
                         final int partitionId = i;
                         futures[i] = CompletableFuture.runAsync(() -> {
+                            log.info("worker for partitionId %d ready", partitionId);
                             try {
                                 while (!queue.isEmpty() || !feeding.isDone()) {
                                     final AnyValue[] work = queue.pollFirst(10, TimeUnit.MILLISECONDS);
@@ -191,7 +192,7 @@ public class TransactionApiJob extends Job {
                                 log.error("queue consumer errored: %s", e.getMessage());
                                 e.printStackTrace();
                             }
-                        }).thenRunAsync(() -> log.debug("completed queue worker task"));
+                        }).thenRunAsync(() -> log.info("completed queue worker task (partitionId: %d)", partitionId));
                     }
 
                     // And we wait...

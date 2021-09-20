@@ -18,7 +18,7 @@ public abstract class GdsRecord implements RowBasedRecord {
         this.valueArray = valueArray;
     }
 
-    protected static Value wrapLongArray(long[] longs) {
+    public static Value wrapLongArray(long[] longs) {
         return new Value() {
             final List<Long> values = Arrays.stream(longs).boxed().collect(Collectors.toList());
 
@@ -59,7 +59,7 @@ public abstract class GdsRecord implements RowBasedRecord {
         };
     }
 
-    protected static Value wrapIntArray(int[] ints) {
+    public static Value wrapIntArray(int[] ints) {
         return new Value() {
             @Override
             public int size() {
@@ -100,7 +100,7 @@ public abstract class GdsRecord implements RowBasedRecord {
         };
     }
 
-    protected static Value wrapFloatArray(float[] floats) {
+    public static Value wrapFloatArray(float[] floats) {
         return new Value() {
 
             @Override
@@ -143,7 +143,7 @@ public abstract class GdsRecord implements RowBasedRecord {
     }
 
 
-    protected static Value wrapDoubleArray(double[] doubles) {
+    public static Value wrapDoubleArray(double[] doubles) {
         return new Value() {
 
             @Override
@@ -188,7 +188,7 @@ public abstract class GdsRecord implements RowBasedRecord {
         };
     }
 
-    protected static Value wrapScalar(ValueType t, Number n) {
+    public static Value wrapScalar(ValueType t, Number n) {
         return new Value() {
             private final Number num = n;
             private final ValueType valueType = t;
@@ -236,7 +236,7 @@ public abstract class GdsRecord implements RowBasedRecord {
         };
     }
 
-    protected static Value wrapString(String s) {
+    public static Value wrapString(String s) {
         return new Value() {
             @Override
             public String asString() {

@@ -217,13 +217,17 @@ public class CypherRecord implements RowBasedRecord {
                 case "IntegerArray":
                 case "LongArray":
                 case "ShortArray":
+                    // XXX treat all as "IntegralList" for now
                     return wrapIntegralList(listValue);
                 case "FloatArray":
                     return wrapFloatList(listValue);
+                case "List":
+                    // XXX treat as a "DoubleArray" for now
+                    // Fallthrough
                 case "DoubleArray":
                     return wrapDoubleList(listValue);
                 default:
-                    logger.error("only handles numeric lists :-( ({})", listValue);
+                    logger.error("only handles numeric lists :-( ({})", listValue.getTypeName());
                     throw new RuntimeException("only handles numeric lists :-(");
             }
         } else {
