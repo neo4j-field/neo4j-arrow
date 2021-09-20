@@ -22,8 +22,8 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
+import java.util.function.Function;
+import java.util.stream.*;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -137,9 +137,7 @@ public class GdsJob extends Job {
                         .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key)))))
                 .toArray(Triple[]::new);
 
-        // TODO: optimize?
-        final PrimitiveLongIterator iterator = baseGraph.nodeIterator();
-        if (!iterator.hasNext())
+        if (baseGraph.nodeCount() == 0)
             throw CallStatus.NOT_FOUND.withDescription("no matching node ids for GDS job").toRuntimeException();
 
         AtomicInteger rowCnt = new AtomicInteger(0);
@@ -152,28 +150,30 @@ public class GdsJob extends Job {
 
             // Make rocket go now
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
-            var s = spliterate(iterator, baseGraph.relationshipCount());
-            StreamSupport.stream(s, false)
-                    .flatMap(nodeId -> {
+
+            LongStream.range(0, baseGraph.nodeCount())
+                    .parallel()
+                    .boxed()
+                    .forEach(nodeId -> {
                         final long originalNodeId = baseGraph.toOriginalNodeId(nodeId);
-                        return Arrays.stream(triples)
+                        Arrays.stream(triples)
                                 .flatMap(triple -> {
                                     final RelationshipType type = (RelationshipType) triple.getLeft();
                                     final String key = (String) triple.getMiddle();
-                                    final Graph graph = (Graph) triple.getRight();
+                                    final Graph graph = ((Graph) triple.getRight()).concurrentCopy();
 
-                                    return graph.streamRelationships(nodeId, Double.NaN)
+                                    return graph
+                                            .streamRelationships(nodeId, Double.NaN)
                                             .map(cursor -> new GdsRelationshipRecord(
                                                     originalNodeId,
-                                                    baseGraph.toOriginalNodeId(cursor.targetId()),
+                                                    graph.toOriginalNodeId(cursor.targetId()),
                                                     type.name(),
                                                     key,
                                                     GdsRecord.wrapScalar(ValueType.DOUBLE, cursor.property())));
-                                });
-                    })
-                    .forEach(record -> consumer.accept(record, rowCnt.getAndIncrement()));
+                                }).forEach(record -> consumer.accept(record, rowCnt.getAndIncrement()));
+                    });
 
-            final String summary = String.format("finished generating GDS rel stream, fed %d, rows", rowCnt.get());
+            final String summary = String.format("finished generating GDS rel stream, fed %,d rows", rowCnt.get());
             log.info(summary);
             onCompletion(() -> summary);
             return true;
