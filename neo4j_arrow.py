@@ -86,6 +86,23 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
+    def gds_relationships(self, graph, properties=[], database='neo4j', filters=[]):
+        """
+        Submit a GDS job for streaming Relationship properties.
+        Returns a ticket.
+        """
+        params = {
+            'db': database,
+            'graph': graph,
+            'type': 'relationships',
+            'properties': properties,
+            'filters': filters,
+        }
+        params_bytes = json.dumps(params).encode('utf8')
+        action = (_JOB_GDS, params_bytes)
+        results = self._client.do_action(action, options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
     def status(self, ticket):
         """Check job status for a ticket."""
         if type(ticket) == pa.flight.Ticket:
