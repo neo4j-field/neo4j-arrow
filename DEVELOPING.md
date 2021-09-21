@@ -56,6 +56,7 @@ A quick cheat-sheet:
 Jobs encapsulate the lifecycle of getting data in/out of the backend, which 
 in this case is Neo4j. Jobs have a very simplified state machine at their core:
 
+* `INITIALIZING`: the Job is starting, state is in flux
 * `PENDING`: the Job is submitted and pending results
 * `PRODUCING`: the Job is producing results, i.e. the first record has been 
   received
@@ -119,6 +120,7 @@ format (in utf-8):
 {
   "db": "<the database name>",
   "graph": "<name of the in-memory graph>",
+  "type": "<type of job: 'node' or 'relationships'>",
   "filters": ["<list of label or relationship filters>"],
   "parameters": ["<list of node/relationship parameters>"]
 }
@@ -154,32 +156,40 @@ Some high level TODOs not in code comments:
 
 * GDS Native Support
 - [X] Multiple node property support for GDS Jobs
-- [ ] Relationship properties!
-- [ ] Property filters (label-based, rel-type based)
+- [X] Relationship properties!
+- [X] Property filters (label-based, rel-type based)
   - [X] node labels
-  - [ ] rel types
+  - [?] rel types
 - [ ] Pivot away from RPC actions and just expose Graphs as discoverable 
   flights?
 
 ## TODO's pulled from the code
-> last updated 18 Aug 2021 via [todo.sh](./todo.sh)
+> last updated 20 Sep 2021 via [todo.sh](./todo.sh)
 
-- [ ] TODO: get Cypher username/password from Context? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
 - [ ] TODO: better mapping support for generic Cypher values? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
 - [ ] TODO: fallback to raw bytes? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
 - [ ] TODO: fallback to raw bytes? [GdsActionHandler.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsActionHandler.java)
+- [ ] TODO: "type" is pretty vague...needs a better name [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
 - [ ] TODO: validation / constraints of values? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
 - [ ] TODO: assert our minimum schema? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
-- [ ] TODO: INT? Does it exist? [GdsRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsRecord.java)
-- [ ] TODO: INT_ARRAY? [GdsRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsRecord.java)
-- [ ] TODO: String? Object? What should we do? [GdsRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsRecord.java)
-- [ ] TODO: apply "filters" to labels or types...for now just get all [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
-- [ ] TODO: inspect the schema via the Graph instance...need to change the Job message type [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
-- [ ] TODO: support more than 1 property in the request. Use first filter for now as label filter [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: new Exception class [CypherRecord.java](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java)
+- [ ] TODO: clean this Double to Float mess :-( [CypherRecord.java](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java)
+- [ ] TODO: object copy might be slow, check on this [CypherRecord.java](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java)
+- [ ] TODO: ShortArray [CypherRecord.java}](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java})
+- [ ] TODO: INT? Does it exist? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
+- [ ] TODO: INT_ARRAY? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
+- [ ] TODO: String? Object? What should we do? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
+- [ ] TODO: support both rel type and node label filtering [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: nested for-loop is ugly [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
 - [ ] TODO: GDS lets us batch access to lists of nodes...future opportunity? [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
-- [ ] TODO: pull in reference to LoginContext and use it in the Transaction [Neo4jTransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/Neo4jTransactionApiJob.java)
+- [ ] TODO: should it be nodeCount - 1? We advanced the iterator...maybe? [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: pull in reference to LoginContext and use it in the Transaction [TransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/TransactionApiJob.java)
+- [ ] TODO: for now wait up to a minute for the first result...needs future work [TransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/TransactionApiJob.java)
+- [ ] TODO: wrap function should take our assumed schema to optimize [TransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/TransactionApiJob.java)
+- [ ] TODO: we need to hand out special tokens that map to drivers I think [ProxyAuthHandler.java](./server/src/main/java/org/neo4j/arrow/auth/ProxyAuthHandler.java)
 - [ ] TODO: standardize on matching logic? case sensitive/insensitive? [StatusHandler.java](./src/main/java/org/neo4j/arrow/action/StatusHandler.java)
 - [ ] TODO: make an auth handler that isn't this silly [HorribleBasicAuthValidator.java](./src/main/java/org/neo4j/arrow/auth/HorribleBasicAuthValidator.java)
-- [ ] TODO: do we need to allocate explicitly? [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
+- [ ] TODO: do we need to allocate explicitly? Or can we just not? [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
 - [ ] TODO: handle batches of records to decrease frequency of calls [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
+- [ ] TODO: figure out ideal way to set a good default based on host [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
 - [ ] TODO: refactor to using fixed arrays for speed [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
