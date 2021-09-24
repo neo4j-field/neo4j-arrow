@@ -11,7 +11,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.demo.Client;
-import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.ReadJob;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.log4j.Log4jLogProvider;
 
@@ -64,7 +64,7 @@ public class GdsRecordBenchmarkTest {
         throw new RuntimeException("bad type");
     }
 
-    private static class NoOpJob extends Job {
+    private static class NoOpJob extends ReadJob {
 
         final CompletableFuture<Integer> future;
         final int numResults;
@@ -81,9 +81,7 @@ public class GdsRecordBenchmarkTest {
                     log.info("Job feeding");
                     BiConsumer<RowBasedRecord, Integer> consumer = super.futureConsumer.join();
 
-                    IntStream.range(1, numResults).parallel().forEach(i -> {
-                        consumer.accept(record, i);
-                    });
+                    IntStream.range(1, numResults).parallel().forEach(i -> consumer.accept(record, i));
 
                     signal.complete(System.currentTimeMillis());
                     log.info("Job finished");

@@ -22,6 +22,7 @@ import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
 import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.ReadJob;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -91,11 +92,19 @@ public class Producer implements FlightProducer, AutoCloseable {
     public void getStream(CallContext context, Ticket ticket, ServerStreamListener listener) {
         logger.debug("getStream called: context={}, ticket={}", context, ticket.getBytes());
 
-        final Job job = jobMap.get(ticket);
-        if (job == null) {
+        final Job rawJob = jobMap.get(ticket);
+        if (rawJob == null) {
             listener.error(CallStatus.NOT_FOUND.withDescription("No job for ticket").toRuntimeException());
             return;
         }
+
+        if (!(rawJob instanceof ReadJob)) {
+            listener.error(CallStatus.INTERNAL.withDescription("invalid job base type").toRuntimeException());
+            return;
+        }
+
+        final ReadJob job = (ReadJob)rawJob;
+
         final FlightInfo info = flightMap.get(ticket);
         if (info == null) {
             listener.error(CallStatus.NOT_FOUND.withDescription("No flight for ticket").toRuntimeException());
@@ -136,7 +145,9 @@ public class Producer implements FlightProducer, AutoCloseable {
             final int maxPartitions = Config.arrowMaxPartitions;
 
             // Map<String, BaseWriter.ListWriter> writerMap
+            @SuppressWarnings("unchecked")
             final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
+            @SuppressWarnings("unchecked")
             final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
             final BufferAllocator[] bufferAllocators = new BufferAllocator[maxPartitions];
             final AtomicInteger[] partitionedCounts = new AtomicInteger[maxPartitions];
@@ -196,7 +207,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                             fieldVector.setInitialCapacity(Config.arrowBatchSize);
                             while (!fieldVector.allocateNewSafe() && --retries > 0) {
                                 logger.error("failed to allocate memory for field {}", fieldVector.getName());
-                                try { Thread.sleep(100); } catch (Exception ignored) {};
+                                try { Thread.sleep(100); } catch (Exception ignored) {}
                             }
                         }
                     }
@@ -314,8 +325,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             job.get();
 
             // Final flush of stragglers...
-            for (int i=0; i<maxPartitions; i++) {
-                final int partition = i;
+            for (int partition=0; partition<maxPartitions; partition++) {
 
                 final List<FieldVector> vectorList = partitionedVectorList[partition];
                 final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
@@ -377,7 +387,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      * </p>
      * @param listener reference to the {@link ServerStreamListener}
      * @param loader reference to the {@link VectorLoader}
-     * @param vectors
+     * @param vectors list of {@link ValueVector}s corresponding to the columns of data to flush
      * @param dimension dimension of the vectors
      */
     private void flush(ServerStreamListener listener, VectorLoader loader, List<ValueVector> vectors, int dimension) {
@@ -485,8 +495,8 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         // We assume for now that our "commands" are just a serialized ticket
         try {
-            Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(descriptor.getCommand()));
-            FlightInfo info = flightMap.get(ticket);
+            final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(descriptor.getCommand()));
+            final FlightInfo info = flightMap.get(ticket);
 
             if (info == null) {
                 logger.info("no flight found for ticket {}", ticket);
@@ -502,7 +512,29 @@ public class Producer implements FlightProducer, AutoCloseable {
     @Override
     public Runnable acceptPut(CallContext context, FlightStream flightStream, StreamListener<PutResult> ackStream) {
         logger.debug("acceptPut called");
-        return ackStream::onCompleted;
+        return () -> {
+            Job job;
+            try {
+                final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(flightStream.getDescriptor().getCommand()));
+                job = jobMap.get(ticket);
+            } catch (IOException e) {
+                logger.error("failed to deserialize ticket", e);
+                ackStream.onError(e);
+            }
+            Iterator<String> i = new Iterator<>() {
+                @Override
+                public boolean hasNext() {
+                    return false;
+                }
+
+                @Override
+                public String next() {
+                    return null;
+                }
+            };
+
+            ackStream.onCompleted();
+        };
     }
 
     @Override
@@ -520,10 +552,12 @@ public class Producer implements FlightProducer, AutoCloseable {
         try {
             final Outcome outcome = handler.handle(context, action, this);
             if (outcome.isSuccessful()) {
-                listener.onNext(outcome.result.get());
+                assert(outcome.getResult().isPresent());
+                listener.onNext(outcome.getResult().get());
                 listener.onCompleted();
             } else {
-                final CallStatus callStatus = outcome.callStatus.get();
+                assert(outcome.getCallStatus().isPresent());
+                final CallStatus callStatus = outcome.getCallStatus().get();
                 logger.error(callStatus.description(), callStatus.toRuntimeException());
                 listener.onError(callStatus.toRuntimeException());
             }

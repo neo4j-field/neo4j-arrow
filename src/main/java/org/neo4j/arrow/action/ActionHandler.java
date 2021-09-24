@@ -26,7 +26,7 @@ public interface ActionHandler {
     /**
      * Get a list of descriptions (as {@link ActionType} instances) supported by this handler.
      *
-     * @return a {@link List} of {@ActionType}s supported
+     * @return a {@link List} of {@link ActionType}s supported
      */
     List<ActionType> actionDescriptions();
 
@@ -37,7 +37,7 @@ public interface ActionHandler {
      *                providing access to the peer identity of the caller
      * @param action the {@link Action} to process
      * @param producer reference to the controlling {@link Producer}
-     * @return
+     * @return new Outcome
      */
     Outcome handle(FlightProducer.CallContext context, Action action, Producer producer);
 }

@@ -10,6 +10,7 @@ import org.neo4j.arrow.Producer;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.JobCreator;
+import org.neo4j.arrow.job.ReadJob;
 import org.neo4j.logging.Log;
 
 import java.io.IOException;
@@ -31,9 +32,9 @@ public class GdsActionHandler implements ActionHandler {
 
     private static final List<String> supportedActions = List.of(NODE_PROPS_ACTION, REL_PROPS_ACTION);
     private final Log log;
-    private final JobCreator<GdsMessage> jobCreator;
+    private final JobCreator<GdsMessage, ReadJob> jobCreator;
 
-    public GdsActionHandler(JobCreator<GdsMessage> jobCreator, Log log) {
+    public GdsActionHandler(JobCreator<GdsMessage, ReadJob> jobCreator, Log log) {
         this.jobCreator = jobCreator;
         this.log = log;
     }
@@ -65,7 +66,7 @@ public class GdsActionHandler implements ActionHandler {
 
         switch (action.getType()) {
             case NODE_PROPS_ACTION:
-                final Job job = jobCreator.newJob(msg, Job.Mode.READ, Optional.of(username));
+                final ReadJob job = jobCreator.newJob(msg, Job.Mode.READ, username);
                 final Ticket ticket = producer.ticketJob(job);
 
                 // We need to wait for the first record to discern our final schema
@@ -92,7 +93,7 @@ public class GdsActionHandler implements ActionHandler {
 
                     // Build the Arrow schema from our first record, assuming it's constant
                     final List<Field> fields = new ArrayList<>();
-                    record.keys().stream().forEach(fieldName -> {
+                    record.keys().forEach(fieldName -> {
                         final RowBasedRecord.Value value = record.get(fieldName);
                         log.info("Translating Neo4j value %s -> %s", fieldName, value.type());
 

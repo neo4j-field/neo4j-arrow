@@ -28,8 +28,8 @@ public class App implements AutoCloseable {
      * Create a new Arrow Flight application using the provided memory allocator. It will listen on
      * the provided {@link Location}.
      *
-     * @param rootAllocator
-     * @param location
+     * @param rootAllocator main {@link BufferAllocator} for use by the application
+     * @param location hostname/port to listen on for incoming API calls
      */
     public App(BufferAllocator rootAllocator, Location location) {
         this(rootAllocator, location, "unnamed-app",
@@ -40,10 +40,11 @@ public class App implements AutoCloseable {
      * Create a new Arrow Flight application using the provided memory allocator. It will listen on
      * the provided {@link Location}.
      *
-     * @param rootAllocator
-     * @param location
+     * @param rootAllocator main {@link BufferAllocator} for use by the application
+     * @param location hostname/port to listen on for incoming API calls
      * @param name identifiable name for the service
      */
+    @SuppressWarnings("unused")
     public App(BufferAllocator rootAllocator, Location location, String name) {
         this(rootAllocator, location, name,
                 new BasicCallHeaderAuthenticator(new HorribleBasicAuthValidator()));
@@ -55,10 +56,10 @@ public class App implements AutoCloseable {
      * <p>
      * Utilizes the provided {@link CallHeaderAuthenticator} for authenticating client calls and
      * requests.
-     * @param rootAllocator
-     * @param location
+     * @param rootAllocator main {@link BufferAllocator} for use by the application
+     * @param location hostname/port to listen on for incoming API calls
      * @param name identifiable name for the service
-     * @param authenticator
+     * @param authenticator a {@link CallHeaderAuthenticator} to use for authenticating API calls
      */
     public App(BufferAllocator rootAllocator, Location location, String name, CallHeaderAuthenticator authenticator) {
         allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
@@ -86,6 +87,7 @@ public class App implements AutoCloseable {
         server.awaitTermination(timeout, unit);
     }
 
+    @SuppressWarnings("unused")
     public Location getLocation() {
         return location;
     }

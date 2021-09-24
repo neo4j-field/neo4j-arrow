@@ -24,14 +24,17 @@ import org.neo4j.values.virtual.VirtualValues;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
 /**
  * Interact with the Database directly via the Transaction API and Cypher.
  */
-public class TransactionApiJob extends Job {
+public class TransactionApiJob extends ReadJob {
 
     private final CompletableFuture<JobSummary> future;
 

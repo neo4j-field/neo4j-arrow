@@ -13,15 +13,14 @@ import java.util.Optional;
  * </p>
  */
 public class Outcome {
-    public final Optional<Result> result;
-    public final Optional<CallStatus> callStatus;
+    private final Result result;
+    private final CallStatus callStatus;
 
     protected Outcome(Result result, CallStatus callStatus) {
-        this.result = Optional.ofNullable(result);
-        this.callStatus = Optional.ofNullable(callStatus);
+        this.result = result;
+        this.callStatus = callStatus;
 
-        assert !(this.result.isPresent() && this.callStatus.isPresent());
-        assert !(this.result.isEmpty() && this.callStatus.isEmpty());
+        assert ((result == null) ^ (callStatus == null));
     }
 
     /**
@@ -35,7 +34,7 @@ public class Outcome {
     }
 
     /**
-     * Creates a new successful {@Outcome} from the provided Arrow Flight RPC {@link Result}.
+     * Creates a new successful {@link Outcome} from the provided Arrow Flight RPC {@link Result}.
      *
      * @param result the successful {@link Result} to return
      * @return a new {@link Outcome}
@@ -50,6 +49,14 @@ public class Outcome {
      * @return true if successful, otherwise false.
      */
     public boolean isSuccessful() {
-        return result.isPresent();
+        return result != null;
+    }
+
+    public Optional<Result> getResult() {
+        return Optional.ofNullable(result);
+    }
+
+    public Optional<CallStatus> getCallStatus() {
+        return Optional.ofNullable(callStatus);
     }
 }

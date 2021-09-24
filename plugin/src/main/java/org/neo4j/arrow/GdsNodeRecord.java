@@ -26,28 +26,15 @@ public class GdsNodeRecord extends GdsRecord {
         this.nodeId = wrapScalar(ValueType.LONG, nodeIdResolver.apply(nodeId));
     }
 
-    protected GdsNodeRecord(long nodeId, List<String> keys, List<Value> values, Function<Long, Long> nodeIdResolver) {
-        this(nodeId, keys.toArray(new String[0]), values.toArray(new Value[0]), nodeIdResolver);
-    }
-
     /**
      * Wrap the given GDS information into a single {@link GdsNodeRecord}.
      *
      * @param nodeId the native node id of the record
-     * @param fieldName the name of the property or field
-     * @param properties a reference to the {@link NodeProperties} interface for resolving the value
+     * @param fieldNames the names of the properties or fields
+     * @param propertiesArray an array of references to the {@link NodeProperties} interface for
+     *                        resolving the property values
      * @return a new {@link GdsNodeRecord}
      */
-    public static GdsNodeRecord wrap(long nodeId, String fieldName, NodeProperties properties,
-                                     Function<Long, Long> nodeIdResolver) {
-        return wrap(nodeId, new String[] { fieldName }, new NodeProperties[] { properties }, nodeIdResolver);
-    }
-
-    public static GdsNodeRecord wrap(long nodeId, List<String> fieldNames, List<NodeProperties> propertiesList,
-                                     Function<Long, Long> nodeIdResolver) {
-        return wrap(nodeId, fieldNames.toArray(new String[0]), propertiesList.toArray(new NodeProperties[0]), nodeIdResolver);
-    }
-
     public static GdsNodeRecord wrap(long nodeId, String[] fieldNames, NodeProperties[] propertiesArray,
                                      Function<Long, Long> nodeIdResolver) {
         final Value[] values = new Value[propertiesArray.length];

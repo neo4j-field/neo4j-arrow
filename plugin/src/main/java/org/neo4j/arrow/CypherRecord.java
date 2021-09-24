@@ -49,10 +49,6 @@ public class CypherRecord implements RowBasedRecord {
         }
     }
 
-    public static CypherRecord wrap(Map<String, Object> map) {
-        return new CypherRecord(map);
-    }
-
     public static CypherRecord wrap(Result.ResultRow row, Collection<String> columns) {
         final Map<String, Object> map = new HashMap<>();
         for (String column : columns) {
@@ -90,12 +86,10 @@ public class CypherRecord implements RowBasedRecord {
 
             @Override
             public Type type() {
-                switch (numberValue.numberType()) {
-                    case INTEGRAL:
-                        return Type.LONG;
-                    default:
-                        return Type.DOUBLE;
+                if (numberValue.numberType() == NumberType.INTEGRAL) {
+                    return Type.LONG;
                 }
+                return Type.DOUBLE;
             }
         };
     }

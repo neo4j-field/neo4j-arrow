@@ -1,7 +1,6 @@
 package org.neo4j.arrow;
 
 import org.apache.arrow.flight.*;
-import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -13,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.demo.Client;
-import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.ReadJob;
 
 import java.util.Arrays;
 import java.util.List;
@@ -92,7 +91,7 @@ public class NoOpBenchmark {
         }
     }
 
-    private static class NoOpJob extends Job {
+    private static class NoOpJob extends ReadJob {
 
         final CompletableFuture<Integer> future;
         final int numResults;

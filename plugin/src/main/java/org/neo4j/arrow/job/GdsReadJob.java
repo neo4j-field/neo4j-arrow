@@ -22,18 +22,20 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
-import java.util.stream.*;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
+import java.util.stream.StreamSupport;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
  */
-public class GdsJob extends Job {
+public class GdsReadJob extends ReadJob {
     private final CompletableFuture<Boolean> future;
     private final Log log;
 
     /**
-     * Create a new GdsJob for processing the given {@link GdsMessage}.
+     * Create a new GdsReadJob for processing the given {@link GdsMessage} that reads Node or
+     * Relationship properties from the GDS in-memory graph(s).
      * <p>
      * The supplied username is assumed to allow GDS to enforce authorization and is assumed to be
      * previously authenticated.
@@ -42,12 +44,13 @@ public class GdsJob extends Job {
      * @param username an already authenticated username
      * @param log the Neo4j log instance
      */
-    public GdsJob(GdsMessage msg, String username, Log log) throws RuntimeException {
+    public GdsReadJob(GdsMessage msg, String username, Log log) throws RuntimeException {
         super();
         final CompletableFuture<Boolean> job;
         this.log = log;
-        log.info("GdsJob called for msg: %s", msg);
+        log.info("GdsReadJob called with msg: %s", msg);
 
+        // TODO: error handling for graph store retrieval
         final GraphStore store = GraphStoreCatalog.get(
                 ImmutableCatalogRequest.of(username, msg.getDbName()), msg.getGraphName())
                 .graphStore();
@@ -68,7 +71,7 @@ public class GdsJob extends Job {
             log.error(throwable.getMessage(), throwable);
             return false;
         }).handleAsync((aBoolean, throwable) -> {
-            log.info("job completed! result: " + (aBoolean == null ? "failed" : "ok!"));
+            log.info("GdsReadJob completed! result: " + (aBoolean == null ? "failed" : "ok!"));
             if (throwable != null)
                 log.error(throwable.getMessage(), throwable);
             return false;

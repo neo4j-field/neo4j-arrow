@@ -1,6 +1,8 @@
 package org.neo4j.arrow.action;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -78,6 +80,8 @@ public class GdsMessage {
         return new byte[0];
     }
 
+    private static class MapTypeReference extends TypeReference<Map<String, Object>> { }
+
     /**
      * Deserialize the given bytes, containing JSON, into a GdsMessage instance.
      * @param bytes UTF-8 bytes containing JSON payload
@@ -85,7 +89,9 @@ public class GdsMessage {
      * @throws IOException if error encountered during serialization
      */
     public static GdsMessage deserialize(byte[] bytes) throws IOException {
-        final Map<String, Object> params = mapper.createParser(bytes).readValueAs(Map.class);
+
+        final JsonParser parser = mapper.createParser(bytes);
+        final Map<String, Object> params = parser.readValueAs(new MapTypeReference());
 
         final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "neo4j").toString();
         // TODO: assert our minimum schema?

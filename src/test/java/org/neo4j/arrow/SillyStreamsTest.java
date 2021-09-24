@@ -2,12 +2,8 @@ package org.neo4j.arrow;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Spliterators;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ForkJoinPool;
-import java.util.function.BinaryOperator;
 import java.util.stream.IntStream;
-import java.util.stream.StreamSupport;
 
 public class SillyStreamsTest {
     @Test

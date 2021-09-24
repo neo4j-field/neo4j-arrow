@@ -1,6 +1,6 @@
 package org.neo4j.arrow.job;
 
-import java.util.Optional;
+import javax.annotation.Nullable;
 
 /**
  * The {@link JobCreator} provides a functional interface for creating an instance of a {@link Job}.
@@ -16,7 +16,7 @@ import java.util.Optional;
  * @param <T>
  */
 @FunctionalInterface
-public interface JobCreator<T> {
+public interface JobCreator<T, J extends Job> {
     /**
      * Create a new {@link Job} given the job message, {@link Job.Mode}, and optional username and
      * password.
@@ -26,5 +26,5 @@ public interface JobCreator<T> {
      * @param username optional username for the caller
      * @return new {@link Job}
      */
-    Job newJob(T msg, Job.Mode mode, Optional<String> username);
+    J newJob(T msg, Job.Mode mode, @Nullable String username);
 }

@@ -77,6 +77,7 @@ public interface RowBasedRecord {
             return List.of();
         }
 
+        @SuppressWarnings("unused")
         default List<Integer> asIntList() {
             return List.of();
         }
@@ -85,6 +86,7 @@ public interface RowBasedRecord {
             return new int[0];
         }
 
+        @SuppressWarnings("unused")
         default List<Long> asLongList() {
             return List.of();
         }
