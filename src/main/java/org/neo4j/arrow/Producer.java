@@ -23,6 +23,7 @@ import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.ReadJob;
+import org.neo4j.arrow.job.WriteJob;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -31,6 +32,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -145,10 +148,8 @@ public class Producer implements FlightProducer, AutoCloseable {
             final int maxPartitions = Config.arrowMaxPartitions;
 
             // Map<String, BaseWriter.ListWriter> writerMap
-            @SuppressWarnings("unchecked")
-            final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
-            @SuppressWarnings("unchecked")
-            final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
+            @SuppressWarnings("unchecked") final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
+            @SuppressWarnings("unchecked") final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
             final BufferAllocator[] bufferAllocators = new BufferAllocator[maxPartitions];
             final AtomicInteger[] partitionedCounts = new AtomicInteger[maxPartitions];
             final Semaphore[] partitionedSemaphores = new Semaphore[maxPartitions];
@@ -513,25 +514,67 @@ public class Producer implements FlightProducer, AutoCloseable {
     public Runnable acceptPut(CallContext context, FlightStream flightStream, StreamListener<PutResult> ackStream) {
         logger.debug("acceptPut called");
         return () -> {
-            Job job;
+            Job rawJob = null;
             try {
                 final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(flightStream.getDescriptor().getCommand()));
-                job = jobMap.get(ticket);
+                rawJob = jobMap.get(ticket);
+
+                // Do we even have a job for this ticket? Provide guidance if we don't.
+                if (rawJob == null) {
+                    RuntimeException e = CallStatus.NOT_FOUND.withDescription("job not found for ticket").toRuntimeException();
+                    logger.error(String.format("can't find job for ticket %s", ticket), e);
+                    ackStream.onError(e);
+                    return;
+                }
             } catch (IOException e) {
+                // Could be a malformed ticket. Log something helpful on the server, but don't divulge too much to client.
                 logger.error("failed to deserialize ticket", e);
-                ackStream.onError(e);
+                ackStream.onError(CallStatus.INVALID_ARGUMENT
+                        .withDescription("could not deserialize ticket").toRuntimeException());
+                return;
             }
-            Iterator<String> i = new Iterator<>() {
-                @Override
-                public boolean hasNext() {
-                    return false;
+
+            // Double-check our Job type
+            if (!(rawJob instanceof WriteJob)) {
+                logger.error("job isn't a write job");
+                ackStream.onError(CallStatus.INVALID_ARGUMENT
+                        .withDescription("provided ticket isn't for a write job").toRuntimeException());
+                return;
+            }
+
+            // TODO: validate root.Schema
+
+            final WriteJob job = (WriteJob) rawJob;
+            final BiConsumer<Long, String[]> consumer = job.getConsumer();
+
+            // Process our stream. Everything in here needs to be checked for memory leaks!
+            try (final VectorSchemaRoot root = flightStream.getRoot()) {
+                final VectorUnloader unloader = new VectorUnloader(root);
+
+                final List<FieldVector> vectors = root.getFieldVectors();
+                long rowId = 0;
+
+                while (flightStream.next()){
+                    try (final ArrowRecordBatch batch = unloader.getRecordBatch()) {
+                        logger.info("consuming batch ({} rows)", batch.getLength());
+
+                        // XXX brute force
+                        for (int i=0; i<batch.getLength(); i++) {
+                            consumer.accept(rowId, new String[] {"hey", "dude"});
+                            rowId++;
+                        }
+                        // TODO: what should we send back? Anything specific?
+                        ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
+                    }
                 }
 
-                @Override
-                public String next() {
-                    return null;
-                }
-            };
+                // XXX need a way to guarantee we call this at the end (I think?)
+                flightStream.takeDictionaryOwnership();
+            } catch (Exception e) {
+                logger.error("error during batch unloading", e);
+                ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());
+                return;
+            }
 
             ackStream.onCompleted();
         };

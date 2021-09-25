@@ -10,9 +10,10 @@ public abstract class ReadJob extends Job {
 
     public static final Mode mode = Mode.READ;
 
+    /** Completes once the first record is received and ready from the Neo4j system. */
     private final CompletableFuture<RowBasedRecord> firstRecord = new CompletableFuture<>();
-    /** Provides a {@link BiConsumer} taking a {@link RowBasedRecord} with data and a partition id {@link Integer} */
 
+    /** Provides a {@link BiConsumer} taking a {@link RowBasedRecord} with data and a partition id {@link Integer} */
     protected final CompletableFuture<BiConsumer<RowBasedRecord, Integer>> futureConsumer = new CompletableFuture<>();
 
     protected void onFirstRecord(RowBasedRecord record) {

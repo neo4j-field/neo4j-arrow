@@ -27,10 +27,13 @@ import java.util.concurrent.Future;
  * Provides jobs/services for reading properties from a graph projection in the Graph Catalog.
  */
 public class GdsActionHandler implements ActionHandler {
-    public static final String NODE_PROPS_ACTION = "gdsNodeProperties";
-    public static final String REL_PROPS_ACTION = "gdsRelProperties";
+    // TODO: rename property keys to read/write forms
+    public static final String NODE_READ_ACTION = "gdsNodeProperties";
+    public static final String RELS_READ_ACTION = "gdsRelProperties";
+    public static final String NODE_WRITE_ACTION = "gds.write.nodes";
+    public static final String RELS_WRITE_ACTION = "gds.write.relationships";
 
-    private static final List<String> supportedActions = List.of(NODE_PROPS_ACTION, REL_PROPS_ACTION);
+    private static final List<String> supportedActions = List.of(NODE_READ_ACTION, RELS_READ_ACTION);
     private final Log log;
     private final JobCreator<GdsMessage, ReadJob> jobCreator;
 
@@ -46,8 +49,8 @@ public class GdsActionHandler implements ActionHandler {
 
     @Override
     public List<ActionType> actionDescriptions() {
-        return List.of(new ActionType(NODE_PROPS_ACTION, "Stream node properties from a GDS Graph"),
-                new ActionType(REL_PROPS_ACTION, "Stream relationship properties from a GDS Graph"));
+        return List.of(new ActionType(NODE_READ_ACTION, "Stream node properties from a GDS Graph"),
+                new ActionType(RELS_READ_ACTION, "Stream relationship properties from a GDS Graph"));
     }
 
     @Override
@@ -65,7 +68,7 @@ public class GdsActionHandler implements ActionHandler {
         }
 
         switch (action.getType()) {
-            case NODE_PROPS_ACTION:
+            case NODE_READ_ACTION:
                 final ReadJob job = jobCreator.newJob(msg, Job.Mode.READ, username);
                 final Ticket ticket = producer.ticketJob(job);
 
@@ -158,7 +161,10 @@ public class GdsActionHandler implements ActionHandler {
 
                 // We're taking off, so hand the ticket back to our client.
                 return Outcome.success(new Result(ticket.serialize().array()));
-            case REL_PROPS_ACTION:
+            case NODE_WRITE_ACTION:
+
+            case RELS_READ_ACTION:
+            case RELS_WRITE_ACTION:
                 // not implemented yet
                 break;
         }

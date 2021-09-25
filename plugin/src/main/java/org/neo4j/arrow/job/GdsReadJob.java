@@ -31,7 +31,6 @@ import java.util.stream.StreamSupport;
  */
 public class GdsReadJob extends ReadJob {
     private final CompletableFuture<Boolean> future;
-    private final Log log;
 
     /**
      * Create a new GdsReadJob for processing the given {@link GdsMessage} that reads Node or
@@ -44,17 +43,16 @@ public class GdsReadJob extends ReadJob {
      * @param username an already authenticated username
      * @param log the Neo4j log instance
      */
-    public GdsReadJob(GdsMessage msg, String username, Log log) throws RuntimeException {
+    public GdsReadJob(GdsMessage msg, String username) throws RuntimeException {
         super();
         final CompletableFuture<Boolean> job;
-        this.log = log;
-        log.info("GdsReadJob called with msg: %s", msg);
+        logger.info("GdsReadJob called with msg: {}", msg);
 
         // TODO: error handling for graph store retrieval
         final GraphStore store = GraphStoreCatalog.get(
                 ImmutableCatalogRequest.of(username, msg.getDbName()), msg.getGraphName())
                 .graphStore();
-        log.info("got GraphStore for graph named %s", msg.getGraphName());
+        logger.info("got GraphStore for graph named {}", msg.getGraphName());
 
         switch (msg.getRequestType()) {
             case node:
@@ -68,12 +66,12 @@ public class GdsReadJob extends ReadJob {
         }
 
         future = job.exceptionally(throwable -> {
-            log.error(throwable.getMessage(), throwable);
+            logger.error(throwable.getMessage(), throwable);
             return false;
         }).handleAsync((aBoolean, throwable) -> {
-            log.info("GdsReadJob completed! result: " + (aBoolean == null ? "failed" : "ok!"));
+            logger.info("GdsReadJob completed! result: {}", (aBoolean == null ? "failed" : "ok!"));
             if (throwable != null)
-                log.error(throwable.getMessage(), throwable);
+                logger.error(throwable.getMessage(), throwable);
             return false;
         });
     }
@@ -100,24 +98,24 @@ public class GdsReadJob extends ReadJob {
                     .filter(store::hasRelationshipType)
                     .collect(Collectors.toUnmodifiableList())
                 : store.relationshipTypes();
-        log.info("proceeding with relTypes: %s", relTypes);
+        logger.info("proceeding with relTypes: {}", relTypes);
 
         // Make sure we have the requested rel properties.
         // TODO: nested for-loop is ugly
         for (String key : msg.getProperties()) {
             boolean found = false;
             for (RelationshipType type : relTypes) {
-                log.info("type %s has key %s?", type.name(), key);
+                logger.info("type {} has key {}", type.name(), key);
                 if (store.hasRelationshipProperty(type, key)) {
-                    log.info("  yes!", type, key);
+                    logger.info("  yes!");
                     found = true;
                     break;
                 } else {
-                    log.info("  nope.", type, key);
+                    logger.info("  nope.");
                 }
             }
             if (!found) {
-                log.error("no relationship property found for %s", key);
+                logger.error("no relationship property found for {}", key);
                 throw CallStatus.NOT_FOUND
                         .withDescription(String.format("no relationship property found for %s", key))
                         .toRuntimeException();
@@ -127,7 +125,7 @@ public class GdsReadJob extends ReadJob {
         final Graph baseGraph = (relTypes.size() > 0) ?
                 store.getGraph(store.nodeLabels(), relTypes, Optional.empty())
                 : store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
-        log.info("got graph for labels %s, relationship types %s", baseGraph.schema().nodeSchema().availableLabels(),
+        logger.info("got graph for labels {}, relationship types {}", baseGraph.schema().nodeSchema().availableLabels(),
                 baseGraph.schema().relationshipSchema().availableTypes());
 
         // Borrow the approach used by gds.graph.streamRelationshipProperties()...i.e. build triples
@@ -177,16 +175,16 @@ public class GdsReadJob extends ReadJob {
                     });
 
             final String summary = String.format("finished generating GDS rel stream, fed %,d rows", rowCnt.get());
-            log.info(summary);
+            logger.info(summary);
             onCompletion(() -> summary);
             return true;
         }).exceptionally(throwable -> {
-            log.error(throwable.getMessage(), throwable);
+            logger.error(throwable.getMessage(), throwable);
             return false;
         }).handleAsync((aBoolean, throwable) -> {
-            log.info("gds job completed. result: " + (aBoolean == null ? "failed" : "ok!"));
+            logger.info("gds job completed. result: {}", (aBoolean == null ? "failed" : "ok!"));
             if (throwable != null)
-                log.error(throwable.getMessage(), throwable);
+                logger.error(throwable.getMessage(), throwable);
             return true;
         });
     }
@@ -198,13 +196,13 @@ public class GdsReadJob extends ReadJob {
         final Graph graph = (labels.size() > 0) ?
                 store.getGraph(labels, store.relationshipTypes(), Optional.empty())
                 : store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
-        log.info("got graph for labels %s, relationship types %s", store.nodeLabels(),
+        logger.info("got graph for labels {}, relationship types {}", store.nodeLabels(),
                 store.relationshipTypes());
 
         // Make sure we have the requested node properties
         for (String key : msg.getProperties()) {
             if (!store.hasNodeProperty(store.nodeLabels(), key)) {
-                log.error("no node property found for %s", key);
+                logger.error("no node property found for {}", key);
                 throw CallStatus.NOT_FOUND
                         .withDescription(String.format("no node property found for %s", key))
                         .toRuntimeException();
@@ -224,9 +222,9 @@ public class GdsReadJob extends ReadJob {
             long nodeId = iterator.next();
             GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId);
             onFirstRecord(record);
-            log.debug("got first record");
+            logger.debug("got first record");
             for (int i=0; i<keys.length; i++)
-                log.info("  %s -> %s", keys[i], propertiesArray[i].valueType());
+                logger.info(" {} -> {}", keys[i], propertiesArray[i].valueType());
 
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
 
@@ -246,12 +244,12 @@ public class GdsReadJob extends ReadJob {
             onCompletion(() -> String.format("finished generating GDS stream, duration %,d ms", delta));
             return true;
         }).exceptionally(throwable -> {
-            log.error(throwable.getMessage(), throwable);
+            logger.error(throwable.getMessage(), throwable);
             return false;
         }).handleAsync((aBoolean, throwable) -> {
-            log.info("gds job completed. result: " + (aBoolean == null ? "failed" : "ok!"));
+            logger.info("gds job completed. result: {}", (aBoolean == null ? "failed" : "ok!"));
             if (throwable != null)
-                log.error(throwable.getMessage(), throwable);
+                logger.error(throwable.getMessage(), throwable);
             return true;
         });
     }

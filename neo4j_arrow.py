@@ -8,7 +8,8 @@ from enum import Enum
 from os import environ as env
 
 _JOB_CYPHER = "cypherRead"
-_JOB_GDS = "gdsNodeProperties"
+_JOB_GDS = "gdsNodeProperties"      # TODO: rename
+_JOB_GDS_WRITE = "gdsWriteNodes"
 _JOB_STATUS = "jobStatus"
 
 _DEFAULT_HOST = env.get('NEO4J_ARROW_HOST', 'localhost')

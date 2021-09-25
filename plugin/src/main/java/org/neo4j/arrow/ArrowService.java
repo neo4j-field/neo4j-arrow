@@ -61,7 +61,7 @@ public class ArrowService extends LifecycleAdapter {
         app.registerHandler(new CypherActionHandler(
                 (msg, mode, username) -> new TransactionApiJob(msg, username, dbms, log)));
         app.registerHandler(new GdsActionHandler(
-                (msg, mode, username) -> new GdsReadJob(msg, username, log), log));
+                (msg, mode, username) -> new GdsReadJob(msg, username), log));
     }
 
     @Override

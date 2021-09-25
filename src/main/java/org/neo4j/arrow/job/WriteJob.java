@@ -1,7 +1,17 @@
 package org.neo4j.arrow.job;
 
-public class WriteJob extends Job {
+
+import java.util.function.BiConsumer;
+
+public abstract class WriteJob extends Job {
+
     public static final Mode mode = Mode.WRITE;
+
+    private BiConsumer<Long, String[]> consumer;
+
+    public WriteJob() {
+        super();
+    }
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
@@ -11,5 +21,13 @@ public class WriteJob extends Job {
     @Override
     public void close() throws Exception {
 
+    }
+
+    public void setConsumer(BiConsumer<Long, String[]> consumer) {
+        this.consumer = consumer;
+    }
+
+    public BiConsumer<Long, String[]> getConsumer() {
+        return consumer;
     }
 }
