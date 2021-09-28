@@ -33,7 +33,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -493,6 +492,7 @@ public class Producer implements FlightProducer, AutoCloseable {
     @Override
     public FlightInfo getFlightInfo(CallContext context, FlightDescriptor descriptor) {
         logger.debug("getFlightInfo called: context={}, descriptor={}", context, descriptor);
+        // XXX needs authorization
 
         // We assume for now that our "commands" are just a serialized ticket
         try {
@@ -514,7 +514,7 @@ public class Producer implements FlightProducer, AutoCloseable {
     public Runnable acceptPut(CallContext context, FlightStream flightStream, StreamListener<PutResult> ackStream) {
         logger.debug("acceptPut called");
         return () -> {
-            Job rawJob = null;
+            Job rawJob;
             try {
                 final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(flightStream.getDescriptor().getCommand()));
                 rawJob = jobMap.get(ticket);
@@ -551,7 +551,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             try (final VectorSchemaRoot root = flightStream.getRoot()) {
                 final VectorUnloader unloader = new VectorUnloader(root);
 
-                final List<FieldVector> vectors = root.getFieldVectors();
+                // final List<FieldVector> vectors = root.getFieldVectors();
                 long rowId = 0;
 
                 while (flightStream.next()){
@@ -574,8 +574,10 @@ public class Producer implements FlightProducer, AutoCloseable {
                 logger.error("error during batch unloading", e);
                 ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());
                 return;
+            } finally {
+                // XXX error handling
+                job.onComplete();
             }
-
             ackStream.onCompleted();
         };
     }

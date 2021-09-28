@@ -9,7 +9,8 @@ from os import environ as env
 
 _JOB_CYPHER = "cypherRead"
 _JOB_GDS = "gdsNodeProperties"      # TODO: rename
-_JOB_GDS_WRITE = "gdsWriteNodes"
+_JOB_GDS_WRITE = "gds.write.nodes"
+_JOB_GDS_WRITE_RELS = "gds.write.relationships"
 _JOB_STATUS = "jobStatus"
 
 _DEFAULT_HOST = env.get('NEO4J_ARROW_HOST', 'localhost')
@@ -87,6 +88,20 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
+    def gds_write_nodes(self, graph, properties=[], database='neo4j', filters=[]):
+        """Submit a GDS Write Job for creating Nodes and Node Properties."""
+        params = {
+             'db': database,
+             'graph': graph,
+             'type': 'node',
+             'properties': properties,
+             'filters': filters,
+         }
+        params_bytes = json.dumps(params).encode('utf8')
+        action = (_JOB_GDS_WRITE, params_bytes)
+        results = self._client.do_action(action, options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
     def gds_relationships(self, graph, properties=[], database='neo4j', filters=[]):
         """
         Submit a GDS job for streaming Relationship properties.
@@ -130,3 +145,17 @@ class Neo4jArrow:
         """Read the stream associated with the given ticket."""
         self.wait_for_job(ticket, timeout=timeout)
         return self._client.do_get(ticket, options=self._options)
+
+    def put_stream(self, ticket, data):
+        """Write a stream to the server"""
+        # no need to wait for writes
+        # XXX dummy data for now
+        d = {
+            "labels": [("Junk") for _ in range(0, 100)],
+            "age": list(range(0, 100))
+        }
+        table = pa.table(data=d)
+        descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
+        writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)
+        writer.write_table(table)
+        writer.close()

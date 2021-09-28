@@ -13,7 +13,6 @@ import javax.annotation.Nullable;
  *     It's assumed that things like the {@link Job.Mode}, a username, and password are common
  *     enough to warrant being in the core signature. (Albeit username and password are optional.)
  * </p>
- * @param <T>
  */
 @FunctionalInterface
 public interface JobCreator<T, J extends Job> {

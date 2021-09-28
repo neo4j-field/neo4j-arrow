@@ -3,21 +3,35 @@ package org.neo4j.arrow.job;
 import org.apache.arrow.flight.CallStatus;
 import org.neo4j.arrow.Config;
 import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.dbms.api.DatabaseManagementService;
+import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
 import org.neo4j.gds.api.AdjacencyCursor;
 import org.neo4j.gds.api.AdjacencyList;
+import org.neo4j.gds.api.GraphStore;
 import org.neo4j.gds.api.Relationships;
+import org.neo4j.gds.config.GraphCreateConfig;
+import org.neo4j.gds.core.CypherMapWrapper;
 import org.neo4j.gds.core.huge.HugeGraph;
+import org.neo4j.gds.core.loading.CSRGraphStoreUtil;
+import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.construction.GraphFactory;
 import org.neo4j.gds.core.loading.construction.NodesBuilder;
 import org.neo4j.gds.core.loading.construction.NodesBuilderBuilder;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
-import org.neo4j.logging.Log;
+import org.neo4j.kernel.database.NamedDatabaseId;
+import org.neo4j.kernel.internal.GraphDatabaseAPI;
 
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
 
 public class GdsWriteJob extends WriteJob {
     private final CompletableFuture<Boolean> future;
+    private final DatabaseManagementService dbms; //
 
     /**
      * Create a new GdsWriteJob for processing the given {@link GdsMessage}, creating or writing to
@@ -26,17 +40,20 @@ public class GdsWriteJob extends WriteJob {
      * The supplied username is assumed to allow GDS to enforce authorization and is assumed to be
      * previously authenticated.
      *
-     * @param msg the {@link GdsMessage} to process in the job
+     * @param msg      the {@link GdsMessage} to process in the job
      * @param username an already authenticated username
+     * @param dbms reference to a {@link DatabaseManagementService}
      */
-    public GdsWriteJob(GdsMessage msg, String username) throws RuntimeException {
+    public GdsWriteJob(GdsMessage msg, String username, DatabaseManagementService dbms) throws RuntimeException {
         super();
+        this.dbms = dbms;
+
         final CompletableFuture<Boolean> job;
         logger.info("GdsWriteJob called with msg: {}", msg);
 
         switch (msg.getRequestType()) {
             case node:
-                job = handleNodeJob(msg);
+                job = handleNodeJob(msg, username);
                 break;
             case relationship:
                 job = handleRelationshipsJob(msg);
@@ -56,22 +73,34 @@ public class GdsWriteJob extends WriteJob {
         });
     }
 
-    protected CompletableFuture<Boolean> handleNodeJob(GdsMessage msg) {
+    protected CompletableFuture<Boolean> handleNodeJob(GdsMessage msg, String username) {
         final NodesBuilder builder = (new NodesBuilderBuilder())
                 .concurrency(Config.arrowMaxPartitions)
                 .hasLabelInformation(true)
                 .hasProperties(true)
+                .maxOriginalId(100)
+                .allocationTracker(AllocationTracker.create())
+                .nodeCount(100)
                 .build();
 
-        setConsumer((batch, schema) -> {
-            // yolo
-            logger.info("pretending to process batch...");
-            //batch.getNodes().get(0).
+        final GraphDatabaseAPI api = (GraphDatabaseAPI) dbms.database(msg.getDbName());
+        final NamedDatabaseId dbId = api.databaseId();
+
+        // XXX consumer
+        setConsumer((nodeId, strings) -> {
+            // nop
+            logger.info("  {}: {}", nodeId, strings);
+            builder.addNode(nodeId, NodeLabel.listOf(strings).toArray(new NodeLabel[0]));
         });
 
         return CompletableFuture.supplyAsync(() -> {
 
-
+            try {
+                getStreamCompletion().get(1, TimeUnit.HOURS);    // XXX
+            } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                e.printStackTrace();
+                return false;
+            }
 
             final HugeGraph hugeGraph = GraphFactory.create(builder.build().nodeMapping(),
                     Relationships.of(0, Orientation.NATURAL, false, new AdjacencyList() {
@@ -96,11 +125,19 @@ public class GdsWriteJob extends WriteJob {
                         }
                     }), AllocationTracker.empty());
 
+            GraphStore store = CSRGraphStoreUtil.createFromGraph(
+                    dbId, hugeGraph, "REL", Optional.empty(),
+                    Config.arrowMaxPartitions, AllocationTracker.create());
+            // XXX
+            GraphCreateConfig config = GraphCreateConfig.createImplicit(username, CypherMapWrapper.empty());
+
+            GraphStoreCatalog.set(config, store);
+
             return true;
         });
     }
 
-    protected CompletableFuture<Boolean> handleRelationshipsJob(GdsMessage msg) {
+    protected CompletableFuture<Boolean> handleRelationshipsJob(GdsMessage unused) {
         return null;
     }
 
