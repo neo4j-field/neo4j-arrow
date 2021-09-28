@@ -6,10 +6,7 @@ import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
-import org.neo4j.gds.api.AdjacencyCursor;
-import org.neo4j.gds.api.AdjacencyList;
-import org.neo4j.gds.api.GraphStore;
-import org.neo4j.gds.api.Relationships;
+import org.neo4j.gds.api.*;
 import org.neo4j.gds.config.GraphCreateConfig;
 import org.neo4j.gds.core.CypherMapWrapper;
 import org.neo4j.gds.core.huge.HugeGraph;
@@ -94,7 +91,7 @@ public class GdsWriteJob extends WriteJob {
         });
 
         return CompletableFuture.supplyAsync(() -> {
-
+            // XXX we assume we're creating a graph (for now), not updating
             try {
                 getStreamCompletion().get(1, TimeUnit.HOURS);    // XXX
             } catch (InterruptedException | ExecutionException | TimeoutException e) {
@@ -129,7 +126,48 @@ public class GdsWriteJob extends WriteJob {
                     dbId, hugeGraph, "REL", Optional.empty(),
                     Config.arrowMaxPartitions, AllocationTracker.create());
             // XXX
-            GraphCreateConfig config = GraphCreateConfig.createImplicit(username, CypherMapWrapper.empty());
+            GraphCreateConfig config = new GraphCreateConfig() {
+                @Override
+                public String graphName() {
+                    return msg.getGraphName();
+                }
+
+                @Override
+                public GraphStoreFactory.Supplier graphStoreFactory() {
+                    throw new RuntimeException("crap: graphStoreFactory() called");
+                }
+
+                @Override
+                public <R> R accept(Cases<R> visitor) {
+                    // TODO: what the heck is this Cases<R> stuff?!
+                    return null;
+                }
+
+                @Override
+                public int readConcurrency() {
+                    return GraphCreateConfig.super.readConcurrency();
+                }
+
+                @Override
+                public long nodeCount() {
+                    return 100; // XXX
+                }
+
+                @Override
+                public long relationshipCount() {
+                    return 0;
+                }
+
+                @Override
+                public boolean validateRelationships() {
+                    return false;
+                }
+
+                @Override
+                public String username() {
+                    return username;
+                }
+            };
 
             GraphStoreCatalog.set(config, store);
 
