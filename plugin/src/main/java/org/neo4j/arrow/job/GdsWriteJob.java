@@ -1,14 +1,13 @@
 package org.neo4j.arrow.job;
 
-import org.apache.arrow.flight.CallStatus;
 import org.neo4j.arrow.Config;
 import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.arrow.action.GdsWriteNodeMessage;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
 import org.neo4j.gds.api.*;
 import org.neo4j.gds.config.GraphCreateConfig;
-import org.neo4j.gds.core.CypherMapWrapper;
 import org.neo4j.gds.core.huge.HugeGraph;
 import org.neo4j.gds.core.loading.CSRGraphStoreUtil;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
@@ -41,13 +40,17 @@ public class GdsWriteJob extends WriteJob {
      * @param username an already authenticated username
      * @param dbms reference to a {@link DatabaseManagementService}
      */
-    public GdsWriteJob(GdsMessage msg, String username, DatabaseManagementService dbms) throws RuntimeException {
+    public GdsWriteJob(GdsWriteNodeMessage msg, // XXX need to abstract here?
+                       String username, DatabaseManagementService dbms) throws RuntimeException {
         super();
         this.dbms = dbms;
 
         final CompletableFuture<Boolean> job;
         logger.info("GdsWriteJob called with msg: {}", msg);
 
+        job = handleNodeJob(msg, username);
+
+        /* XXX later
         switch (msg.getRequestType()) {
             case node:
                 job = handleNodeJob(msg, username);
@@ -57,7 +60,8 @@ public class GdsWriteJob extends WriteJob {
                 break;
             default:
                 throw CallStatus.UNIMPLEMENTED.withDescription("unhandled request type").toRuntimeException();
-        }
+         }
+         */
 
         future = job.exceptionally(throwable -> {
             logger.error(throwable.getMessage(), throwable);
@@ -70,7 +74,7 @@ public class GdsWriteJob extends WriteJob {
         });
     }
 
-    protected CompletableFuture<Boolean> handleNodeJob(GdsMessage msg, String username) {
+    protected CompletableFuture<Boolean> handleNodeJob(GdsWriteNodeMessage msg, String username) {
         final NodesBuilder builder = (new NodesBuilderBuilder())
                 .concurrency(Config.arrowMaxPartitions)
                 .hasLabelInformation(true)
@@ -84,10 +88,11 @@ public class GdsWriteJob extends WriteJob {
         final NamedDatabaseId dbId = api.databaseId();
 
         // XXX consumer
-        setConsumer((nodeId, strings) -> {
+        setConsumer(node -> {
             // nop
-            logger.info("  {}: {}", nodeId, strings);
-            builder.addNode(nodeId, NodeLabel.listOf(strings).toArray(new NodeLabel[0]));
+            logger.info(node.toString());
+            final NodeLabel[] labelArray = NodeLabel.listOf(node.labels).toArray(new NodeLabel[0]);
+            //builder.addNode(node.nodeId, node.properties, labelArray);
         });
 
         return CompletableFuture.supplyAsync(() -> {

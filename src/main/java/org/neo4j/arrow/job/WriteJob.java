@@ -1,19 +1,39 @@
 package org.neo4j.arrow.job;
 
 
+import org.neo4j.arrow.RowBasedRecord;
+
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 public abstract class WriteJob extends Job {
 
     public static final Mode mode = Mode.WRITE;
 
-    private BiConsumer<Long, String[]> consumer;
+    private Consumer<Node> nodeConsumer;
     private CompletableFuture<Void> streamComplete = new CompletableFuture<>();
 
     public WriteJob() {
         super();
+    }
+
+    public static class Node {
+        public final long nodeId;
+        public final Map<String, RowBasedRecord.Value> properties;
+        public final String[] labels;
+
+        public Node(long nodeId, Map<String, RowBasedRecord.Value> properties, String... labels) {
+            this.nodeId = nodeId;
+            this.properties = properties;
+            this.labels = labels;
+        }
+
+        public static Node of(long nodeId, Map<String, RowBasedRecord.Value> properties, String... labels) {
+            return new Node(nodeId, properties, labels);
+        }
     }
 
     @Override
@@ -34,11 +54,11 @@ public abstract class WriteJob extends Job {
         return streamComplete.complete(null);
     }
 
-    public void setConsumer(BiConsumer<Long, String[]> consumer) {
-        this.consumer = consumer;
+    public void setConsumer(Consumer<Node> consumer) {
+        this.nodeConsumer = consumer;
     }
 
-    public BiConsumer<Long, String[]> getConsumer() {
-        return consumer;
+    public Consumer<Node> getConsumer() {
+        return nodeConsumer;
     }
 }

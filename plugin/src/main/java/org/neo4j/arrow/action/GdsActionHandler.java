@@ -36,9 +36,9 @@ public class GdsActionHandler implements ActionHandler {
 
     private static final List<String> supportedActions = List.of(NODE_READ_ACTION, RELS_READ_ACTION, NODE_WRITE_ACTION);
     private final Log log;
-    private final JobCreator<GdsMessage, Job> jobCreator;
+    private final JobCreator<Message, Job> jobCreator;
 
-    public GdsActionHandler(JobCreator<GdsMessage, Job> jobCreator, Log log) {
+    public GdsActionHandler(JobCreator<Message, Job> jobCreator, Log log) {
         this.jobCreator = jobCreator;
         this.log = log;
     }
@@ -62,18 +62,24 @@ public class GdsActionHandler implements ActionHandler {
 
         final String username = context.peerIdentity();
         log.info("user '%s' attempting a GDS action: %s", username, action.getType());
-        GdsMessage msg;
-        try {
-            msg = GdsMessage.deserialize(action.getBody());
-        } catch (IOException e) {
-            return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
-        }
+
+        Message msg;
 
         switch (action.getType()) {
             case NODE_READ_ACTION:
-                return handleNodeReadAction(producer, username, msg);
+                try {
+                    msg = GdsMessage.deserialize(action.getBody());
+                } catch (IOException e) {
+                    return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
+                }
+                return handleNodeReadAction(producer, username, (GdsMessage) msg);
             case NODE_WRITE_ACTION:
-                return handleNodeWriteAction(producer, username, msg);
+                try {
+                    msg = GdsWriteNodeMessage.deserialize(action.getBody());
+                } catch (IOException e) {
+                    return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
+                }
+                return handleNodeWriteAction(producer, username, (GdsWriteNodeMessage) msg);
             case RELS_READ_ACTION:
             case RELS_WRITE_ACTION:
                 // FALLTHROUGH: unimplemented
@@ -82,7 +88,7 @@ public class GdsActionHandler implements ActionHandler {
         return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("coming soon?!"));
     }
 
-    private Outcome handleNodeWriteAction(Producer producer, String username, GdsMessage msg) {
+    private Outcome handleNodeWriteAction(Producer producer, String username, GdsWriteNodeMessage msg) {
         final Job j = jobCreator.newJob(msg, Job.Mode.WRITE, username);
         assert(j instanceof WriteJob); // XXX
         final WriteJob job = (WriteJob)j;

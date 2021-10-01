@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
  * Primary message type for communicating parameters to GDS jobs. Relies on JSON for serialization
  * to keep things simple and portable without manual byte-packing, etc.
  */
-public class GdsMessage {
+public class GdsMessage implements Message {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(GdsMessage.class);
 
     static private final ObjectMapper mapper = new ObjectMapper();

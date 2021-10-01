@@ -7,6 +7,8 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.CypherActionHandler;
 import org.neo4j.arrow.action.GdsActionHandler;
+import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.arrow.action.GdsWriteNodeMessage;
 import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.arrow.job.GdsReadJob;
 import org.neo4j.arrow.job.GdsWriteJob;
@@ -63,9 +65,9 @@ public class ArrowService extends LifecycleAdapter {
         app.registerHandler(new CypherActionHandler(
                 (msg, mode, username) -> new TransactionApiJob(msg, username, dbms, log)));
         app.registerHandler(new GdsActionHandler(
-                (msg, mode, username) ->
-                        (mode == Job.Mode.READ) ? new GdsReadJob(msg, username)
-                                : new GdsWriteJob(msg, username, dbms), log));
+                (msg, mode, username) -> // XXX casts and stuff
+                        (mode == Job.Mode.READ) ? new GdsReadJob((GdsMessage) msg, username)
+                                : new GdsWriteJob((GdsWriteNodeMessage) msg, username, dbms), log));
     }
 
     @Override

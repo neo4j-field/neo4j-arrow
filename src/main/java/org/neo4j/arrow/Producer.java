@@ -33,6 +33,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -545,13 +546,13 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: validate root.Schema
 
             final WriteJob job = (WriteJob) rawJob;
-            final BiConsumer<Long, String[]> consumer = job.getConsumer();
+            final Consumer<WriteJob.Node> consumer = job.getConsumer();
 
             // Process our stream. Everything in here needs to be checked for memory leaks!
             try (final VectorSchemaRoot root = flightStream.getRoot()) {
                 final VectorUnloader unloader = new VectorUnloader(root);
 
-                // final List<FieldVector> vectors = root.getFieldVectors();
+                logger.info("client putting stream with schema: {}", root.getSchema());
                 long rowId = 0;
 
                 while (flightStream.next()){
@@ -560,7 +561,12 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                         // XXX brute force
                         for (int i=0; i<batch.getLength(); i++) {
-                            consumer.accept(rowId, new String[] {"hey", "dude"});
+                            // XXX for now let's assume and enforce some trivial constraints on types
+                            for (FieldVector fv : root.getFieldVectors()) {
+                                // XXX just log types and names for now for investigation
+                                logger.info("fv {}: {}", fv.getName(), fv.getClass().getCanonicalName());
+                            }
+
                             rowId++;
                         }
                         // TODO: what should we send back? Anything specific?

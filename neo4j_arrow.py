@@ -88,14 +88,13 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
-    def gds_write_nodes(self, graph, properties=[], database='neo4j', filters=[]):
+    def gds_write_nodes(self, graph, database='neo4j', idField='id', labelsField='labels'):
         """Submit a GDS Write Job for creating Nodes and Node Properties."""
         params = {
              'db': database,
              'graph': graph,
-             'type': 'node',
-             'properties': properties,
-             'filters': filters,
+             'idField': idField,
+             'labelsField': labelsField,
          }
         params_bytes = json.dumps(params).encode('utf8')
         action = (_JOB_GDS_WRITE, params_bytes)
@@ -149,12 +148,7 @@ class Neo4jArrow:
     def put_stream(self, ticket, data):
         """Write a stream to the server"""
         # no need to wait for writes
-        # XXX dummy data for now
-        d = {
-            "labels": [("Junk") for _ in range(0, 100)],
-            "age": list(range(0, 100))
-        }
-        table = pa.table(data=d)
+        table = pa.table(data=data)
         descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
         writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)
         writer.write_table(table)
