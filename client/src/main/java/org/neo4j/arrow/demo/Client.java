@@ -55,8 +55,7 @@ public class Client implements AutoCloseable {
         long byteCnt = 0;
 
         try (FlightStream stream = client.getStream(ticket, option);
-                VectorSchemaRoot root = stream.getRoot();
-                VectorSchemaRoot downloadedRoot = VectorSchemaRoot.create(root.getSchema(), allocator)) {
+                VectorSchemaRoot root = stream.getRoot()) {
             final VectorUnloader unloader = new VectorUnloader(root);
 
             logger.info("got schema: {}", root.getSchema().toJson());
@@ -65,6 +64,7 @@ public class Client implements AutoCloseable {
                 try (ArrowRecordBatch batch = unloader.getRecordBatch()) {
                     logger.debug("got batch, sized: {}", batch.getLength());
                     cnt += batch.getLength();
+
                     for (FieldVector vector : root.getFieldVectors())
                         byteCnt += vector.getBufferSize();
                     if (cnt % 25_000 == 0) {

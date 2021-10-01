@@ -188,7 +188,18 @@ public abstract class GdsRecord implements RowBasedRecord {
         };
     }
 
-    public static Value wrapScalar(ValueType t, Number n) {
+    public static Value wrapScalar(Number n) {
+        if (n instanceof Integer || n instanceof Long || n instanceof Short) {
+            return wrapScalar(n, ValueType.LONG);
+        } else if (n instanceof Float || n instanceof Double) {
+            return wrapScalar(n, ValueType.DOUBLE);
+        }
+
+        // fallback to Double for now
+        return wrapScalar(n, ValueType.DOUBLE);
+    }
+
+    public static Value wrapScalar(Number n, ValueType t) {
         return new Value() {
             private final Number num = n;
             private final ValueType valueType = t;
@@ -248,6 +259,16 @@ public abstract class GdsRecord implements RowBasedRecord {
                 return Type.STRING;
             }
         };
+    }
+
+    public static Value wrapObject(Object o) {
+        if (o instanceof Number) {
+            return wrapScalar((Number)o);
+        } else if (o instanceof String) {
+            return wrapString((String)o);
+        }
+
+        return null;
     }
 
 }

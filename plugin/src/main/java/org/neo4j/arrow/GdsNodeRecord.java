@@ -23,7 +23,12 @@ public class GdsNodeRecord extends GdsRecord {
 
     protected GdsNodeRecord(long nodeId, String[] keys, Value[] values, Function<Long, Long> nodeIdResolver) {
         super(keys, values);
-        this.nodeId = wrapScalar(ValueType.LONG, nodeIdResolver.apply(nodeId));
+        this.nodeId = wrapScalar(nodeIdResolver.apply(nodeId), ValueType.LONG);
+    }
+
+    // TODO: LABELS!!??!
+    public static GdsNodeRecord wrap(long nodeId, String[] keys, Value[] values) {
+        return new GdsNodeRecord(nodeId, keys, values, Function.identity());
     }
 
     /**
@@ -47,10 +52,10 @@ public class GdsNodeRecord extends GdsRecord {
             switch (properties.valueType()) {
                 // TODO: INT? Does it exist?
                 case LONG:
-                    value = wrapScalar(properties.valueType(), properties.longValue(nodeId));
+                    value = wrapScalar(properties.longValue(nodeId), properties.valueType());
                     break;
                 case DOUBLE:
-                    value = wrapScalar(properties.valueType(), properties.doubleValue(nodeId));
+                    value = wrapScalar(properties.doubleValue(nodeId), properties.valueType());
                     break;
                 // TODO: INT_ARRAY?
                 case LONG_ARRAY:

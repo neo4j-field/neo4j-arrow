@@ -16,7 +16,6 @@ import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
-import org.neo4j.logging.Log;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -146,7 +145,7 @@ public class GdsReadJob extends ReadJob {
         return CompletableFuture.supplyAsync(() -> {
             // XXX We cheat and make a fake record just to communicate schema :-(
             GdsRelationshipRecord fauxRecord = new GdsRelationshipRecord(0, 1, "type", "key",
-                    GdsRecord.wrapScalar(ValueType.DOUBLE, 0.0d));
+                    GdsRecord.wrapScalar(0.0d, ValueType.DOUBLE));
             onFirstRecord(fauxRecord);
 
             // Make rocket go now
@@ -170,7 +169,7 @@ public class GdsReadJob extends ReadJob {
                                                     graph.toOriginalNodeId(cursor.targetId()),
                                                     type.name(),
                                                     key,
-                                                    GdsRecord.wrapScalar(ValueType.DOUBLE, cursor.property())));
+                                                    GdsRecord.wrapScalar(cursor.property(), ValueType.DOUBLE)));
                                 }).forEach(record -> consumer.accept(record, rowCnt.getAndIncrement()));
                     });
 

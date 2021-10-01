@@ -9,14 +9,16 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
-import org.apache.arrow.vector.complex.impl.UnionListWriter;
+import org.apache.arrow.vector.complex.impl.*;
+import org.apache.arrow.vector.complex.reader.*;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.compression.CompressionUtil;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
@@ -33,7 +35,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -546,29 +549,58 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: validate root.Schema
 
             final WriteJob job = (WriteJob) rawJob;
-            final Consumer<WriteJob.Node> consumer = job.getConsumer();
+            final BiConsumer<List<String>, List<Object>> consumer = job.getConsumer();
 
             // Process our stream. Everything in here needs to be checked for memory leaks!
             try (final VectorSchemaRoot root = flightStream.getRoot()) {
                 final VectorUnloader unloader = new VectorUnloader(root);
 
                 logger.info("client putting stream with schema: {}", root.getSchema());
-                long rowId = 0;
+
+                final List<String> fieldNames = root.getSchema()
+                        .getFields().stream()
+                        .map(Field::getName)
+                        .collect(Collectors.toList());
 
                 while (flightStream.next()){
                     try (final ArrowRecordBatch batch = unloader.getRecordBatch()) {
                         logger.info("consuming batch ({} rows)", batch.getLength());
 
-                        // XXX brute force
-                        for (int i=0; i<batch.getLength(); i++) {
-                            // XXX for now let's assume and enforce some trivial constraints on types
-                            for (FieldVector fv : root.getFieldVectors()) {
-                                // XXX just log types and names for now for investigation
-                                logger.info("fv {}: {}", fv.getName(), fv.getClass().getCanonicalName());
-                            }
+                        final List<FieldVector> vectors = root.getFieldVectors();
+                        final List<FieldReader> readers = vectors.stream()
+                                .map(fv -> {
+                                    final FieldReader reader = fv.getReader();
+                                    reader.setPosition(0);
+                                    return reader;
+                                })
+                                .collect(Collectors.toList());
 
-                            rowId++;
-                        }
+                        IntStream.range(0, batch.getLength())
+                                .forEach(row -> {
+                                    final List<Object> values = readers.stream()
+                                            .map(reader -> {
+                                                reader.setPosition(row);
+                                                Object o = 0.0;
+                                                if (reader instanceof BigIntReaderImpl) {
+                                                    o = reader.readLong();
+                                                } else if (reader instanceof Float8ReaderImpl) {
+                                                    o = reader.readDouble();
+                                                } else if (reader instanceof Float4ReaderImpl) {
+                                                    o = reader.readDouble();
+                                                } else if (reader instanceof VarCharReaderImpl) {
+                                                    o = reader.readText().toString();
+                                                } else {
+                                                    logger.warn("unsupported reader type {}", reader.getClass().getCanonicalName());
+                                                }
+                                                return o;
+                                            })
+                                            .collect(Collectors.toList());
+                                    logger.info("passing in fieldNames: {}, values: {}", fieldNames, values);
+                                    consumer.accept(fieldNames, values);
+                                });
+
+                        // XXX: Close readers?
+
                         // TODO: what should we send back? Anything specific?
                         ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
                     }

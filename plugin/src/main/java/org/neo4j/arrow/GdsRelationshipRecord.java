@@ -23,8 +23,8 @@ public class GdsRelationshipRecord extends GdsRecord {
 
     public GdsRelationshipRecord(long sourceId, long targetId, String type, String property, Value value) {
         super(new String[0], new Value[0]);
-        this.sourceId = wrapScalar(ValueType.LONG, sourceId);
-        this.targetId = wrapScalar(ValueType.LONG, targetId);
+        this.sourceId = wrapScalar(sourceId, ValueType.LONG);
+        this.targetId = wrapScalar(targetId, ValueType.LONG);
         this.relType = wrapString(type);
         this.property = wrapString(property);
         this.value = value;

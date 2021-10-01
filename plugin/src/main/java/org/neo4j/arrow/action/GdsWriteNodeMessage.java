@@ -92,6 +92,14 @@ public class GdsWriteNodeMessage implements Message {
         return graphName;
     }
 
+    public String getIdField() {
+        return idField;
+    }
+
+    public String getLabelsField() {
+        return labelsField;
+    }
+
     @Override
     public String toString() {
         return "GdsWriteNodeMessage{" +

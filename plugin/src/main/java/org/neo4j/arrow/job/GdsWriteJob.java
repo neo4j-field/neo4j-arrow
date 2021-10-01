@@ -1,8 +1,14 @@
 package org.neo4j.arrow.job;
 
+import org.checkerframework.checker.units.qual.A;
 import org.neo4j.arrow.Config;
+import org.neo4j.arrow.GdsNodeRecord;
+import org.neo4j.arrow.GdsRecord;
+import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.GdsWriteNodeMessage;
+import org.neo4j.arrow.action.Message;
+import org.neo4j.cypher.internal.util.symbols.StorableType;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
@@ -17,17 +23,24 @@ import org.neo4j.gds.core.loading.construction.NodesBuilderBuilder;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.kernel.database.NamedDatabaseId;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
+import org.neo4j.values.storable.Value;
+import org.neo4j.values.storable.Values;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 
 public class GdsWriteJob extends WriteJob {
     private final CompletableFuture<Boolean> future;
-    private final DatabaseManagementService dbms; //
+    private final DatabaseManagementService dbms;
 
     /**
      * Create a new GdsWriteJob for processing the given {@link GdsMessage}, creating or writing to
@@ -87,12 +100,27 @@ public class GdsWriteJob extends WriteJob {
         final GraphDatabaseAPI api = (GraphDatabaseAPI) dbms.database(msg.getDbName());
         final NamedDatabaseId dbId = api.databaseId();
 
+        logger.info("configuring job for {}", msg);
+
+        final AtomicInteger nodeCount = new AtomicInteger(0);
+
         // XXX consumer
-        setConsumer(node -> {
-            // nop
-            logger.info(node.toString());
-            final NodeLabel[] labelArray = NodeLabel.listOf(node.labels).toArray(new NodeLabel[0]);
-            //builder.addNode(node.nodeId, node.properties, labelArray);
+        setConsumer((ks, vs) -> {
+            final List<Value> values = vs.stream()
+                    .map(Values::of).collect(Collectors.toList());
+
+            // dumb
+            final HashMap<String, Value> map = new HashMap<>();
+            long nodeId = -1;
+            for (int i=0; i<ks.size(); i++) {
+                map.put(ks.get(i), values.get(i));
+                if (Objects.equals(ks.get(i), msg.getIdField()))
+                    nodeId = (Long)vs.get(i);
+            }
+
+            logger.info("consuming nodeId {}, map: {}", nodeId, map);
+            builder.addNode(nodeId, map, NodeLabel.ALL_NODES);
+            nodeCount.incrementAndGet();
         });
 
         return CompletableFuture.supplyAsync(() -> {
@@ -155,7 +183,7 @@ public class GdsWriteJob extends WriteJob {
 
                 @Override
                 public long nodeCount() {
-                    return 100; // XXX
+                    return nodeCount.get(); // XXX
                 }
 
                 @Override
@@ -180,7 +208,7 @@ public class GdsWriteJob extends WriteJob {
         });
     }
 
-    protected CompletableFuture<Boolean> handleRelationshipsJob(GdsMessage unused) {
+    protected CompletableFuture<Boolean> handleRelationshipsJob(Message unused) {
         return null;
     }
 
@@ -193,4 +221,5 @@ public class GdsWriteJob extends WriteJob {
     public void close() {
         future.cancel(true);
     }
+
 }
