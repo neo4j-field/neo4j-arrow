@@ -549,57 +549,20 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: validate root.Schema
 
             final WriteJob job = (WriteJob) rawJob;
-            final BiConsumer<List<String>, List<Object>> consumer = job.getConsumer();
+            final VectorSchemaRoot localRoot = VectorSchemaRoot.create(flightStream.getSchema(), allocator);
 
             // Process our stream. Everything in here needs to be checked for memory leaks!
-            try (final VectorSchemaRoot root = flightStream.getRoot()) {
-                final VectorUnloader unloader = new VectorUnloader(root);
+            try (final VectorSchemaRoot streamRoot = flightStream.getRoot()) {
+                final VectorUnloader unloader = new VectorUnloader(streamRoot);
+                final VectorLoader loader = new VectorLoader(localRoot);
 
-                logger.info("client putting stream with schema: {}", root.getSchema());
+                logger.info("client putting stream with schema: {}", streamRoot.getSchema());
 
-                final List<String> fieldNames = root.getSchema()
-                        .getFields().stream()
-                        .map(Field::getName)
-                        .collect(Collectors.toList());
-
-                while (flightStream.next()){
+                // Consume the entire stream into memory for now
+                while (flightStream.next()) {
                     try (final ArrowRecordBatch batch = unloader.getRecordBatch()) {
                         logger.info("consuming batch ({} rows)", batch.getLength());
-
-                        final List<FieldVector> vectors = root.getFieldVectors();
-                        final List<FieldReader> readers = vectors.stream()
-                                .map(fv -> {
-                                    final FieldReader reader = fv.getReader();
-                                    reader.setPosition(0);
-                                    return reader;
-                                })
-                                .collect(Collectors.toList());
-
-                        IntStream.range(0, batch.getLength())
-                                .forEach(row -> {
-                                    final List<Object> values = readers.stream()
-                                            .map(reader -> {
-                                                reader.setPosition(row);
-                                                Object o = 0.0;
-                                                if (reader instanceof BigIntReaderImpl) {
-                                                    o = reader.readLong();
-                                                } else if (reader instanceof Float8ReaderImpl) {
-                                                    o = reader.readDouble();
-                                                } else if (reader instanceof Float4ReaderImpl) {
-                                                    o = reader.readDouble();
-                                                } else if (reader instanceof VarCharReaderImpl) {
-                                                    o = reader.readText().toString();
-                                                } else {
-                                                    logger.warn("unsupported reader type {}", reader.getClass().getCanonicalName());
-                                                }
-                                                return o;
-                                            })
-                                            .collect(Collectors.toList());
-                                    logger.info("passing in fieldNames: {}, values: {}", fieldNames, values);
-                                    consumer.accept(fieldNames, values);
-                                });
-
-                        // XXX: Close readers?
+                        loader.load(batch);
 
                         // TODO: what should we send back? Anything specific?
                         ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
@@ -608,15 +571,18 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
+                job.onComplete(localRoot);
+
             } catch (Exception e) {
                 logger.error("error during batch unloading", e);
                 ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());
+                localRoot.close();
                 return;
-            } finally {
-                // XXX error handling
-                job.onComplete();
             }
             ackStream.onCompleted();
+
+            // At this point we should have the full stream in memory.
+            logger.info("localRoot rowCount={}, schema={}", localRoot.getRowCount(), localRoot.getSchema());
         };
     }
 

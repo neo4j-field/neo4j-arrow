@@ -1,14 +1,13 @@
 package org.neo4j.arrow.job;
 
-import org.checkerframework.checker.units.qual.A;
+import org.apache.arrow.vector.BigIntVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.Config;
-import org.neo4j.arrow.GdsNodeRecord;
-import org.neo4j.arrow.GdsRecord;
-import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.GdsWriteNodeMessage;
 import org.neo4j.arrow.action.Message;
-import org.neo4j.cypher.internal.util.symbols.StorableType;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
@@ -23,23 +22,19 @@ import org.neo4j.gds.core.loading.construction.NodesBuilderBuilder;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.kernel.database.NamedDatabaseId;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
-import org.neo4j.values.storable.Value;
-import org.neo4j.values.storable.Values;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 
 public class GdsWriteJob extends WriteJob {
     private final CompletableFuture<Boolean> future;
+
     private final DatabaseManagementService dbms;
 
     /**
@@ -88,49 +83,51 @@ public class GdsWriteJob extends WriteJob {
     }
 
     protected CompletableFuture<Boolean> handleNodeJob(GdsWriteNodeMessage msg, String username) {
-        final NodesBuilder builder = (new NodesBuilderBuilder())
-                .concurrency(Config.arrowMaxPartitions)
-                .hasLabelInformation(true)
-                .hasProperties(true)
-                .maxOriginalId(100)
-                .allocationTracker(AllocationTracker.create())
-                .nodeCount(100)
-                .build();
-
         final GraphDatabaseAPI api = (GraphDatabaseAPI) dbms.database(msg.getDbName());
         final NamedDatabaseId dbId = api.databaseId();
 
         logger.info("configuring job for {}", msg);
 
-        final AtomicInteger nodeCount = new AtomicInteger(0);
-
-        // XXX consumer
-        setConsumer((ks, vs) -> {
-            final List<Value> values = vs.stream()
-                    .map(Values::of).collect(Collectors.toList());
-
-            // dumb
-            final HashMap<String, Value> map = new HashMap<>();
-            long nodeId = -1;
-            for (int i=0; i<ks.size(); i++) {
-                map.put(ks.get(i), values.get(i));
-                if (Objects.equals(ks.get(i), msg.getIdField()))
-                    nodeId = (Long)vs.get(i);
-            }
-
-            logger.info("consuming nodeId {}, map: {}", nodeId, map);
-            builder.addNode(nodeId, map, NodeLabel.ALL_NODES);
-            nodeCount.incrementAndGet();
-        });
-
         return CompletableFuture.supplyAsync(() -> {
             // XXX we assume we're creating a graph (for now), not updating
+            final VectorSchemaRoot root;
             try {
-                getStreamCompletion().get(1, TimeUnit.HOURS);    // XXX
+                root = getStreamCompletion().get(1, TimeUnit.HOURS);    // XXX
             } catch (InterruptedException | ExecutionException | TimeoutException e) {
                 e.printStackTrace();
                 return false;
             }
+
+            // XXX push schema validation to Producer side prior to full stream being formed
+            final Schema schema = root.getSchema();
+            final long rowCount = root.getRowCount();
+
+            // XXX this assumes we only load up to ((1 << 31) - 1) (~2.1B) node ids
+            // these will throw IllegalArg exceptions
+            schema.findField(msg.getIdField());
+            BigIntVector nodeIdVector = (BigIntVector) root.getVector(msg.getIdField());
+
+            schema.findField(msg.getLabelsField());
+            ListVector labelsVector = (ListVector) root.getVector(msg.getLabelsField());
+
+            final NodesBuilder builder = (new NodesBuilderBuilder())
+                    .concurrency(Config.arrowMaxPartitions)
+                    .hasLabelInformation(true)
+                    .hasProperties(true)
+                    .allocationTracker(AllocationTracker.empty())
+                    .maxOriginalId(Integer.MAX_VALUE)
+                    .nodeCount(rowCount)
+                    .build();
+
+            assert(root.getRowCount() == nodeIdVector.getValueCount());
+            IntStream.range(0, nodeIdVector.getValueCount())
+                    .parallel()
+                    .forEach(idx -> {
+                        final String[] labels = labelsVector.getObject(idx).stream()
+                                .map(Object::toString).collect(Collectors.toList()).toArray(String[]::new);
+                        final NodeLabel[] nodeLabels = NodeLabel.listOf(labels).toArray(NodeLabel[]::new);
+                        builder.addNode(nodeIdVector.get(idx), nodeLabels);
+                    });
 
             final HugeGraph hugeGraph = GraphFactory.create(builder.build().nodeMapping(),
                     Relationships.of(0, Orientation.NATURAL, false, new AdjacencyList() {
@@ -155,11 +152,18 @@ public class GdsWriteJob extends WriteJob {
                         }
                     }), AllocationTracker.empty());
 
-            GraphStore store = CSRGraphStoreUtil.createFromGraph(
+            final GraphStore store = CSRGraphStoreUtil.createFromGraph(
                     dbId, hugeGraph, "REL", Optional.empty(),
                     Config.arrowMaxPartitions, AllocationTracker.create());
-            // XXX
-            GraphCreateConfig config = new GraphCreateConfig() {
+
+            // Try wiring in our arbitrary node properties.
+            root.getFieldVectors().stream()
+                    .filter(vec -> !vec.getName().equals(msg.getLabelsField())
+                            && !vec.getName().equals(msg.getIdField()))
+                    .map(ArrowNodeProperties::new)
+                    .forEach(nodeProps -> store.addNodeProperty(NodeLabel.ALL_NODES, nodeProps.getName(), nodeProps));
+
+            final GraphCreateConfig config = new GraphCreateConfig() {
                 @Override
                 public String graphName() {
                     return msg.getGraphName();
@@ -167,7 +171,7 @@ public class GdsWriteJob extends WriteJob {
 
                 @Override
                 public GraphStoreFactory.Supplier graphStoreFactory() {
-                    throw new RuntimeException("crap: graphStoreFactory() called");
+                    throw new RuntimeException("oops: graphStoreFactory() called");
                 }
 
                 @Override
@@ -183,7 +187,7 @@ public class GdsWriteJob extends WriteJob {
 
                 @Override
                 public long nodeCount() {
-                    return nodeCount.get(); // XXX
+                    return rowCount;
                 }
 
                 @Override
@@ -220,6 +224,12 @@ public class GdsWriteJob extends WriteJob {
     @Override
     public void close() {
         future.cancel(true);
+    }
+
+    @Override
+    public void onError(Exception e) {
+        logger.info("failure", e);
+        future.completeExceptionally(e);
     }
 
 }

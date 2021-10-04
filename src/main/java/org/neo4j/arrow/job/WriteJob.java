@@ -1,18 +1,16 @@
 package org.neo4j.arrow.job;
 
 
-import java.util.List;
+import org.apache.arrow.vector.VectorSchemaRoot;
+
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 public abstract class WriteJob extends Job {
 
     public static final Mode mode = Mode.WRITE;
 
-    private BiConsumer<List<String>, List<Object>> consumer;
-    private CompletableFuture<Void> streamComplete = new CompletableFuture<>();
+    private final CompletableFuture<VectorSchemaRoot> streamComplete = new CompletableFuture<>();
 
     public WriteJob() {
         super();
@@ -28,19 +26,13 @@ public abstract class WriteJob extends Job {
         // TODO handle writejob close???
     }
 
-    public Future<Void> getStreamCompletion() {
+    public Future<VectorSchemaRoot> getStreamCompletion() {
         return streamComplete;
     }
 
-    public boolean onComplete() {
-        return streamComplete.complete(null);
+    public void onComplete(VectorSchemaRoot root) {
+        streamComplete.complete(root);
     }
 
-    public void setConsumer(BiConsumer<List<String>, List<Object>> consumer) {
-        this.consumer = consumer;
-    }
-
-    public BiConsumer<List<String>, List<Object>> getConsumer() {
-        return consumer;
-    }
+    public abstract void onError(Exception e);
 }

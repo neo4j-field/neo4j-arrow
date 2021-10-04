@@ -40,7 +40,6 @@ public class GdsReadJob extends ReadJob {
      *
      * @param msg the {@link GdsMessage} to process in the job
      * @param username an already authenticated username
-     * @param log the Neo4j log instance
      */
     public GdsReadJob(GdsMessage msg, String username) throws RuntimeException {
         super();
