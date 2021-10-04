@@ -2,6 +2,7 @@ package org.neo4j.arrow;
 
 import org.neo4j.driver.*;
 
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Neo4jDirectClient {
@@ -15,10 +16,23 @@ public class Neo4jDirectClient {
         logger = org.slf4j.LoggerFactory.getLogger(Neo4jDirectClient.class);
     }
 
-    private static final String cypher =
-            System.getenv("GDS") != null
-                    ? "CALL gds.graph.streamNodeProperty('mygraph', 'n')"
-                    : "MATCH (n) RETURN id(n) as nodeId, n.fastRp AS embedding";
+    private static final String cypher;
+    static {
+        switch (System.getenv()
+                .getOrDefault("TEST_MODE", "CYPHER")
+                .toUpperCase(Locale.ROOT)) {
+            case "GDS":
+                cypher = "CALL gds.graph.streamNodeProperty('mygraph', 'n')";
+                break;
+            case "RANDOM":
+                cypher = "UNWIND range(1, 10000000) AS row RETURN row, [_ IN range(1, 256) | rand()] as fauxEmbedding";
+                break;
+            case "CYPHER":
+            default:
+                cypher = "MATCH (n) RETURN id(n) as nodeId, n.fastRp AS embedding";
+                break;
+        }
+    }
 
     public static void main(String[] args) {
         logger.info("Connecting to {} using Java Driver", Config.neo4jUrl);
