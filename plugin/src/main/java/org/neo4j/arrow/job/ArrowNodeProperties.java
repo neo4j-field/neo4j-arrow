@@ -1,7 +1,6 @@
 package org.neo4j.arrow.job;
 
 import org.apache.arrow.vector.*;
-import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.api.nodeproperties.ValueType;
@@ -12,6 +11,7 @@ import java.util.List;
 import java.util.function.Function;
 
 public class ArrowNodeProperties implements NodeProperties {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowNodeProperties.class);
 
     final private FieldVector vector;
     final private ValueType type;
@@ -78,6 +78,7 @@ public class ArrowNodeProperties implements NodeProperties {
 
     @Override
     public long release() {
+        logger.info("NodeProperties({}) released", vector.getName());
         vector.close();
         return NodeProperties.super.release();
     }

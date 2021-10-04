@@ -149,6 +149,8 @@ public class GdsWriteJob extends WriteJob {
 
                         @Override
                         public void close() {
+                            // XXX hack
+                            root.close();
                         }
                     }), AllocationTracker.empty());
 
@@ -161,7 +163,8 @@ public class GdsWriteJob extends WriteJob {
                     .filter(vec -> !vec.getName().equals(msg.getLabelsField())
                             && !vec.getName().equals(msg.getIdField()))
                     .map(ArrowNodeProperties::new)
-                    .forEach(nodeProps -> store.addNodeProperty(NodeLabel.ALL_NODES, nodeProps.getName(), nodeProps));
+                    .forEach(nodeProps -> store.addNodeProperty(NodeLabel.ALL_NODES, // XXX hack for now
+                            nodeProps.getName(), nodeProps));
 
             final GraphCreateConfig config = new GraphCreateConfig() {
                 @Override
