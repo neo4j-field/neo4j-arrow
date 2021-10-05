@@ -70,7 +70,7 @@ public class ArrowNodeProperties implements NodeProperties {
     @Override
     public Object getObject(long nodeId) {
         assert(0 <= nodeId && nodeId <= Integer.MAX_VALUE);
-        return vector.getObject((int) nodeId);
+        return value(nodeId).asObject();
     }
 
     @Override

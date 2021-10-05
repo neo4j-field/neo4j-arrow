@@ -29,12 +29,11 @@ import java.util.concurrent.Future;
  */
 public class GdsActionHandler implements ActionHandler {
     // TODO: rename property keys to read/write forms
-    public static final String NODE_READ_ACTION = "gdsNodeProperties";
-    public static final String RELS_READ_ACTION = "gdsRelProperties";
+    public static final String GDS_READ_ACTION = "gds.read";
     public static final String NODE_WRITE_ACTION = "gds.write.nodes";
     public static final String RELS_WRITE_ACTION = "gds.write.relationships";
 
-    private static final List<String> supportedActions = List.of(NODE_READ_ACTION, RELS_READ_ACTION, NODE_WRITE_ACTION);
+    private static final List<String> supportedActions = List.of(GDS_READ_ACTION, RELS_WRITE_ACTION, NODE_WRITE_ACTION);
     private final Log log;
     private final JobCreator<Message, Job> jobCreator;
 
@@ -50,8 +49,8 @@ public class GdsActionHandler implements ActionHandler {
 
     @Override
     public List<ActionType> actionDescriptions() {
-        return List.of(new ActionType(NODE_READ_ACTION, "Stream node properties from a GDS Graph"),
-                new ActionType(RELS_READ_ACTION, "Stream relationship properties from a GDS Graph"),
+        return List.of(new ActionType(GDS_READ_ACTION, "Stream node or relationship properties from a GDS Graph"),
+                new ActionType(RELS_WRITE_ACTION, "Write relationship properties to a GDS Graph"),
                 new ActionType(NODE_WRITE_ACTION, "Write Nodes and properties to a GDS Graph"));
     }
 
@@ -66,29 +65,34 @@ public class GdsActionHandler implements ActionHandler {
         Message msg;
 
         switch (action.getType()) {
-            case NODE_READ_ACTION:
+            case GDS_READ_ACTION:
                 try {
                     msg = GdsMessage.deserialize(action.getBody());
                 } catch (IOException e) {
                     return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
                 }
-                return handleNodeReadAction(producer, username, (GdsMessage) msg);
+                return handleGdsReadAction(producer, username, (GdsMessage) msg);
             case NODE_WRITE_ACTION:
                 try {
                     msg = GdsWriteNodeMessage.deserialize(action.getBody());
                 } catch (IOException e) {
                     return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
                 }
-                return handleNodeWriteAction(producer, username, (GdsWriteNodeMessage) msg);
-            case RELS_READ_ACTION:
+                return handleGdsWriteAction(producer, username, (GdsWriteNodeMessage) msg);
             case RELS_WRITE_ACTION:
-                // FALLTHROUGH: unimplemented
-                break;
+                try {
+                    msg = GdsWriteRelsMessage.deserialize(action.getBody());
+                } catch (IOException e) {
+                    return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
+                }
+                return handleGdsWriteAction(producer, username, msg);
+            default:
+                // fallthrough
         }
         return Outcome.failure(CallStatus.UNIMPLEMENTED.withDescription("coming soon?!"));
     }
 
-    private Outcome handleNodeWriteAction(Producer producer, String username, GdsWriteNodeMessage msg) {
+    private Outcome handleGdsWriteAction(Producer producer, String username, Message msg) {
         final Job j = jobCreator.newJob(msg, Job.Mode.WRITE, username);
         assert(j instanceof WriteJob); // XXX
         final WriteJob job = (WriteJob)j;
@@ -97,7 +101,7 @@ public class GdsActionHandler implements ActionHandler {
         return Outcome.success(new Result(ticket.serialize().array()));
     }
 
-    private Outcome handleNodeReadAction(Producer producer, String username, GdsMessage msg) {
+    private Outcome handleGdsReadAction(Producer producer, String username, GdsMessage msg) {
         final Job j = jobCreator.newJob(msg, Job.Mode.READ, username);
         assert(j instanceof ReadJob); // XXX
         final ReadJob job = (ReadJob)j;

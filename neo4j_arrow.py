@@ -8,8 +8,8 @@ from enum import Enum
 from os import environ as env
 
 _JOB_CYPHER = "cypherRead"
-_JOB_GDS = "gdsNodeProperties"      # TODO: rename
-_JOB_GDS_WRITE = "gds.write.nodes"
+_JOB_GDS_READ = "gds.read"      # TODO: rename
+_JOB_GDS_WRITE_NODES = "gds.write.nodes"
 _JOB_GDS_WRITE_RELS = "gds.write.relationships"
 _JOB_STATUS = "jobStatus"
 
@@ -84,7 +84,7 @@ class Neo4jArrow:
             'filters': filters,
         }
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS, params_bytes)
+        action = (_JOB_GDS_READ, params_bytes)
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
@@ -97,7 +97,21 @@ class Neo4jArrow:
              'labelsField': labelsField,
          }
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS_WRITE, params_bytes)
+        action = (_JOB_GDS_WRITE_NODES, params_bytes)
+        results = self._client.do_action(action, options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
+    def gds_write_relationships(self, graph, database='neo4j', sourceField='sourceId', targetField='targetId', typeField='type'):
+        """Submit a GDS Write Job for creating Rels and Rel Properties."""
+        params = {
+             'db': database,
+             'graph': graph,
+             'sourceIdField': sourceField,
+             'targetIdField': targetField,
+             'typeField': typeField,
+         }
+        params_bytes = json.dumps(params).encode('utf8')
+        action = (_JOB_GDS_WRITE_RELS, params_bytes)
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
@@ -114,7 +128,7 @@ class Neo4jArrow:
             'filters': filters,
         }
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS, params_bytes)
+        action = (_JOB_GDS_READ, params_bytes)
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
