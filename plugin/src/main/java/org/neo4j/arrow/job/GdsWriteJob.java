@@ -11,7 +11,10 @@ import org.neo4j.arrow.action.Message;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
+import org.neo4j.gds.RelationshipType;
 import org.neo4j.gds.api.*;
+import org.neo4j.gds.api.schema.NodeSchema;
+import org.neo4j.gds.api.schema.PropertySchema;
 import org.neo4j.gds.config.GraphCreateConfig;
 import org.neo4j.gds.core.huge.HugeGraph;
 import org.neo4j.gds.core.loading.CSRGraphStoreUtil;
@@ -23,11 +26,12 @@ import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.kernel.database.NamedDatabaseId;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -110,61 +114,107 @@ public class GdsWriteJob extends WriteJob {
             schema.findField(msg.getLabelsField());
             ListVector labelsVector = (ListVector) root.getVector(msg.getLabelsField());
 
+            // This is ugly
+            final Map<NodeLabel, Map<String, ArrowNodeProperties>> labelToPropMap = new ConcurrentHashMap<>();
+            final Map<NodeLabel, Map<String, PropertySchema>> labelToPropSchemaMap = new ConcurrentHashMap<>();
+            final Map<String, NodeProperties> globalPropMap = new ConcurrentHashMap<>();
+
+            final Map<Long, Integer> idMap = new ConcurrentHashMap<>();
+            final AtomicLong maxId = new AtomicLong(0);
+
+            // Brute force. Terrible.
+            logger.info("analyzing vectors to build label->propMap mapping");
+            IntStream.range(0, nodeIdVector.getValueCount())
+                    .parallel()
+                    .boxed()
+                    .forEach(idx -> {
+                        final long nodeId = nodeIdVector.get(idx);
+                        final List<?> labels = labelsVector.getObject(idx);
+                        labels.stream().map(Object::toString).forEach(label -> {
+                            final NodeLabel nodeLabel = NodeLabel.of(label);
+                            final Map<String, ArrowNodeProperties> propMap =
+                                    labelToPropMap.getOrDefault(nodeLabel, new ConcurrentHashMap<>());
+                            root.getFieldVectors().stream()
+                                    .filter(vec -> !Objects.equals(vec.getName(), msg.getIdField())
+                                            && !Objects.equals(vec.getName(), msg.getLabelsField()))
+                                    .forEach(vec -> {
+                                        final ArrowNodeProperties props = new ArrowNodeProperties(vec, nodeLabel, idMap);
+                                        propMap.putIfAbsent(vec.getName(), props);
+                                        globalPropMap.putIfAbsent(vec.getName(), props);
+                                    });
+                            labelToPropMap.put(nodeLabel, propMap); // ??? is this needed?
+                        });
+                        idMap.put(nodeId, idx);
+                        maxId.updateAndGet(i -> Math.max(nodeId, i));
+                    });
+            logger.info("labelToPropMap: {}", labelToPropMap);
+
+            // groan
+            labelToPropMap.forEach((label, propMap) ->
+                    propMap.forEach((str, props) ->
+                            labelToPropSchemaMap.getOrDefault(label, new ConcurrentHashMap<>())
+                                    .putIfAbsent(str, PropertySchema.of(str, propMap.get(str).valueType()))));
+
+            final NodeSchema nodeSchema = NodeSchema.of(labelToPropSchemaMap);
+
             final NodesBuilder builder = (new NodesBuilderBuilder())
                     .concurrency(Config.arrowMaxPartitions)
                     .hasLabelInformation(true)
                     .hasProperties(true)
                     .allocationTracker(AllocationTracker.empty())
-                    .maxOriginalId(Integer.MAX_VALUE)
+                    .maxOriginalId(maxId.get())
                     .nodeCount(rowCount)
                     .build();
 
             assert(root.getRowCount() == nodeIdVector.getValueCount());
+
+            // Sadly need to re-run through this :-(, thanks max original id!
             IntStream.range(0, nodeIdVector.getValueCount())
                     .parallel()
                     .forEach(idx -> {
+                        // XXX don't recompute?
                         final String[] labels = labelsVector.getObject(idx).stream()
                                 .map(Object::toString).collect(Collectors.toList()).toArray(String[]::new);
                         final NodeLabel[] nodeLabels = NodeLabel.listOf(labels).toArray(NodeLabel[]::new);
                         builder.addNode(nodeIdVector.get(idx), nodeLabels);
                     });
 
-            final HugeGraph hugeGraph = GraphFactory.create(builder.build().nodeMapping(),
-                    Relationships.of(0, Orientation.NATURAL, false, new AdjacencyList() {
-                        // See GraphStoreFilterTest.java for inspiration of how to stub out
-                        @Override
-                        public int degree(long node) {
-                            return 0;
-                        }
+            final HugeGraph hugeGraph = GraphFactory.create(builder.build().nodeMapping(), nodeSchema, Map.of(),
+                    RelationshipType.ALL_RELATIONSHIPS, Relationships.of(0, Orientation.NATURAL, false,
+                            new AdjacencyList() {
+                                // See GraphStoreFilterTest.java for inspiration of how to stub out
+                                @Override
+                                public int degree(long node) {
+                                    return 0;
+                                }
 
-                        @Override
-                        public AdjacencyCursor adjacencyCursor(long node, double fallbackValue) {
-                            return AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
-                        }
+                                @Override
+                                public AdjacencyCursor adjacencyCursor(long node, double fallbackValue) {
+                                    return AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
+                                }
 
-                        @Override
-                        public AdjacencyCursor rawAdjacencyCursor() {
-                            return AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
-                        }
+                                @Override
+                                public AdjacencyCursor rawAdjacencyCursor() {
+                                    return AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
+                                }
 
-                        @Override
-                        public void close() {
-                            // XXX hack
-                            root.close();
-                        }
-                    }), AllocationTracker.empty());
+                                @Override
+                                public void close() {
+                                    // XXX hack
+                                    root.close();
+                                }
+                            }), AllocationTracker.empty());
 
             final GraphStore store = CSRGraphStoreUtil.createFromGraph(
                     dbId, hugeGraph, "REL", Optional.empty(),
                     Config.arrowMaxPartitions, AllocationTracker.create());
 
             // Try wiring in our arbitrary node properties.
-            root.getFieldVectors().stream()
-                    .filter(vec -> !vec.getName().equals(msg.getLabelsField())
-                            && !vec.getName().equals(msg.getIdField()))
-                    .map(ArrowNodeProperties::new)
-                    .forEach(nodeProps -> store.addNodeProperty(NodeLabel.ALL_NODES, // XXX hack for now
-                            nodeProps.getName(), nodeProps));
+            labelToPropMap.forEach((label, propMap) ->
+                    propMap.forEach((name, props) -> {
+                        logger.info("mapping label {} to property {}", label, name);
+                        store.addNodeProperty(label, name, props);
+                    }));
 
             final GraphCreateConfig config = new GraphCreateConfig() {
                 @Override
