@@ -122,6 +122,11 @@ public abstract class GdsRecord implements RowBasedRecord {
             }
 
             @Override
+            public float[] asFloatArray() {
+                return floats;
+            }
+
+            @Override
             public List<Double> asDoubleList() {
                 return asFloatList().stream()
                         .mapToDouble(Float::doubleValue).boxed().collect(Collectors.toList());
@@ -179,6 +184,15 @@ public abstract class GdsRecord implements RowBasedRecord {
             @Override
             public double[] asDoubleArray() {
                 return doubles;
+            }
+
+            @Override
+            public float[] asFloatArray() {
+                // XXX wasteful
+                final float[] array = new float[doubles.length];
+                IntStream.range(0, doubles.length).parallel()
+                        .forEach(idx -> array[idx] = (float) doubles[idx]);
+                return array;
             }
 
             @Override
