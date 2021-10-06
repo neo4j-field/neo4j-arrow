@@ -275,7 +275,7 @@ project(':plugin') {
         dependencies {
             // Neo4j adds this for us
             exclude(dependency('org.neo4j:neo4j-parser'))
-            exclude(dependency('org.opencycpher::'))
+            exclude(dependency('org.opencypher::'))
         }
     }
 }
