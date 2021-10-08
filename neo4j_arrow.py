@@ -123,7 +123,7 @@ class Neo4jArrow:
         params = {
             'db': database,
             'graph': graph,
-            'type': 'relationships',
+            'type': 'relationship',
             'properties': properties,
             'filters': filters,
         }
