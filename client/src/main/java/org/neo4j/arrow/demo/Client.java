@@ -135,7 +135,7 @@ public class Client implements AutoCloseable {
         if (args != null && args.length > 0 && args[0].equalsIgnoreCase("gds")) {
             GdsMessage msg = new GdsMessage("neo4j", "mygraph", GdsMessage.RequestType.node,
                     List.of("embedding"), List.of());
-            return new Action(GdsActionHandler.NODE_READ_ACTION, msg.serialize());
+            return new Action(GdsActionHandler.GDS_READ_ACTION, msg.serialize());
         } else {
             CypherMessage msg = new CypherMessage("neo4j", "UNWIND range(1, $rows) AS row\n" +
                     "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
