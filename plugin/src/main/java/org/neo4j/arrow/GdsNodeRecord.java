@@ -100,7 +100,7 @@ public class GdsNodeRecord extends GdsRecord {
     @Override
     public List<String> keys() {
         ArrayList<String> list = new ArrayList<>(keyArray.length + 1);
-        list.add("nodeId");
+        list.add("node_id");
         list.addAll(List.of(keyArray));
         return list;
     }

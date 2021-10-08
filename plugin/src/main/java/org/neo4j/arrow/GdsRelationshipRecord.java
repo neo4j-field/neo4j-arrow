@@ -9,9 +9,9 @@ import java.util.List;
  */
 public class GdsRelationshipRecord extends GdsRecord {
 
-    public static final String SOURCE_FIELD = "sourceId";
-    public static final String TARGET_FIELD = "targetId";
-    public static final String TYPE_FIELD = "relType";
+    public static final String SOURCE_FIELD = "source_id";
+    public static final String TARGET_FIELD = "target_id";
+    public static final String TYPE_FIELD = "type";
     public static final String PROPERTY_FIELD = "property";
     public static final String VALUE_FIELD = "value";
 
