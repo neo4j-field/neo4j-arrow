@@ -11,6 +11,8 @@ import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.GdsWriteNodeMessage;
 import org.neo4j.arrow.action.GdsWriteRelsMessage;
 import org.neo4j.arrow.action.Message;
+import org.neo4j.arrow.gds.ArrowAdjacencyList;
+import org.neo4j.arrow.gds.ArrowNodeProperties;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
@@ -289,10 +291,14 @@ public class GdsWriteJob extends WriteJob {
             final BigIntVector targetIdVector = (BigIntVector) root.getVector(msg.getTargetField());
             final VarCharVector typesVector = (VarCharVector) root.getVector(msg.getTypeField());
 
-            // Ugliness abounds
-            final Map<Long, List<Integer>> sourceIdMap = new ConcurrentHashMap<>();
-            final Map<Long, List<Integer>> targetIdMap = new ConcurrentHashMap<>();
+            // Ugliness abounds...
+            // Maps of node ids to offsets in the opposite end of the edge
+            final Map<String, Map<Long, Queue<Integer>>> sourceTypeIdMap = new ConcurrentHashMap<>();
+            final Map<String, Map<Long, Queue<Integer>>> targetTypeIdMap = new ConcurrentHashMap<>();
             final Map<String, Long> types = new ConcurrentHashMap<>();
+
+            // Map of NodeIds to types
+            final Map<Long, Set<String>> typeMap = new ConcurrentHashMap<>();
 
             logger.info("analyzing vectors to build type->rel mappings");
             IntStream.range(0, root.getRowCount())
@@ -303,93 +309,48 @@ public class GdsWriteJob extends WriteJob {
                         final long targetId = targetIdVector.get(idx);
                         final String type = new String(typesVector.get(idx), StandardCharsets.UTF_8);
 
-                        final List<Integer> targetList = sourceIdMap.getOrDefault(sourceId, new ArrayList<>());
-                        targetList.add(idx);
-                        sourceIdMap.put(sourceId, targetList);
+                        types.compute(type, (key, cnt) -> (cnt == null) ? 1L : cnt + 1);
 
-                        final List<Integer> sourceList = targetIdMap.getOrDefault(targetId, new ArrayList<>());
-                        sourceList.add(idx);
-                        targetIdMap.put(targetId, sourceList);
+                        sourceTypeIdMap.compute(type, (k, v) -> {
+                            final Map<Long, Queue<Integer>> sourceIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
+                            sourceIdMap.compute(sourceId, (k2, v2) -> {
+                                final Queue<Integer> targetList = (v2 == null) ? new ConcurrentLinkedQueue<>() : v2;
+                                targetList.add(idx);
+                                return targetList;
+                            });
+                            return sourceIdMap;
+                        });
 
-                        types.put(type, types.getOrDefault(type, 0L) + 1);
+                        targetTypeIdMap.compute(type, (k, v) -> {
+                            final Map<Long, Queue<Integer>> targetIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
+                            targetIdMap.compute(targetId, (k2, v2) -> {
+                                final Queue<Integer> sourceList = (v2 == null) ? new ConcurrentLinkedQueue<>() : v2;
+                                sourceList.add(idx);
+                                return sourceList;
+                            });
+                            return targetIdMap;
+                        });
+
+                        typeMap.compute(sourceId, (k, v) -> {
+                            final Set<String> sourceTypeSet = (v == null) ? new ConcurrentSkipListSet<>() : v;
+                            sourceTypeSet.add(type);
+                            return sourceTypeSet;
+                        });
+
+                        typeMap.compute(targetId, (k, v) -> {
+                            final Set<String> sourceTypeSet = (v == null) ? new ConcurrentSkipListSet<>() : v;
+                            sourceTypeSet.add(type);
+                            return sourceTypeSet;
+                        });
                     });
 
             // TODO: properties
 
             types.forEach((type, cnt) -> {
                 // TODO: wire in maps
-                final Relationships rels = Relationships.of(cnt, Orientation.NATURAL, false, new AdjacencyList() {
-                    @Override
-                    public int degree(long node) {
-                        return 0;
-                    }
-
-                    @Override
-                    public AdjacencyCursor adjacencyCursor(long node, double fallbackValue) {
-                        return new AdjacencyCursor() {
-                            @Override
-                            public void init(long index, int degree) {
-
-                            }
-
-                            @Override
-                            public int size() {
-                                return 0;
-                            }
-
-                            @Override
-                            public boolean hasNextVLong() {
-                                return false;
-                            }
-
-                            @Override
-                            public long nextVLong() {
-                                return 0;
-                            }
-
-                            @Override
-                            public long peekVLong() {
-                                return 0;
-                            }
-
-                            @Override
-                            public int remaining() {
-                                return 0;
-                            }
-
-                            @Override
-                            public long skipUntil(long nodeId) {
-                                return 0;
-                            }
-
-                            @Override
-                            public long advance(long nodeId) {
-                                return 0;
-                            }
-
-                            @Override
-                            public AdjacencyCursor shallowCopy(AdjacencyCursor destination) {
-                                return AdjacencyCursor.empty();
-                            }
-
-                            @Override
-                            public void close() {
-
-                            }
-                        };
-                    }
-
-                    @Override
-                    public AdjacencyCursor rawAdjacencyCursor() {
-                        return AdjacencyCursor.empty();
-                    }
-
-                    @Override
-                    public void close() {
-                        root.close();
-                    }
-                });
-
+                final Relationships rels = Relationships.of(cnt, Orientation.NATURAL, true,
+                        new ArrowAdjacencyList(sourceTypeIdMap.get(type), targetTypeIdMap.get(type),
+                                sourceIdVector, targetIdVector, (unused) -> root.close()));
                 logger.info("adding relationship type {} to graph {}", type, storeWithConfig.config().graphName());
                 storeWithConfig.graphStore().addRelationshipType(RelationshipType.of(type), Optional.empty(), Optional.empty(), rels);
             });

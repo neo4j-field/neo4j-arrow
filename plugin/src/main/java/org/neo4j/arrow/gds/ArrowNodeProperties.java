@@ -1,4 +1,4 @@
-package org.neo4j.arrow.job;
+package org.neo4j.arrow.gds;
 
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.ListVector;

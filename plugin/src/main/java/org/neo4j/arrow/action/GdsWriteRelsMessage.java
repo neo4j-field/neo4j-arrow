@@ -16,7 +16,7 @@ public class GdsWriteRelsMessage implements Message {
 
     public static final String JSON_KEY_DATABASE_NAME = "db";
     public static final String JSON_KEY_GRAPH_NAME = "graph";
-    // TODO: "type" is pretty vague...needs a better name
+
     public static final String JSON_KEY_SOURCE_FIELD = "sourceField";
     public static final String DEFAULT_SOURCE_FIELD = "source";
 
