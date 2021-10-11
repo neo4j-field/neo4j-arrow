@@ -1,11 +1,13 @@
 package org.neo4j.arrow;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.ExecutionException;
 import java.util.stream.IntStream;
 
 public class SillyStreamsTest {
+    @Disabled
     @Test
     public void testStreams() throws ExecutionException, InterruptedException {
         var n = IntStream.range(1, 1_000_000).boxed().parallel().map(i -> {

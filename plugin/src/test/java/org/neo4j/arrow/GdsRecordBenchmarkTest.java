@@ -4,6 +4,7 @@ import org.apache.arrow.flight.Action;
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.memory.RootAllocator;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -111,6 +112,7 @@ public class GdsRecordBenchmarkTest {
         );
     }
 
+    @Disabled
     @ParameterizedTest
     @MethodSource("provideDifferentNativeArrays")
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
@@ -128,7 +130,7 @@ public class GdsRecordBenchmarkTest {
             final long start = System.currentTimeMillis();
             final GdsMessage msg = new GdsMessage("neo4j", "mygraph",
                     GdsMessage.RequestType.node, List.of("fastRp"), List.of());
-            final Action action = new Action(GdsActionHandler.NODE_READ_ACTION, msg.serialize());
+            final Action action = new Action(GdsActionHandler.GDS_READ_ACTION, msg.serialize());
             client.run(action);
             final long stop = signal.join();
             log.info(String.format("Client Lifecycle Time: %,d ms", stop - start));
