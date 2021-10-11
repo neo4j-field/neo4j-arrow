@@ -21,6 +21,8 @@ public class GdsNodeRecord extends GdsRecord {
     /** Represents the underlying node id */
     private final Value nodeId;
 
+    public static final String NODE_ID_FIELD = "node_id";
+
     protected GdsNodeRecord(long nodeId, String[] keys, Value[] values, Function<Long, Long> nodeIdResolver) {
         super(keys, values);
         this.nodeId = wrapScalar(nodeIdResolver.apply(nodeId), ValueType.LONG);
@@ -87,7 +89,7 @@ public class GdsNodeRecord extends GdsRecord {
 
     @Override
     public Value get(String field) {
-        if ("nodeId".equals(field)) {
+        if (NODE_ID_FIELD.equals(field)) {
             return nodeId;
         } else {
             for (int i = 0; i < keyArray.length; i++)
@@ -99,8 +101,8 @@ public class GdsNodeRecord extends GdsRecord {
 
     @Override
     public List<String> keys() {
-        ArrayList<String> list = new ArrayList<>(keyArray.length + 1);
-        list.add("node_id");
+        ArrayList<String> list = new ArrayList<>();
+        list.add(NODE_ID_FIELD);
         list.addAll(List.of(keyArray));
         return list;
     }

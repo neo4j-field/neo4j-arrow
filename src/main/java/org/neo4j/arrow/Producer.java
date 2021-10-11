@@ -9,16 +9,14 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.impl.*;
-import org.apache.arrow.vector.complex.reader.*;
+import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
+import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.compression.CompressionUtil;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
-import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
@@ -34,9 +32,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -96,7 +91,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      */
     @Override
     public void getStream(CallContext context, Ticket ticket, ServerStreamListener listener) {
-        logger.debug("getStream called: context={}, ticket={}", context, ticket.getBytes());
+        logger.info("getStream called: context={}, ticket={}", context, ticket.getBytes());
 
         final Job rawJob = jobMap.get(ticket);
         if (rawJob == null) {
@@ -126,7 +121,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
-            logger.debug("using schema: {}", info.getSchema().toJson());
+            logger.info("using schema: {}", info.getSchema().toJson());
 
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
@@ -185,6 +180,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 partitionedCounts[i] = new AtomicInteger(0);
                 partitionedVectorList[i] = new ArrayList<>(0);
             }
+
+            logger.info("starting consumer");
 
             // Core job logic
             job.consume((record, partitionKey) -> {
@@ -453,6 +450,7 @@ public class Producer implements FlightProducer, AutoCloseable {
     public Ticket ticketJob(Job job) {
         final Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
         jobMap.put(ticket, job);
+        logger.info("ticketed job {}", ticket);
         return ticket;
     }
 

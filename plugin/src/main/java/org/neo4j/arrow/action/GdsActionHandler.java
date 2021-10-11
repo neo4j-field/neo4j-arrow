@@ -102,40 +102,54 @@ public class GdsActionHandler implements ActionHandler {
     }
 
     private Outcome handleGdsReadAction(Producer producer, String username, GdsMessage msg) {
-        final Job j = jobCreator.newJob(msg, Job.Mode.READ, username);
-        assert(j instanceof ReadJob); // XXX
-        final ReadJob job = (ReadJob)j;
-        final Ticket ticket = producer.ticketJob(job);
+        log.info("handling gds read action from username %s", username);
+        try {
+            final Job j = jobCreator.newJob(msg, Job.Mode.READ, username);
+            assert (j instanceof ReadJob); // XXX
+            final ReadJob job = (ReadJob) j;
+            final Ticket ticket = producer.ticketJob(job);
 
-        // We need to wait for the first record to discern our final schema
-        final Future<RowBasedRecord> futureRecord = job.getFirstRecord();
+            // We need to wait for the first record to discern our final schema
+            final Future<RowBasedRecord> futureRecord = job.getFirstRecord();
 
-        CompletableFuture.supplyAsync(() -> {
-            // Try to get our first record
-            try {
-                return Optional.of(futureRecord.get());
-            } catch (InterruptedException e) {
-                log.error("interrupted getting first record", e);
-            } catch (ExecutionException e) {
-                log.error("execution error", e);
-            }
-            return Optional.empty();
-        }).thenAcceptAsync(maybeRecord -> {
-            if (maybeRecord.isEmpty()) {
-                // XXX: need handling of this problem :-(
-                producer.deleteFlight(ticket);
-                return;
-            }
+            CompletableFuture.supplyAsync(() -> {
+                // Try to get our first record
+                try {
+                    return Optional.of(futureRecord.get());
+                } catch (InterruptedException e) {
+                    log.error("interrupted getting first record", e);
+                } catch (ExecutionException e) {
+                    log.error("execution error", e);
+                } finally {
+                    log.info("got possible first record");
+                }
+                return Optional.empty();
+            }).thenAcceptAsync(maybeRecord -> {
+                if (maybeRecord.isEmpty()) {
+                    // XXX: need handling of this problem :-(
+                    log.warn("first record looks bogus");
+                    producer.deleteFlight(ticket);
+                    return;
+                }
+                try {
+                    final RowBasedRecord record = (RowBasedRecord) maybeRecord.get();
+                    final List<Field> fields = getSchemaFields(record);
 
-            final RowBasedRecord record = (RowBasedRecord) maybeRecord.get();
-            final List<Field> fields = getSchemaFields(record);
+                    log.info("publishing flight info for ticket %s", ticket);
 
-            // We've got our Schema, so publish this Flight for consumption
-            producer.setFlightInfo(ticket, new Schema(fields));
-        });
+                    // We've got our Schema, so publish this Flight for consumption
+                    producer.setFlightInfo(ticket, new Schema(fields));
+                } catch (Exception e) {
+                    log.error("oops", e);
+                }
+            });
 
-        // We're taking off, so hand the ticket back to our client.
-        return Outcome.success(new Result(ticket.serialize().array()));
+            // We're taking off, so hand the ticket back to our client.
+            return Outcome.success(new Result(ticket.serialize().array()));
+        } catch (Exception e) {
+            log.error("handleGdsReadAction failed", e);
+            return Outcome.failure(CallStatus.INTERNAL.withDescription(e.getMessage()));
+        }
     }
 
     /**

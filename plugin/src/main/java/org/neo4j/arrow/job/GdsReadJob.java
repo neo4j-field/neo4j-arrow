@@ -240,11 +240,13 @@ public class GdsReadJob extends ReadJob {
             long nodeId = iterator.next();
             GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId);
             onFirstRecord(record);
-            logger.debug("got first record");
+            logger.debug("offered first record to producer");
             for (int i=0; i<keys.length; i++)
-                logger.info(" {} -> {}", keys[i], propertiesArray[i].valueType());
+                logger.info(" key {}/{}: {} -> {}", i, keys.length-1, keys[i], propertiesArray[i].valueType());
 
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
+
+            logger.info("acquired consumer");
 
             // Blast off!
             // TODO: GDS lets us batch access to lists of nodes...future opportunity?
