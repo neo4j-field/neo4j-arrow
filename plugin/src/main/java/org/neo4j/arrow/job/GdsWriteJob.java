@@ -1,5 +1,7 @@
 package org.neo4j.arrow.job;
 
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.VarCharVector;
@@ -29,6 +31,8 @@ import org.neo4j.gds.core.loading.GraphStoreWithConfig;
 import org.neo4j.gds.core.loading.construction.GraphFactory;
 import org.neo4j.gds.core.loading.construction.NodesBuilder;
 import org.neo4j.gds.core.loading.construction.NodesBuilderBuilder;
+import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterable;
+import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.kernel.database.NamedDatabaseId;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
@@ -37,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongPredicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -116,7 +121,7 @@ public class GdsWriteJob extends WriteJob {
             final Map<NodeLabel, Map<String, ArrowNodeProperties>> labelToPropMap = new ConcurrentHashMap<>();
             final Map<NodeLabel, Map<String, PropertySchema>> labelToPropSchemaMap = new ConcurrentHashMap<>();
             final Map<String, NodeProperties> globalPropMap = new ConcurrentHashMap<>();
-
+            final Map<Long, Set<NodeLabel>> nodeToLabelMap = new ConcurrentHashMap<>();
             final Map<Long, Integer> idMap = new ConcurrentHashMap<>();
             final AtomicLong maxId = new AtomicLong(0);
 
@@ -128,8 +133,13 @@ public class GdsWriteJob extends WriteJob {
                     .forEach(idx -> {
                         final long nodeId = nodeIdVector.get(idx);
                         final List<?> labels = labelsVector.getObject(idx);
+
+                        final Set<NodeLabel> labelSet = new HashSet<>();
+
                         labels.stream().map(Object::toString).forEach(label -> {
                             final NodeLabel nodeLabel = NodeLabel.of(label);
+                            labelSet.add(nodeLabel);
+
                             final Map<String, ArrowNodeProperties> propMap =
                                     labelToPropMap.getOrDefault(nodeLabel, new ConcurrentHashMap<>());
                             root.getFieldVectors().stream()
@@ -142,10 +152,12 @@ public class GdsWriteJob extends WriteJob {
                                     });
                             labelToPropMap.put(nodeLabel, propMap); // ??? is this needed?
                         });
+
+                        nodeToLabelMap.put(nodeId, labelSet);
                         idMap.put(nodeId, idx);
                         maxId.updateAndGet(i -> Math.max(nodeId, i));
                     });
-            logger.info("labelToPropMap: {}", labelToPropMap);
+            // logger.info("labelToPropMap: {}", labelToPropMap);
 
             // groan
             labelToPropMap.forEach((label, propMap) ->
@@ -154,30 +166,113 @@ public class GdsWriteJob extends WriteJob {
                                     .putIfAbsent(str, PropertySchema.of(str, propMap.get(str).valueType()))));
 
             final NodeSchema nodeSchema = NodeSchema.of(labelToPropSchemaMap);
-
-            final NodesBuilder builder = (new NodesBuilderBuilder())
-                    .concurrency(Config.arrowMaxPartitions)
-                    .hasLabelInformation(true)
-                    .hasProperties(true)
-                    .allocationTracker(AllocationTracker.empty())
-                    .maxOriginalId(maxId.get())
-                    .nodeCount(rowCount)
-                    .build();
-
             assert(root.getRowCount() == nodeIdVector.getValueCount());
 
-            // Sadly need to re-run through this :-(, thanks max original id!
-            IntStream.range(0, nodeIdVector.getValueCount())
-                    .parallel()
-                    .forEach(idx -> {
-                        // XXX don't recompute?
-                        final String[] labels = labelsVector.getObject(idx).stream()
-                                .map(Object::toString).collect(Collectors.toList()).toArray(String[]::new);
-                        final NodeLabel[] nodeLabels = NodeLabel.listOf(labels).toArray(NodeLabel[]::new);
-                        builder.addNode(nodeIdVector.get(idx), nodeLabels);
-                    });
+            // We need our own style of NodeMapping do deal with the fact we manage the node ids
+            final NodeMapping nodeMapping = new NodeMapping() {
 
-            final HugeGraph hugeGraph = GraphFactory.create(builder.build().nodeMapping(), nodeSchema, globalPropMap,
+                @Override
+                public Set<NodeLabel> nodeLabels(long nodeId) {
+                    return nodeToLabelMap.get(nodeId);
+                }
+
+                @Override
+                public void forEachNodeLabel(long nodeId, NodeLabelConsumer consumer) {
+                    final Set<NodeLabel> labels = nodeToLabelMap.get(nodeId);
+                    if (labels != null) {
+                        labels.forEach(consumer::accept);
+                    }
+                }
+
+                @Override
+                public Set<NodeLabel> availableNodeLabels() {
+                    return labelToPropMap.keySet();
+                }
+
+                @Override
+                public boolean hasLabel(long nodeId, NodeLabel label) {
+                    return nodeToLabelMap.getOrDefault(nodeId, Set.of()).contains(label);
+                }
+
+                @Override
+                public Collection<PrimitiveLongIterable> batchIterables(long batchSize) {
+                    final Set<Long> nodeIds = nodeToLabelMap.keySet();
+                    // XXX hacky cast
+                    return Lists.partition(new ArrayList<>(nodeIds), (int) batchSize).stream().map(longs -> {
+                        final Iterator<Long> iterator = longs.listIterator();
+                        return (PrimitiveLongIterable) () -> new PrimitiveLongIterator() {
+                            @Override
+                            public boolean hasNext() {
+                                return iterator.hasNext();
+                            }
+
+                            @Override
+                            public long next() {
+                                return iterator.next();
+                            }
+                        };
+                    }).collect(Collectors.toList());
+                }
+
+                @Override
+                public long toMappedNodeId(long nodeId) {
+                    return nodeId;
+                }
+
+                @Override
+                public long toOriginalNodeId(long nodeId) {
+                    return nodeId;
+                }
+
+                @Override
+                public long toRootNodeId(long nodeId) {
+                    return nodeId;
+                }
+
+                @Override
+                public boolean contains(long nodeId) {
+                    return nodeToLabelMap.containsKey(nodeId);
+                }
+
+                @Override
+                public long nodeCount() {
+                    return nodeToLabelMap.size();
+                }
+
+                @Override
+                public long rootNodeCount() {
+                    return nodeToLabelMap.size();
+                }
+
+                @Override
+                public long highestNeoId() {
+                    // UNSUPPORTED
+                    return maxId.get();
+                }
+
+                @Override
+                public void forEachNode(LongPredicate consumer) {
+                    nodeToLabelMap.keySet().forEach(consumer::test);
+                }
+
+                @Override
+                public PrimitiveLongIterator nodeIterator() {
+                    return new PrimitiveLongIterator() {
+                        final private Iterator<Long> iterator = nodeToLabelMap.keySet().iterator();
+                        @Override
+                        public boolean hasNext() {
+                            return iterator.hasNext();
+                        }
+
+                        @Override
+                        public long next() {
+                            return iterator.next();
+                        }
+                    };
+                }
+            };
+
+            final HugeGraph hugeGraph = GraphFactory.create(nodeMapping, nodeSchema, globalPropMap,
                     RelationshipType.ALL_RELATIONSHIPS, Relationships.of(0, Orientation.NATURAL, true,
                             new AdjacencyList() {
                                 // See GraphStoreFilterTest.java for inspiration of how to stub out
@@ -282,7 +377,6 @@ public class GdsWriteJob extends WriteJob {
 
             // XXX push schema validation to Producer side prior to full stream being formed
             final Schema schema = root.getSchema();
-            final long rowCount = root.getRowCount();
 
             final GraphStoreWithConfig storeWithConfig = GraphStoreCatalog.get(CatalogRequest.of(username, dbId), msg.getGraphName());
             assert(storeWithConfig != null);
@@ -302,12 +396,14 @@ public class GdsWriteJob extends WriteJob {
 
             logger.info("analyzing vectors to build type->rel mappings");
             IntStream.range(0, root.getRowCount())
-                    .parallel()
+                    //.parallel()
                     .boxed()
                     .forEach(idx -> {
                         final long sourceId = sourceIdVector.get(idx);
                         final long targetId = targetIdVector.get(idx);
                         final String type = new String(typesVector.get(idx), StandardCharsets.UTF_8);
+
+                        logger.trace("recording {} -[{}]> {}", sourceId, type, targetId);
 
                         types.compute(type, (key, cnt) -> (cnt == null) ? 1L : cnt + 1);
 
@@ -344,6 +440,8 @@ public class GdsWriteJob extends WriteJob {
                         });
                     });
 
+            logger.info("types counts: {}", types);
+
             // TODO: properties
 
             types.forEach((type, cnt) -> {
@@ -351,7 +449,9 @@ public class GdsWriteJob extends WriteJob {
                 final Relationships rels = Relationships.of(cnt, Orientation.NATURAL, true,
                         new ArrowAdjacencyList(sourceTypeIdMap.get(type), targetTypeIdMap.get(type),
                                 sourceIdVector, targetIdVector, (unused) -> root.close()));
-                logger.info("adding relationship type {} to graph {}", type, storeWithConfig.config().graphName());
+                logger.info("adding relationship type {} to graph {} (sourceMap: {}, targetMap: {})", type,
+                        storeWithConfig.config().graphName(), sourceTypeIdMap.get(type).size(),
+                        targetTypeIdMap.get(type).size());
                 storeWithConfig.graphStore().addRelationshipType(RelationshipType.of(type), Optional.empty(), Optional.empty(), rels);
             });
 

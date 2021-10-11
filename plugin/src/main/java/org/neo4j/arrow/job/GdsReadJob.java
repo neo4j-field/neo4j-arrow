@@ -174,6 +174,7 @@ public class GdsReadJob extends ReadJob {
                     .boxed()
                     .forEach(nodeId -> {
                         final long originalNodeId = baseGraph.toOriginalNodeId(nodeId);
+                        // logger.info("processing node {} (originalId: {})", nodeId, originalNodeId);
                         Arrays.stream(triples)
                                 .flatMap(triple -> {
                                     final RelationshipType type = (RelationshipType) triple.getLeft();
