@@ -51,6 +51,9 @@ public class GdsMessage implements Message {
      */
     private final List<String> properties;
 
+    /** Special instance to use as a way for us to "fail open" with properties */
+    public static final List<String> ANY_PROPERTIES = List.of();
+
     public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters) {
         this.dbName = dbName;
         this.graphName = graphName;
@@ -111,6 +114,8 @@ public class GdsMessage implements Message {
         if (obj instanceof List) {
             properties = ((List<?>)obj).stream().map(Object::toString).collect(Collectors.toList());
         }
+        if (properties.isEmpty())
+            properties = ANY_PROPERTIES;
 
         return new GdsMessage(dbName, graphName, requestType, properties, filters);
     }
@@ -140,7 +145,7 @@ public class GdsMessage implements Message {
                 ", graph='" + graphName + '\'' +
                 ", type='" + requestType + '\'' +
                 ", filters=" + filters +
-                ", properties=" + properties +
+                ", properties=" + (properties == ANY_PROPERTIES ? "ANY" : properties) +
                 '}';
     }
 }

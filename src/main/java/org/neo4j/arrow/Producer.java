@@ -231,7 +231,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                             ((Float4Vector) vector).set(idx, value.asFloat());
                         } else if (vector instanceof Float8Vector) {
                             ((Float8Vector) vector).set(idx, value.asDouble());
-                        } else if (vector instanceof VarCharVector) {
+                        } else if (vector instanceof VarCharVector && value.asString() != null) {
                             ((VarCharVector) vector).setSafe(idx, value.asString().getBytes(StandardCharsets.UTF_8));
                         } else if (vector instanceof FixedSizeListVector) {
                             // Used for GdsJobs

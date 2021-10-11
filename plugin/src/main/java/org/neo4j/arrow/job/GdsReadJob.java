@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 /**
@@ -100,23 +101,25 @@ public class GdsReadJob extends ReadJob {
 
         // Make sure we have the requested rel properties.
         // TODO: nested for-loop is ugly
-        for (String key : msg.getProperties()) {
-            boolean found = false;
-            for (RelationshipType type : relTypes) {
-                logger.info("type {} has key {}", type.name(), key);
-                if (store.hasRelationshipProperty(type, key)) {
-                    logger.info("  yes!");
-                    found = true;
-                    break;
-                } else {
-                    logger.info("  nope.");
+        if (msg.getProperties() != GdsMessage.ANY_PROPERTIES) {
+            for (String key : msg.getProperties()) {
+                boolean found = false;
+                for (RelationshipType type : relTypes) {
+                    logger.info("type {} has key {}", type.name(), key);
+                    if (store.hasRelationshipProperty(type, key)) {
+                        logger.info("  yes!");
+                        found = true;
+                        break;
+                    } else {
+                        logger.info("  nope.");
+                    }
                 }
-            }
-            if (!found) {
-                logger.error("no relationship property found for {}", key);
-                throw CallStatus.NOT_FOUND
-                        .withDescription(String.format("no relationship property found for %s", key))
-                        .toRuntimeException();
+                if (!found) {
+                    logger.error("no relationship property found for {}", key);
+                    throw CallStatus.NOT_FOUND
+                            .withDescription(String.format("no relationship property found for %s", key))
+                            .toRuntimeException();
+                }
             }
         }
 
@@ -131,10 +134,25 @@ public class GdsReadJob extends ReadJob {
         // XXX for now (as of v1.7.x) all rel properties are doubles, but this could change
         final String[] keys = msg.getProperties().toArray(new String[0]);
         var triples = relTypes.stream()
-                .flatMap(relType -> Arrays.stream(keys)
-                        .filter(key -> store.hasRelationshipProperty(relType, key))
-                        .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key)))))
+                .flatMap(relType -> {
+                    logger.info("assembling triples for type {}", relType);
+                    // Filtering for certain properties
+                    if (msg.getProperties() != GdsMessage.ANY_PROPERTIES) {
+                        return Arrays.stream(keys)
+                                .filter(key -> store.hasRelationshipProperty(relType, key))
+                                .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key))));
+                    } else {
+                        logger.info("using all property keys for {}", relType);
+                        return Stream.concat(
+                                store.relationshipPropertyKeys(relType).stream()
+                                        .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key)))),
+                                Stream.of(Triple.of(relType, null, store.getGraph(relType, Optional.empty())))
+                        );
+                    }
+                })
+                .peek(triple -> logger.info("constructed triple {}", triple))
                 .toArray(Triple[]::new);
+        logger.info("assembled {} triples", triples.length);
 
         if (baseGraph.nodeCount() == 0)
             throw CallStatus.NOT_FOUND.withDescription("no matching node ids for GDS job").toRuntimeException();
@@ -150,6 +168,7 @@ public class GdsReadJob extends ReadJob {
             // Make rocket go now
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
 
+            logger.info("finding rels for {} nodes", baseGraph.nodeCount());
             LongStream.range(0, baseGraph.nodeCount())
                     .parallel()
                     .boxed()
