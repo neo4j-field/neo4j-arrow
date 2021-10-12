@@ -4,6 +4,7 @@ import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.flight.auth.BasicServerAuthHandler;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
+import org.neo4j.internal.kernel.api.security.AuthenticationResult;
 import org.neo4j.internal.kernel.api.security.LoginContext;
 import org.neo4j.kernel.api.security.AuthManager;
 import org.neo4j.kernel.api.security.AuthToken;
@@ -43,8 +44,8 @@ public class NativeAuthValidator
      * <p>
      * The token is in the form of the username, base64 encoded, a <pre>.</pre> character, and the
      * password, base64 encoded. (All in UTF-8 encoding.)
-     * @param username
-     * @param password
+     * @param username identity of the client
+     * @param password secret token or password provided by the client
      * @return new byte[] containing the token
      */
     @Override
@@ -64,7 +65,7 @@ public class NativeAuthValidator
      * {@link #getToken(String, String)}, and validates the password is correct for the username
      * contained within the token.
      *
-     * @param token
+     * @param token encoded identity and secret
      * @return Optional containing the username if valid, empty if not.
      */
     @Override
@@ -91,8 +92,8 @@ public class NativeAuthValidator
      * Validate the given username and password for the calling client by using the Neo4j
      * {@link #authManager} instance. (Does not support realms!)
      *
-     * @param username
-     * @param password
+     * @param username identity of the client
+     * @param password secret token or password provided by the client
      * @return an AuthResult that resolves to the username of the caller
      * @throws InvalidAuthTokenException if the basic auth token is malformed
      * @throws RuntimeException if the AuthManager service is unavailable or the identity cannot be
@@ -110,13 +111,11 @@ public class NativeAuthValidator
         }
         final LoginContext context = am.login(token, new ArrowConnectionInfo());
 
-        switch (context.subject().getAuthenticationResult()) {
-            case SUCCESS:
-                // XXX: this is HORRIBLE /facepalm
-                contextMap.put(context.subject().username(), context);
-                return () -> context.subject().username();
-            default:
-                throw CallStatus.UNAUTHENTICATED.withDescription("invalid username or password").toRuntimeException();
+        if (context.subject().getAuthenticationResult() == AuthenticationResult.SUCCESS) {
+            // XXX: this is HORRIBLE /facepalm
+            contextMap.put(context.subject().username(), context);
+            return () -> context.subject().username();
         }
+        throw CallStatus.UNAUTHENTICATED.withDescription("invalid username or password").toRuntimeException();
     }
 }

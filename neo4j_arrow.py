@@ -8,7 +8,9 @@ from enum import Enum
 from os import environ as env
 
 _JOB_CYPHER = "cypherRead"
-_JOB_GDS = "gdsNodeProperties"
+_JOB_GDS_READ = "gds.read"      # TODO: rename
+_JOB_GDS_WRITE_NODES = "gds.write.nodes"
+_JOB_GDS_WRITE_RELS = "gds.write.relationships"
 _JOB_STATUS = "jobStatus"
 
 _DEFAULT_HOST = env.get('NEO4J_ARROW_HOST', 'localhost')
@@ -82,7 +84,34 @@ class Neo4jArrow:
             'filters': filters,
         }
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS, params_bytes)
+        action = (_JOB_GDS_READ, params_bytes)
+        results = self._client.do_action(action, options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
+    def gds_write_nodes(self, graph, database='neo4j', idField='_node_id_', labelsField='_labels_'):
+        """Submit a GDS Write Job for creating Nodes and Node Properties."""
+        params = {
+             'db': database,
+             'graph': graph,
+             'idField': idField,
+             'labelsField': labelsField,
+         }
+        params_bytes = json.dumps(params).encode('utf8')
+        action = (_JOB_GDS_WRITE_NODES, params_bytes)
+        results = self._client.do_action(action, options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
+    def gds_write_relationships(self, graph, database='neo4j', sourceField='_source_id_', targetField='_target_id_', typeField='_type_'):
+        """Submit a GDS Write Job for creating Rels and Rel Properties."""
+        params = {
+             'db': database,
+             'graph': graph,
+             'sourceField': sourceField,
+             'targetField': targetField,
+             'typeField': typeField,
+         }
+        params_bytes = json.dumps(params).encode('utf8')
+        action = (_JOB_GDS_WRITE_RELS, params_bytes)
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
@@ -94,12 +123,12 @@ class Neo4jArrow:
         params = {
             'db': database,
             'graph': graph,
-            'type': 'relationships',
+            'type': 'relationship',
             'properties': properties,
             'filters': filters,
         }
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS, params_bytes)
+        action = (_JOB_GDS_READ, params_bytes)
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
@@ -129,3 +158,12 @@ class Neo4jArrow:
         """Read the stream associated with the given ticket."""
         self.wait_for_job(ticket, timeout=timeout)
         return self._client.do_get(ticket, options=self._options)
+
+    def put_stream(self, ticket, data):
+        """Write a stream to the server"""
+        # no need to wait for writes
+        table = pa.table(data=data)
+        descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
+        writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)
+        writer.write_table(table)
+        writer.close()

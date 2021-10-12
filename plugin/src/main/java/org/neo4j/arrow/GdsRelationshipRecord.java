@@ -9,9 +9,10 @@ import java.util.List;
  */
 public class GdsRelationshipRecord extends GdsRecord {
 
-    public static final String SOURCE_FIELD = "sourceId";
-    public static final String TARGET_FIELD = "targetId";
-    public static final String TYPE_FIELD = "relType";
+    // THESE SHOULD MATCH THE DEFAULTS IN neo4j_arrow.py!!!!
+    public static final String SOURCE_FIELD = "_source_id_";
+    public static final String TARGET_FIELD = "_target_id_";
+    public static final String TYPE_FIELD = "_type_";
     public static final String PROPERTY_FIELD = "property";
     public static final String VALUE_FIELD = "value";
 
@@ -23,8 +24,8 @@ public class GdsRelationshipRecord extends GdsRecord {
 
     public GdsRelationshipRecord(long sourceId, long targetId, String type, String property, Value value) {
         super(new String[0], new Value[0]);
-        this.sourceId = wrapScalar(ValueType.LONG, sourceId);
-        this.targetId = wrapScalar(ValueType.LONG, targetId);
+        this.sourceId = wrapScalar(sourceId, ValueType.LONG);
+        this.targetId = wrapScalar(targetId, ValueType.LONG);
         this.relType = wrapString(type);
         this.property = wrapString(property);
         this.value = value;

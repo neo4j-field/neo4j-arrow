@@ -1,6 +1,5 @@
 package org.neo4j.arrow;
 
-import org.apache.arrow.compression.Lz4CompressionCodec;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
@@ -9,19 +8,22 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.UnionVector;
 import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
-import org.apache.arrow.vector.compression.CompressionUtil;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
 import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.ReadJob;
+import org.neo4j.arrow.job.WriteJob;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -89,13 +91,21 @@ public class Producer implements FlightProducer, AutoCloseable {
      */
     @Override
     public void getStream(CallContext context, Ticket ticket, ServerStreamListener listener) {
-        logger.debug("getStream called: context={}, ticket={}", context, ticket.getBytes());
+        logger.info("getStream called: context={}, ticket={}", context, ticket.getBytes());
 
-        final Job job = jobMap.get(ticket);
-        if (job == null) {
+        final Job rawJob = jobMap.get(ticket);
+        if (rawJob == null) {
             listener.error(CallStatus.NOT_FOUND.withDescription("No job for ticket").toRuntimeException());
             return;
         }
+
+        if (!(rawJob instanceof ReadJob)) {
+            listener.error(CallStatus.INTERNAL.withDescription("invalid job base type").toRuntimeException());
+            return;
+        }
+
+        final ReadJob job = (ReadJob)rawJob;
+
         final FlightInfo info = flightMap.get(ticket);
         if (info == null) {
             listener.error(CallStatus.NOT_FOUND.withDescription("No flight for ticket").toRuntimeException());
@@ -111,7 +121,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
-            logger.debug("using schema: {}", info.getSchema().toJson());
+            logger.info("using schema: {}", info.getSchema().toJson());
 
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
@@ -136,8 +146,8 @@ public class Producer implements FlightProducer, AutoCloseable {
             final int maxPartitions = Config.arrowMaxPartitions;
 
             // Map<String, BaseWriter.ListWriter> writerMap
-            final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
-            final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
+            @SuppressWarnings("unchecked") final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
+            @SuppressWarnings("unchecked") final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
             final BufferAllocator[] bufferAllocators = new BufferAllocator[maxPartitions];
             final AtomicInteger[] partitionedCounts = new AtomicInteger[maxPartitions];
             final Semaphore[] partitionedSemaphores = new Semaphore[maxPartitions];
@@ -171,6 +181,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 partitionedVectorList[i] = new ArrayList<>(0);
             }
 
+            logger.info("starting consumer");
+
             // Core job logic
             job.consume((record, partitionKey) -> {
                 // Trivial partitioning scheme...
@@ -196,7 +208,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                             fieldVector.setInitialCapacity(Config.arrowBatchSize);
                             while (!fieldVector.allocateNewSafe() && --retries > 0) {
                                 logger.error("failed to allocate memory for field {}", fieldVector.getName());
-                                try { Thread.sleep(100); } catch (Exception ignored) {};
+                                try { Thread.sleep(100); } catch (Exception ignored) {}
                             }
                         }
                     }
@@ -216,7 +228,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                             ((Float4Vector) vector).set(idx, value.asFloat());
                         } else if (vector instanceof Float8Vector) {
                             ((Float8Vector) vector).set(idx, value.asDouble());
-                        } else if (vector instanceof VarCharVector) {
+                        } else if (vector instanceof VarCharVector && value.asString() != null) {
                             ((VarCharVector) vector).setSafe(idx, value.asString().getBytes(StandardCharsets.UTF_8));
                         } else if (vector instanceof FixedSizeListVector) {
                             // Used for GdsJobs
@@ -258,24 +270,74 @@ public class Producer implements FlightProducer, AutoCloseable {
                             // Used for Cypher
                             final UnionListWriter writer =
                                     (UnionListWriter) writerMap.computeIfAbsent(field.getName(),
-                                            s -> ((ListVector) vector).getWriter());
+                                            s -> {
+                                                UnionListWriter w = ((ListVector) vector).getWriter();
+                                                w.start();
+                                                return w;
+                                            });
                             writer.startList();
-                            // XXX: Assumes all values are doubles for now :-(
-                            for (Double d : value.asDoubleList())
-                                writer.writeFloat8(d);
-                            writer.setValueCount(value.asList().size());
+                            switch (value.type()) {
+                                case INT_ARRAY:
+                                    for (int i : value.asIntArray())
+                                        writer.writeInt(i);
+                                    break;
+                                case LONG_ARRAY:
+                                    for (long l : value.asLongArray())
+                                        writer.writeBigInt(l);
+                                    break;
+                                case FLOAT_ARRAY:
+                                    for (float f : value.asFloatArray())
+                                        writer.writeFloat4(f);
+                                    break;
+                                case DOUBLE_ARRAY:
+                                    for (double d : value.asDoubleArray())
+                                        writer.writeFloat8(d);
+                                    break;
+                                case STRING_LIST:
+                                    for (final String s : value.asStringList()) {
+                                        // TODO: should we allocate a single byte array and not have to reallocate?
+                                        final byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
+                                        try (final ArrowBuf buf = streamAllocator.buffer(bytes.length)) {
+                                            buf.setBytes(0, bytes);
+                                            writer.writeVarChar(0, bytes.length, buf);
+                                            logger.trace("wrote string {}", s);
+                                        }
+                                    }
+                                    break;
+                                default:
+                                    for (final Object o : value.asList()) {
+                                        // TODO: should we allocate a single byte array and not have to reallocate?
+                                        final byte[] bytes = o.toString().getBytes(StandardCharsets.UTF_8);
+                                        try (final ArrowBuf buf = streamAllocator.buffer(bytes.length)) {
+                                            buf.setBytes(0, bytes);
+                                            writer.writeVarChar(0, bytes.length, buf);
+                                        }
+                                    }
+                                    break;
+                            }
                             writer.endList();
                         }
                     }
 
                     // Flush at our batch size limit and reset our batch states.
                     if ((idx + 1) == Config.arrowBatchSize) {
+                        writerMap.values().forEach(writer -> {
+                            if (writer instanceof UnionFixedSizeListWriter) {
+                                logger.trace("calling writer.end() on {}", writer);
+                                //((UnionFixedSizeListWriter) writer).end();
+                            } else if (writer instanceof UnionListWriter) {
+                                logger.trace("calling writer.end() on {}", writer);
+                                ((UnionListWriter) writer).end();
+                            } else {
+                                logger.warn("writer isn't what we thought! {}", writer.getClass().getCanonicalName());
+                            }
+                        });
                         // Yolo?
                         final ArrayList<ValueVector> copy = new ArrayList<>();
                         final int vectorSize = idx + 1;
                         try {
                             transferMutex.acquire();
-                            for (FieldVector vector : vectorList) {
+                            for (final FieldVector vector : vectorList) {
                                 final TransferPair tp = vector.getTransferPair(transmitAllocator);
                                 tp.transfer();
                                 copy.add(tp.getTo());
@@ -314,12 +376,23 @@ public class Producer implements FlightProducer, AutoCloseable {
             job.get();
 
             // Final flush of stragglers...
-            for (int i=0; i<maxPartitions; i++) {
-                final int partition = i;
+            for (int partition=0; partition<maxPartitions; partition++) {
 
                 final List<FieldVector> vectorList = partitionedVectorList[partition];
                 final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
                 final int vectorSize = partitionedCounts[partition].get();
+
+                writerMap.values().forEach(writer -> {
+                    if (writer instanceof UnionFixedSizeListWriter) {
+                        logger.trace("calling writer.end() on {}", writer);
+                        // ((UnionFixedSizeListWriter) writer).end();
+                    } else if (writer instanceof UnionListWriter) {
+                        logger.trace("calling writer.end() on {}", writer);
+                        ((UnionListWriter) writer).end();
+                    } else {
+                        logger.warn("writer isn't what we thought! {}", writer.getClass().getCanonicalName());
+                    }
+                });
 
                 if (vectorSize > 0) {
                     final ArrayList<ValueVector> copy = new ArrayList<>();
@@ -377,7 +450,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      * </p>
      * @param listener reference to the {@link ServerStreamListener}
      * @param loader reference to the {@link VectorLoader}
-     * @param vectors
+     * @param vectors list of {@link ValueVector}s corresponding to the columns of data to flush
      * @param dimension dimension of the vectors
      */
     private void flush(ServerStreamListener listener, VectorLoader loader, List<ValueVector> vectors, int dimension) {
@@ -386,14 +459,14 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         try {
             for (ValueVector vector : vectors) {
-                logger.debug("flushing vector {}", vector.getName());
                 vector.setValueCount(dimension);
-                nodes.add(new ArrowFieldNode(dimension, 0));
+                nodes.add(new ArrowFieldNode(dimension, vector.getNullCount()));
 
                 if (vector instanceof BaseListVector) {
                     // Variable-width ListVectors have some special crap we need to deal with
                     if (vector instanceof ListVector) {
-                        ((ListVector) vector).setLastSet(dimension);
+                        logger.trace("working on ListVector {}", vector.getName());
+                        ((ListVector) vector).setLastSet(dimension - 1);
                         buffers.add(vector.getValidityBuffer());
                         buffers.add(vector.getOffsetBuffer());
                     } else {
@@ -401,14 +474,27 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
 
                     for (FieldVector child : ((BaseListVector)vector).getChildrenFromFields()) {
-                        logger.debug("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
+                        logger.trace("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
+
                         nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
-                        buffers.addAll(List.of(child.getBuffers(false)));
+                        if (vector instanceof ListVector && child instanceof UnionVector) {
+                            final UnionVector uv = (UnionVector) child;
+                            for (FieldVector grandchild : uv.getChildrenFromFields()) {
+                                if (grandchild instanceof VarCharVector) {
+                                    final VarCharVector vcv = (VarCharVector) grandchild;
+                                    buffers.add(vcv.getValidityBuffer());
+                                    buffers.add(vcv.getOffsetBuffer());
+                                    buffers.add(vcv.getDataBuffer());
+                                }
+                            }
+                        } else {
+                            buffers.addAll(List.of(child.getBuffers(false)));
+                        }
                     }
 
                 } else {
                     for (ArrowBuf buf : vector.getBuffers(false)) {
-                        logger.debug("adding buf {} for vector {}", buf, vector.getName());
+                        logger.trace("adding buf {} for vector {}", buf, vector.getName());
                         buffers.add(buf);
                     }
                 }
@@ -418,12 +504,11 @@ public class Producer implements FlightProducer, AutoCloseable {
         }
 
         // The actual data transmission...
-        try (ArrowRecordBatch batch = new ArrowRecordBatch(dimension, nodes, buffers,
-                CompressionUtil.createBodyCompression(new Lz4CompressionCodec()))) {
+        try (ArrowRecordBatch batch = new ArrowRecordBatch(dimension, nodes, buffers)) {
             loader.load(batch);
             listener.putNext();
         } catch (Exception e) {
-            // logger.error(e.getMessage(), e);
+            logger.error(e.getMessage(), e);
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());
         }
 
@@ -439,6 +524,7 @@ public class Producer implements FlightProducer, AutoCloseable {
     public Ticket ticketJob(Job job) {
         final Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
         jobMap.put(ticket, job);
+        logger.info("ticketed job {}", ticket);
         return ticket;
     }
 
@@ -482,11 +568,12 @@ public class Producer implements FlightProducer, AutoCloseable {
     @Override
     public FlightInfo getFlightInfo(CallContext context, FlightDescriptor descriptor) {
         logger.debug("getFlightInfo called: context={}, descriptor={}", context, descriptor);
+        // XXX needs authorization
 
         // We assume for now that our "commands" are just a serialized ticket
         try {
-            Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(descriptor.getCommand()));
-            FlightInfo info = flightMap.get(ticket);
+            final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(descriptor.getCommand()));
+            final FlightInfo info = flightMap.get(ticket);
 
             if (info == null) {
                 logger.info("no flight found for ticket {}", ticket);
@@ -502,7 +589,73 @@ public class Producer implements FlightProducer, AutoCloseable {
     @Override
     public Runnable acceptPut(CallContext context, FlightStream flightStream, StreamListener<PutResult> ackStream) {
         logger.debug("acceptPut called");
-        return ackStream::onCompleted;
+        return () -> {
+            Job rawJob;
+            try {
+                final Ticket ticket = Ticket.deserialize(ByteBuffer.wrap(flightStream.getDescriptor().getCommand()));
+                rawJob = jobMap.get(ticket);
+
+                // Do we even have a job for this ticket? Provide guidance if we don't.
+                if (rawJob == null) {
+                    RuntimeException e = CallStatus.NOT_FOUND.withDescription("job not found for ticket").toRuntimeException();
+                    logger.error(String.format("can't find job for ticket %s", ticket), e);
+                    ackStream.onError(e);
+                    return;
+                }
+            } catch (IOException e) {
+                // Could be a malformed ticket. Log something helpful on the server, but don't divulge too much to client.
+                logger.error("failed to deserialize ticket", e);
+                ackStream.onError(CallStatus.INVALID_ARGUMENT
+                        .withDescription("could not deserialize ticket").toRuntimeException());
+                return;
+            }
+
+            // Double-check our Job type
+            if (!(rawJob instanceof WriteJob)) {
+                logger.error("job isn't a write job");
+                ackStream.onError(CallStatus.INVALID_ARGUMENT
+                        .withDescription("provided ticket isn't for a write job").toRuntimeException());
+                return;
+            }
+
+            // TODO: validate root.Schema
+
+            final WriteJob job = (WriteJob) rawJob;
+            final VectorSchemaRoot localRoot = VectorSchemaRoot.create(flightStream.getSchema(), allocator);
+
+            // Process our stream. Everything in here needs to be checked for memory leaks!
+            try (final VectorSchemaRoot streamRoot = flightStream.getRoot()) {
+                final VectorUnloader unloader = new VectorUnloader(streamRoot);
+                final VectorLoader loader = new VectorLoader(localRoot);
+
+                logger.info("client putting stream with schema: {}", streamRoot.getSchema());
+
+                // Consume the entire stream into memory for now
+                while (flightStream.next()) {
+                    try (final ArrowRecordBatch batch = unloader.getRecordBatch()) {
+                        logger.info("consuming batch ({} rows)", batch.getLength());
+                        loader.load(batch);
+
+                        // TODO: what should we send back? Anything specific?
+                        ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
+                    }
+                }
+
+                // XXX need a way to guarantee we call this at the end (I think?)
+                flightStream.takeDictionaryOwnership();
+                job.onComplete(localRoot);
+
+            } catch (Exception e) {
+                logger.error("error during batch unloading", e);
+                ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());
+                localRoot.close();
+                return;
+            }
+            ackStream.onCompleted();
+
+            // At this point we should have the full stream in memory.
+            logger.info("localRoot rowCount={}, schema={}", localRoot.getRowCount(), localRoot.getSchema());
+        };
     }
 
     @Override
@@ -520,10 +673,12 @@ public class Producer implements FlightProducer, AutoCloseable {
         try {
             final Outcome outcome = handler.handle(context, action, this);
             if (outcome.isSuccessful()) {
-                listener.onNext(outcome.result.get());
+                assert(outcome.getResult().isPresent());
+                listener.onNext(outcome.getResult().get());
                 listener.onCompleted();
             } else {
-                final CallStatus callStatus = outcome.callStatus.get();
+                assert(outcome.getCallStatus().isPresent());
+                final CallStatus callStatus = outcome.getCallStatus().get();
                 logger.error(callStatus.description(), callStatus.toRuntimeException());
                 listener.onError(callStatus.toRuntimeException());
             }

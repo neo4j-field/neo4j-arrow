@@ -1,12 +1,13 @@
 package org.neo4j.arrow;
 
+import org.neo4j.gds.ElementIdentifier;
+import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.api.nodeproperties.ValueType;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Wrapper around a record of Nodes and properties from the in-memory graph in GDS.
@@ -20,36 +21,34 @@ import java.util.function.Function;
 public class GdsNodeRecord extends GdsRecord {
     /** Represents the underlying node id */
     private final Value nodeId;
+    private final Value labels;
 
-    protected GdsNodeRecord(long nodeId, String[] keys, Value[] values, Function<Long, Long> nodeIdResolver) {
+    // THESE SHOULD MATCH THE DEFAULTS IN neo4j_arrow.py!!!!
+    public static final String NODE_ID_FIELD = "_node_id_";
+    public static final String LABELS_FIELD = "_labels_";
+
+    protected GdsNodeRecord(long nodeId, Set<NodeLabel> labels, String[] keys, Value[] values, Function<Long, Long> nodeIdResolver) {
         super(keys, values);
-        this.nodeId = wrapScalar(ValueType.LONG, nodeIdResolver.apply(nodeId));
+        this.nodeId = wrapScalar(nodeIdResolver.apply(nodeId), ValueType.LONG);
+        this.labels = wrapNodeLabels(labels);
     }
 
-    protected GdsNodeRecord(long nodeId, List<String> keys, List<Value> values, Function<Long, Long> nodeIdResolver) {
-        this(nodeId, keys.toArray(new String[0]), values.toArray(new Value[0]), nodeIdResolver);
+    public static GdsNodeRecord wrap(long nodeId, Set<NodeLabel> labels, String[] keys, Value[] values) {
+        return new GdsNodeRecord(nodeId, labels, keys, values, Function.identity());
     }
 
     /**
      * Wrap the given GDS information into a single {@link GdsNodeRecord}.
      *
      * @param nodeId the native node id of the record
-     * @param fieldName the name of the property or field
-     * @param properties a reference to the {@link NodeProperties} interface for resolving the value
+     * @param labels Set of node labels for the given node
+     * @param fieldNames the names of the properties or fields
+     * @param propertiesArray an array of references to the {@link NodeProperties} interface for
+     *                        resolving the property values
      * @return a new {@link GdsNodeRecord}
      */
-    public static GdsNodeRecord wrap(long nodeId, String fieldName, NodeProperties properties,
-                                     Function<Long, Long> nodeIdResolver) {
-        return wrap(nodeId, new String[] { fieldName }, new NodeProperties[] { properties }, nodeIdResolver);
-    }
-
-    public static GdsNodeRecord wrap(long nodeId, List<String> fieldNames, List<NodeProperties> propertiesList,
-                                     Function<Long, Long> nodeIdResolver) {
-        return wrap(nodeId, fieldNames.toArray(new String[0]), propertiesList.toArray(new NodeProperties[0]), nodeIdResolver);
-    }
-
-    public static GdsNodeRecord wrap(long nodeId, String[] fieldNames, NodeProperties[] propertiesArray,
-                                     Function<Long, Long> nodeIdResolver) {
+    public static GdsNodeRecord wrap(long nodeId, Set<NodeLabel> labels, String[] fieldNames,
+                                     NodeProperties[] propertiesArray, Function<Long, Long> nodeIdResolver) {
         final Value[] values = new Value[propertiesArray.length];
 
         assert fieldNames.length == values.length;
@@ -60,10 +59,10 @@ public class GdsNodeRecord extends GdsRecord {
             switch (properties.valueType()) {
                 // TODO: INT? Does it exist?
                 case LONG:
-                    value = wrapScalar(properties.valueType(), properties.longValue(nodeId));
+                    value = wrapScalar(properties.longValue(nodeId), properties.valueType());
                     break;
                 case DOUBLE:
-                    value = wrapScalar(properties.valueType(), properties.doubleValue(nodeId));
+                    value = wrapScalar(properties.doubleValue(nodeId), properties.valueType());
                     break;
                 // TODO: INT_ARRAY?
                 case LONG_ARRAY:
@@ -81,22 +80,60 @@ public class GdsNodeRecord extends GdsRecord {
             }
             values[i] = value;
         }
-        return new GdsNodeRecord(nodeId, fieldNames, values, nodeIdResolver);
+        return new GdsNodeRecord(nodeId, labels, fieldNames, values, nodeIdResolver);
+    }
+
+    public static Value wrapNodeLabels(Set<NodeLabel> nodeLabels) {
+        return wrapLabels(nodeLabels.stream().map(ElementIdentifier::name).collect(Collectors.toUnmodifiableSet()));
+    }
+
+    public static Value wrapLabels(Set<String> labels) {
+        return new Value() {
+            final List<String> list = new ArrayList<>(labels);
+            @Override
+            public int size() {
+                return list.size();
+            }
+
+            @Override
+            public String asString() {
+                return String.join(",", list);
+            }
+
+            @Override
+            public List<String> asStringList() {
+                return list;
+            }
+
+            @Override
+            public List<Object> asList() {
+                return new ArrayList<>(labels);
+            }
+
+            @Override
+            public Type type() {
+                return Type.STRING_LIST;
+            }
+        };
     }
 
     @Override
     public Value get(int index) {
-        if (index < 0 || index > valueArray.length)
+        if (index < 0 || index >= valueArray.length + 2)
             throw new RuntimeException("invalid index");
         if (index == 0)
             return nodeId;
-        return valueArray[index - 1];
+        if (index == 1)
+            return labels;
+        return valueArray[index - 2];
     }
 
     @Override
     public Value get(String field) {
-        if ("nodeId".equals(field)) {
+        if (NODE_ID_FIELD.equals(field)) {
             return nodeId;
+        } else if (LABELS_FIELD.equals(field)) {
+            return labels;
         } else {
             for (int i = 0; i < keyArray.length; i++)
                 if (keyArray[i].equals(field))
@@ -107,8 +144,9 @@ public class GdsNodeRecord extends GdsRecord {
 
     @Override
     public List<String> keys() {
-        ArrayList<String> list = new ArrayList<>(keyArray.length + 1);
-        list.add("nodeId");
+        ArrayList<String> list = new ArrayList<>();
+        list.add(NODE_ID_FIELD);
+        list.add(LABELS_FIELD);
         list.addAll(List.of(keyArray));
         return list;
     }

@@ -11,17 +11,16 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
 /**
  * Implementation of a Neo4jJob that uses an AsyncSession via the Neo4j Java Driver.
  */
-public class AsyncDriverJob extends Job {
+public class AsyncDriverJob extends ReadJob {
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(AsyncDriverJob.class);
 
     /* 1 Driver per identity for now...gross simplification. */
-    private static ConcurrentMap<AuthToken, Driver> driverMap = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<AuthToken, Driver> driverMap = new ConcurrentHashMap<>();
 
     private final AsyncSession session;
     private final CompletableFuture<ResultSummary> future;
@@ -85,7 +84,7 @@ public class AsyncDriverJob extends Job {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
         future.cancel(true);
         session.closeAsync();
     }

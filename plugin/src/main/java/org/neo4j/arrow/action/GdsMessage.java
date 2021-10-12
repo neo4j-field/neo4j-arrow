@@ -1,6 +1,8 @@
 package org.neo4j.arrow.action;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -13,7 +15,7 @@ import java.util.stream.Collectors;
  * Primary message type for communicating parameters to GDS jobs. Relies on JSON for serialization
  * to keep things simple and portable without manual byte-packing, etc.
  */
-public class GdsMessage {
+public class GdsMessage implements Message {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(GdsMessage.class);
 
     static private final ObjectMapper mapper = new ObjectMapper();
@@ -49,6 +51,9 @@ public class GdsMessage {
      */
     private final List<String> properties;
 
+    /** Special instance to use as a way for us to "fail open" with properties */
+    public static final List<String> ANY_PROPERTIES = List.of();
+
     public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters) {
         this.dbName = dbName;
         this.graphName = graphName;
@@ -78,6 +83,8 @@ public class GdsMessage {
         return new byte[0];
     }
 
+    private static class MapTypeReference extends TypeReference<Map<String, Object>> { }
+
     /**
      * Deserialize the given bytes, containing JSON, into a GdsMessage instance.
      * @param bytes UTF-8 bytes containing JSON payload
@@ -85,7 +92,9 @@ public class GdsMessage {
      * @throws IOException if error encountered during serialization
      */
     public static GdsMessage deserialize(byte[] bytes) throws IOException {
-        final Map<String, Object> params = mapper.createParser(bytes).readValueAs(Map.class);
+
+        final JsonParser parser = mapper.createParser(bytes);
+        final Map<String, Object> params = parser.readValueAs(new MapTypeReference());
 
         final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "neo4j").toString();
         // TODO: assert our minimum schema?
@@ -105,6 +114,8 @@ public class GdsMessage {
         if (obj instanceof List) {
             properties = ((List<?>)obj).stream().map(Object::toString).collect(Collectors.toList());
         }
+        if (properties.isEmpty())
+            properties = ANY_PROPERTIES;
 
         return new GdsMessage(dbName, graphName, requestType, properties, filters);
     }
@@ -134,7 +145,7 @@ public class GdsMessage {
                 ", graph='" + graphName + '\'' +
                 ", type='" + requestType + '\'' +
                 ", filters=" + filters +
-                ", properties=" + properties +
+                ", properties=" + (properties == ANY_PROPERTIES ? "ANY" : properties) +
                 '}';
     }
 }

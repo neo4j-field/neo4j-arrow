@@ -55,27 +55,27 @@ public class DriverRecord implements RowBasedRecord {
 
             @Override
             public List<Object> asList() {
-                return value.asList(val -> val.asObject());
+                return value.asList(org.neo4j.driver.Value::asObject);
             }
 
             @Override
             public List<Integer> asIntList() {
-                return value.asList(val -> val.asInt());
+                return value.asList(org.neo4j.driver.Value::asInt);
             }
 
             @Override
             public List<Long> asLongList() {
-                return value.asList(val -> val.asLong());
+                return value.asList(org.neo4j.driver.Value::asLong);
             }
 
             @Override
             public List<Float> asFloatList() {
-                return value.asList(val -> val.asFloat());
+                return value.asList(org.neo4j.driver.Value::asFloat);
             }
 
             @Override
             public List<Double> asDoubleList() {
-                return value.asList(val -> val.asDouble());
+                return value.asList(org.neo4j.driver.Value::asDouble);
             }
 
             @Override

@@ -1,17 +1,14 @@
 package org.neo4j.arrow.job;
 
-import org.neo4j.arrow.RowBasedRecord;
-
+import javax.annotation.Nonnull;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
 
 /**
  * The abstract base class for neo4j-arrow Jobs.
  */
 public abstract class Job implements AutoCloseable, Future<JobSummary> {
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Job.class);
+    protected static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Job.class);
     private static final AtomicLong jobCounter = new AtomicLong(0);
 
     public enum Mode {
@@ -45,11 +42,10 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     }
 
     private Status jobStatus = Status.INITIALIZING;
-    private final CompletableFuture<JobSummary> jobSummary = new CompletableFuture<>();
-    private final CompletableFuture<RowBasedRecord> firstRecord = new CompletableFuture<>();
-    /** Provides a {@link BiConsumer} taking a {@link RowBasedRecord} with data and a partition id {@link Integer} */
-    protected final CompletableFuture<BiConsumer<RowBasedRecord, Integer>> futureConsumer = new CompletableFuture<>();
-    private final String jobId;
+
+    protected final CompletableFuture<JobSummary> jobSummary = new CompletableFuture<>();
+
+    protected final String jobId;
 
     protected Job() {
         jobId = String.format("job-%d", jobCounter.getAndIncrement());
@@ -65,25 +61,11 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
         jobStatus = status;
     }
 
-    protected void onFirstRecord(RowBasedRecord record) {
-        logger.info("First record received {}", record);
-        firstRecord.complete(record);
-        setStatus(Status.PENDING);
-    }
-
     protected void onCompletion(JobSummary summary) {
         logger.info("Job {} completed", jobId);
         jobSummary.complete(summary);
         setStatus(Status.COMPLETE);
     }
-
-    public void consume(BiConsumer<RowBasedRecord, Integer> consumer) {
-        if (!futureConsumer.isDone())
-            futureConsumer.complete(consumer);
-        else
-            logger.error("Consumer already supplied for job {}", this);
-    }
-
 
     @Override
     public abstract boolean cancel(boolean mayInterruptIfRunning);
@@ -108,12 +90,8 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     }
 
     @Override
-    public JobSummary get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+    public JobSummary get(long timeout, @Nonnull TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
         return jobSummary.get(timeout, unit);
-    }
-
-    public Future<RowBasedRecord> getFirstRecord() {
-        return firstRecord;
     }
 
     @Override

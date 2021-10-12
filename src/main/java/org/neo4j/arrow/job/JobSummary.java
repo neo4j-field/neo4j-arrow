@@ -5,5 +5,6 @@ package org.neo4j.arrow.job;
  */
 @FunctionalInterface
 public interface JobSummary {
+    @SuppressWarnings("unused")
     String asString();
 }

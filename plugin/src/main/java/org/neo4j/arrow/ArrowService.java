@@ -7,14 +7,17 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.CypherActionHandler;
 import org.neo4j.arrow.action.GdsActionHandler;
+import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.arrow.action.GdsWriteNodeMessage;
 import org.neo4j.arrow.auth.NativeAuthValidator;
-import org.neo4j.arrow.job.GdsJob;
+import org.neo4j.arrow.job.GdsReadJob;
+import org.neo4j.arrow.job.GdsWriteJob;
+import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.TransactionApiJob;
 import org.neo4j.configuration.GraphDatabaseSettings;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.compat.GraphDatabaseApiProxy;
 import org.neo4j.kernel.api.security.AuthManager;
-import org.neo4j.kernel.impl.query.QueryExecutionEngine;
 import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.internal.LogService;
@@ -60,9 +63,11 @@ public class ArrowService extends LifecycleAdapter {
                 new BasicCallHeaderAuthenticator(new NativeAuthValidator(authManager, log)));
 
         app.registerHandler(new CypherActionHandler(
-                (msg, mode, username) -> new TransactionApiJob(msg, username.get(), dbms, log)));
+                (msg, mode, username) -> new TransactionApiJob(msg, username, dbms, log)));
         app.registerHandler(new GdsActionHandler(
-                (msg, mode, username) -> new GdsJob(msg, username.get(), log), log));
+                (msg, mode, username) -> // XXX casts and stuff
+                        (mode == Job.Mode.READ) ? new GdsReadJob((GdsMessage) msg, username)
+                                : new GdsWriteJob(msg, username, dbms), log));
     }
 
     @Override

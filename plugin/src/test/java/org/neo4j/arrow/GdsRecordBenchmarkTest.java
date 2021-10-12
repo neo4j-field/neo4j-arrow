@@ -4,6 +4,7 @@ import org.apache.arrow.flight.Action;
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.memory.RootAllocator;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -11,11 +12,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.demo.Client;
-import org.neo4j.arrow.job.Job;
+import org.neo4j.arrow.job.ReadJob;
+import org.neo4j.gds.NodeLabel;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.log4j.Log4jLogProvider;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -45,17 +48,17 @@ public class GdsRecordBenchmarkTest {
                 float[] data = new float[size];
                 for (int i=0; i<size; i++)
                     data[i] = (float)i;
-                return new GdsNodeRecord(1, new String[] {"embedding"},
+                return new GdsNodeRecord(1, Set.of(NodeLabel.ALL_NODES), new String[] {"embedding"},
                         new RowBasedRecord.Value[] { GdsRecord.wrapFloatArray(data) },
                         Function.identity());
             case "double":
-                return new GdsNodeRecord(1, new String[] {"embedding"},
+                return new GdsNodeRecord(1, Set.of(NodeLabel.ALL_NODES), new String[] {"embedding"},
                         new RowBasedRecord.Value[] {
                                 GdsRecord.wrapDoubleArray(
                                         IntStream.range(1, size).boxed().mapToDouble(Integer::doubleValue).toArray())
                         }, Function.identity());
             case "long":
-                return new GdsNodeRecord(1, new String[] {"embedding"},
+                return new GdsNodeRecord(1,  Set.of(NodeLabel.ALL_NODES), new String[] {"embedding"},
                         new RowBasedRecord.Value[] {
                                 GdsRecord.wrapLongArray(LongStream.range(1, size).toArray())
                         }, Function.identity());
@@ -64,7 +67,7 @@ public class GdsRecordBenchmarkTest {
         throw new RuntimeException("bad type");
     }
 
-    private static class NoOpJob extends Job {
+    private static class NoOpJob extends ReadJob {
 
         final CompletableFuture<Integer> future;
         final int numResults;
@@ -81,9 +84,7 @@ public class GdsRecordBenchmarkTest {
                     log.info("Job feeding");
                     BiConsumer<RowBasedRecord, Integer> consumer = super.futureConsumer.join();
 
-                    IntStream.range(1, numResults).parallel().forEach(i -> {
-                        consumer.accept(record, i);
-                    });
+                    IntStream.range(1, numResults).parallel().forEach(i -> consumer.accept(record, i));
 
                     signal.complete(System.currentTimeMillis());
                     log.info("Job finished");
@@ -113,6 +114,7 @@ public class GdsRecordBenchmarkTest {
         );
     }
 
+    @Disabled
     @ParameterizedTest
     @MethodSource("provideDifferentNativeArrays")
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
@@ -130,7 +132,7 @@ public class GdsRecordBenchmarkTest {
             final long start = System.currentTimeMillis();
             final GdsMessage msg = new GdsMessage("neo4j", "mygraph",
                     GdsMessage.RequestType.node, List.of("fastRp"), List.of());
-            final Action action = new Action(GdsActionHandler.NODE_PROPS_ACTION, msg.serialize());
+            final Action action = new Action(GdsActionHandler.GDS_READ_ACTION, msg.serialize());
             client.run(action);
             final long stop = signal.join();
             log.info(String.format("Client Lifecycle Time: %,d ms", stop - start));

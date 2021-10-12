@@ -10,6 +10,7 @@ import org.neo4j.arrow.Producer;
 import org.neo4j.arrow.RowBasedRecord;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.JobCreator;
+import org.neo4j.arrow.job.ReadJob;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,12 +34,12 @@ public class CypherActionHandler implements ActionHandler {
     public static final String CYPHER_WRITE_ACTION = "cypherWrite";
 
     private static final List<String> supportedActions = List.of(CYPHER_READ_ACTION, CYPHER_WRITE_ACTION);
-    private static Logger logger = LoggerFactory.getLogger(CypherActionHandler.class);
+    private static final Logger logger = LoggerFactory.getLogger(CypherActionHandler.class);
 
     /** A {@link JobCreator} that works with {@link CypherMessage}s */
-    private final JobCreator<CypherMessage> jobCreator;
+    private final JobCreator<CypherMessage, ReadJob> jobCreator;
 
-    public CypherActionHandler(JobCreator<CypherMessage> jobCreator) {
+    public CypherActionHandler(JobCreator<CypherMessage, ReadJob> jobCreator) {
         this.jobCreator = jobCreator;
     }
 
@@ -65,7 +66,7 @@ public class CypherActionHandler implements ActionHandler {
 
         switch (action.getType()) {
             case CYPHER_READ_ACTION:
-                final Job job = jobCreator.newJob(msg, Job.Mode.READ, Optional.of("neo4j"));
+                final ReadJob job = jobCreator.newJob(msg, Job.Mode.READ, "neo4j");
                 final Ticket ticket = producer.ticketJob(job);
 
                 /* We need to wait for the first record to discern our final schema */
@@ -92,7 +93,7 @@ public class CypherActionHandler implements ActionHandler {
                     logger.info("got first record for job {}", job.getJobId());
 
                     final List<Field> fields = new ArrayList<>();
-                    record.keys().stream().forEach(fieldName -> {
+                    record.keys().forEach(fieldName -> {
                         final RowBasedRecord.Value value = record.get(fieldName);
                         // TODO: better mapping support for generic Cypher values?
                         logger.info("translating Neo4j value {} -> {}", fieldName, value.type());

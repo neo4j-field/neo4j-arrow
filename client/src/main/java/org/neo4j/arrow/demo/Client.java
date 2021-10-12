@@ -7,7 +7,6 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.FieldVector;
-import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.VectorUnloader;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
@@ -56,9 +55,7 @@ public class Client implements AutoCloseable {
         long byteCnt = 0;
 
         try (FlightStream stream = client.getStream(ticket, option);
-                VectorSchemaRoot root = stream.getRoot();
-                VectorSchemaRoot downloadedRoot = VectorSchemaRoot.create(root.getSchema(), allocator)) {
-            final VectorLoader loader = new VectorLoader(downloadedRoot);
+                VectorSchemaRoot root = stream.getRoot()) {
             final VectorUnloader unloader = new VectorUnloader(root);
 
             logger.info("got schema: {}", root.getSchema().toJson());
@@ -66,8 +63,8 @@ public class Client implements AutoCloseable {
             while (stream.next()) {
                 try (ArrowRecordBatch batch = unloader.getRecordBatch()) {
                     logger.debug("got batch, sized: {}", batch.getLength());
-                    loader.load(batch);
                     cnt += batch.getLength();
+
                     for (FieldVector vector : root.getFieldVectors())
                         byteCnt += vector.getBufferSize();
                     if (cnt % 25_000 == 0) {
@@ -138,7 +135,7 @@ public class Client implements AutoCloseable {
         if (args != null && args.length > 0 && args[0].equalsIgnoreCase("gds")) {
             GdsMessage msg = new GdsMessage("neo4j", "mygraph", GdsMessage.RequestType.node,
                     List.of("embedding"), List.of());
-            return new Action(GdsActionHandler.NODE_PROPS_ACTION, msg.serialize());
+            return new Action(GdsActionHandler.GDS_READ_ACTION, msg.serialize());
         } else {
             CypherMessage msg = new CypherMessage("neo4j", "UNWIND range(1, $rows) AS row\n" +
                     "RETURN row, [_ IN range(1, $dimension) | rand()] as fauxEmbedding",
