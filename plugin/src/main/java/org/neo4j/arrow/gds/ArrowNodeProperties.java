@@ -16,17 +16,17 @@ public class ArrowNodeProperties implements NodeProperties {
 
     final private FieldVector vector;
     final private ValueType type;
-    final private Map<Long, Integer> idMap;
     final private NodeLabel label;
+    final int maxId;
 
     final Function<Integer, Value> valueReader;
     final Function<Integer, Number> numberReader;
     final Function<Integer, Number[]> arrayReader;
 
-    public ArrowNodeProperties(FieldVector vector, NodeLabel label, Map<Long, Integer> idMap) {
+    public ArrowNodeProperties(FieldVector vector, NodeLabel label, int maxId) {
         this.vector = vector;
-        this.idMap = idMap;
         this.label = label;
+        this.maxId = maxId;
 
         if (vector instanceof BigIntVector || vector instanceof IntVector) {
             this.type = ValueType.LONG;
@@ -47,33 +47,33 @@ public class ArrowNodeProperties implements NodeProperties {
             if (dataVector instanceof BigIntVector || dataVector instanceof IntVector) {
                 this.type = ValueType.LONG_ARRAY;
                 this.valueReader = (id) -> {
-                    final List<Long> list = (List<Long>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Long> list = (List<Long>) vector.getObject(id); // XXX
                     return Values.longArray(list.stream().mapToLong(Long::longValue).toArray());
                 };
                 this.arrayReader = (id) -> {
-                    final List<Long> list = (List<Long>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Long> list = (List<Long>) vector.getObject(id); // XXX
                     return list.stream().mapToLong(Long::valueOf).boxed().toArray(Number[]::new);
                 };
 
             } else if (dataVector instanceof Float4Vector) {
                 this.type = ValueType.FLOAT_ARRAY;
                 this.valueReader = (id) -> {
-                    final List<Float> list = (List<Float>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Float> list = (List<Float>) vector.getObject(id); // XXX
                     return Values.doubleArray(list.stream().mapToDouble(Float::doubleValue).toArray());
                 };
                 this.arrayReader = (id) -> {
-                    final List<Float> list = (List<Float>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Float> list = (List<Float>) vector.getObject(id); // XXX
                     return list.stream().mapToDouble(Float::valueOf).boxed().toArray(Number[]::new);
                 };
 
             } else if (dataVector instanceof Float8Vector) {
                 this.type = ValueType.DOUBLE_ARRAY;
                 this.valueReader = (id) -> {
-                    final List<Double> list = (List<Double>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Double> list = (List<Double>) vector.getObject(id); // XXX
                     return Values.doubleArray(list.stream().mapToDouble(Double::doubleValue).toArray());
                 };
                 this.arrayReader = (id) -> {
-                    final List<Double> list = (List<Double>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Double> list = (List<Double>) vector.getObject(id); // XXX
                     return list.stream().mapToDouble(Double::valueOf).boxed().toArray(Number[]::new);
                 };
 
@@ -91,30 +91,31 @@ public class ArrowNodeProperties implements NodeProperties {
 
     @Override
     public double doubleValue(long nodeId) {
-        if (idMap.containsKey(nodeId))
-            return numberReader.apply(idMap.get(nodeId)).doubleValue();
+        if (nodeId < maxId)
+            return numberReader.apply((int) nodeId).doubleValue(); // XXX cast
         throw new RuntimeException("invalid node id (not in idMap)");
     }
 
     @Override
     public long longValue(long nodeId) {
-        if (idMap.containsKey(nodeId))
-            return numberReader.apply(idMap.get(nodeId)).longValue();
+        if (nodeId < maxId)
+            return numberReader.apply((int) nodeId).longValue(); // XXX cast
         throw new RuntimeException("invalid node id (not in idMap)");    }
 
     @Override
     public
     double[] doubleArrayValue(long nodeId) {
-        if (idMap.containsKey(nodeId))
-            return Arrays.stream(arrayReader.apply(idMap.get(nodeId))).mapToDouble(Number::doubleValue).toArray();
+        if (nodeId < maxId)
+            return Arrays.stream(arrayReader.apply((int) nodeId)) // XXX cast
+                    .mapToDouble(Number::doubleValue).toArray();
         throw new RuntimeException("invalid node id (not in idMap)");
     }
 
     @Override
     public
     float[] floatArrayValue(long nodeId) {
-        if (idMap.containsKey(nodeId)) {
-            final Number[] data = arrayReader.apply(idMap.get(nodeId));
+        if (nodeId < maxId) {
+            final Number[] data = arrayReader.apply((int) nodeId); // XXX cast
             final float[] floats = new float[data.length];
             for (int i=0; i<floats.length; i++)
                 floats[i] = data[i].floatValue();
@@ -125,8 +126,9 @@ public class ArrowNodeProperties implements NodeProperties {
     @Override
     public
     long[] longArrayValue(long nodeId) {
-        if (idMap.containsKey(nodeId))
-            return Arrays.stream(arrayReader.apply(idMap.get(nodeId))).mapToLong(Number::longValue).toArray();
+        if (nodeId < maxId)
+            return Arrays.stream(arrayReader.apply((int) nodeId)) // XXX cast
+                    .mapToLong(Number::longValue).toArray();
         throw new RuntimeException("invalid node id (not in idMap)");    }
 
     @Override
@@ -152,11 +154,9 @@ public class ArrowNodeProperties implements NodeProperties {
 
     @Override
     public Value value(long nodeId) {
-        final Integer idx = idMap.get(nodeId);
-        if (idx == null) {
-            return Values.of(null);
-        }
-        return valueReader.apply(idx);
+        if (nodeId < maxId)
+            return valueReader.apply((int) nodeId); // XXX cast
+        return Values.of(null);
     }
 
     @Override
@@ -175,6 +175,7 @@ public class ArrowNodeProperties implements NodeProperties {
         return label.name();
     }
 
+    @SuppressWarnings("unused")
     public NodeLabel getLabel() {
         return label;
     }

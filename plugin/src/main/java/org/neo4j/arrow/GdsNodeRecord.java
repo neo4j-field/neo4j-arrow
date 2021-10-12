@@ -23,6 +23,7 @@ public class GdsNodeRecord extends GdsRecord {
     private final Value nodeId;
     private final Value labels;
 
+    // THESE SHOULD MATCH THE DEFAULTS IN neo4j_arrow.py!!!!
     public static final String NODE_ID_FIELD = "_node_id_";
     public static final String LABELS_FIELD = "_labels_";
 

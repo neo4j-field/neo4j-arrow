@@ -465,7 +465,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 if (vector instanceof BaseListVector) {
                     // Variable-width ListVectors have some special crap we need to deal with
                     if (vector instanceof ListVector) {
-                        logger.info("working on ListVector {}", vector.getName());
+                        logger.trace("working on ListVector {}", vector.getName());
                         ((ListVector) vector).setLastSet(dimension - 1);
                         buffers.add(vector.getValidityBuffer());
                         buffers.add(vector.getOffsetBuffer());
@@ -474,7 +474,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
 
                     for (FieldVector child : ((BaseListVector)vector).getChildrenFromFields()) {
-                        logger.info("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
+                        logger.trace("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
 
                         nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
                         if (vector instanceof ListVector && child instanceof UnionVector) {
@@ -494,7 +494,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                 } else {
                     for (ArrowBuf buf : vector.getBuffers(false)) {
-                        logger.info("adding buf {} for vector {}", buf, vector.getName());
+                        logger.trace("adding buf {} for vector {}", buf, vector.getName());
                         buffers.add(buf);
                     }
                 }

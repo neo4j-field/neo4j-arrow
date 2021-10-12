@@ -18,13 +18,13 @@ public class GdsWriteRelsMessage implements Message {
     public static final String JSON_KEY_GRAPH_NAME = "graph";
 
     public static final String JSON_KEY_SOURCE_FIELD = "sourceField";
-    public static final String DEFAULT_SOURCE_FIELD = "source";
+    public static final String DEFAULT_SOURCE_FIELD = "_source_id_";
 
     public static final String JSON_KEY_TARGET_FIELD = "targetField";
-    public static final String DEFAULT_TARGET_FIELD = "target";
+    public static final String DEFAULT_TARGET_FIELD = "_target_id_";
 
     public static final String JSON_KEY_TYPE_FIELD = "typeField";
-    public static final String DEFAULT_TYPE_FIELD = "type";
+    public static final String DEFAULT_TYPE_FIELD = "_type_";
 
     /** Name of the Neo4j Database where our Graph lives. Optional. Defaults to "neo4j" */
     private final String dbName;

@@ -21,11 +21,22 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Vector;
 
+@SuppressWarnings("all")
 public class StringListTest {
+
+    @Test
+    public void batchSizeTest() {
+        long rowCount = 6000;
+        long batchSize = 750;
+        for (long l = 0; l < rowCount; l += batchSize) {
+            long start = l;
+            long finish = Math.min(l + batchSize, rowCount);
+            System.out.println(String.format("%d -> %d", start, finish));
+        }
+    }
+
     @Test
     public void testStringListCreation() throws Exception {
         Field field = new Field("test-list", FieldType.nullable(new ArrowType.List()),
