@@ -11,21 +11,18 @@ public class ArrowAdjacencyCursor implements AdjacencyCursor {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowAdjacencyCursor.class);
 
     private long index = 0;
-    // private int degree = 0;
 
     private final double fallbackValue;
-    private final BigIntVector targetVector;
     private final List<Integer> targets;
 
-    protected ArrowAdjacencyCursor(Queue<Integer> targets, BigIntVector targetVector, double fallbackValue) {
-        this(new ArrayList<>(targets), targetVector, fallbackValue);
+    protected ArrowAdjacencyCursor(Queue<Integer> targets, double fallbackValue) {
+        this(new ArrayList<>(targets), fallbackValue);
     }
 
-    private ArrowAdjacencyCursor(List<Integer> sortedOutgoing, BigIntVector targetVector, double fallbackValue) {
+    private ArrowAdjacencyCursor(List<Integer> sortedOutgoing, double fallbackValue) {
         this.targets = sortedOutgoing;
-        this.targetVector = targetVector;
         this.fallbackValue = fallbackValue;
-        logger.trace("new cursor (outgoing: {}, targetVector: {}, fallbackValue: {})", sortedOutgoing, targetVector, fallbackValue);
+        logger.trace("new cursor (outgoing: {}, fallbackValue: {})", sortedOutgoing, fallbackValue);
     }
 
     @Override
@@ -47,16 +44,14 @@ public class ArrowAdjacencyCursor implements AdjacencyCursor {
     @Override
     public long nextVLong() {
         final int targetIdx = targets.get((int) index);
-        final long nodeId = targetVector.get(targetIdx); // XXX
-        logger.trace("nextVLong: @{}, offset: {}, nodeId: {}", index, targetIdx, nodeId);
         index++;
-        return nodeId;
+        return targetIdx;
     }
 
     @Override
     public long peekVLong() {
         if (hasNextVLong())
-            return targetVector.get(targets.get((int) index)); // XXX
+            return targets.get((int) index); // XXX
         else
             return NOT_FOUND;
     }
@@ -91,7 +86,7 @@ public class ArrowAdjacencyCursor implements AdjacencyCursor {
     @Override
     public AdjacencyCursor shallowCopy(AdjacencyCursor destination) {
         final AdjacencyCursor copy = (destination == null) ?
-                new ArrowAdjacencyCursor(targets, targetVector, fallbackValue)
+                new ArrowAdjacencyCursor(targets, fallbackValue)
                 : destination;
         copy.init(index, 0);
         return copy;

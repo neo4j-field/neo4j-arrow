@@ -211,7 +211,7 @@ public class GdsWriteJob extends WriteJob {
 
                 @Override
                 public long toMappedNodeId(long nodeId) {
-                    return nodeId;
+                    return idMap.get(nodeId);
                 }
 
                 @Override
@@ -370,9 +370,6 @@ public class GdsWriteJob extends WriteJob {
                 return false;
             }
 
-            // XXX push schema validation to Producer side prior to full stream being formed
-            final Schema schema = root.getSchema();
-
             final GraphStoreWithConfig storeWithConfig = GraphStoreCatalog.get(CatalogRequest.of(username, dbId), msg.getGraphName());
             assert(storeWithConfig != null);
 
@@ -385,12 +382,9 @@ public class GdsWriteJob extends WriteJob {
 
             // Ugliness abounds...
             // Edge maps, keyed by Type. Each Type has it's own mapping of GDS Node Id to a Queue of target GDS node Ids
+            // { type: { nodeVectorId: [ offsets into node vector ] } }
             final Map<String, Map<Integer, Queue<Integer>>> sourceTypeIdMap = new ConcurrentHashMap<>();
-            final Map<String, Map<Integer, Queue<Integer>>> targetTypeIdMap = new ConcurrentHashMap<>();
             final Map<String, Integer> types = new ConcurrentHashMap<>();
-
-            // Map of GDS NodeIds to types
-            final Map<Integer, Set<String>> typeMap = new ConcurrentHashMap<>();
 
             // Use our nodeMapping to deal with the fact we get "original" ids in the target vector and don't know the
             // "internal" GDS ids from our node vectors
@@ -399,12 +393,10 @@ public class GdsWriteJob extends WriteJob {
             logger.info("analyzing vectors to build type->rel mappings");
             IntStream.range(0, root.getRowCount())
                     //.parallel() // XXX need to check if we solved the concurrency bug
-                    .boxed()
                     .forEach(idx -> {
                         final long originalSourceId = sourceIdVector.get(idx);
                         final int sourceId = (int) nodeMapping.toMappedNodeId(originalSourceId); // XXX cast
                         final long originalTargetId = targetIdVector.get(idx);
-                        final int targetId = (int) nodeMapping.toMappedNodeId(originalTargetId); // XXX cast
                         final String type = new String(typesVector.get(idx), StandardCharsets.UTF_8);
 
                         logger.trace("recording {} -[{}]> {}", originalSourceId, type, originalTargetId);
@@ -413,34 +405,12 @@ public class GdsWriteJob extends WriteJob {
 
                         sourceTypeIdMap.compute(type, (k, v) -> {
                             final Map<Integer, Queue<Integer>> sourceIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
-                            sourceIdMap.compute((int) sourceId, (k2, v2) -> {
+                            sourceIdMap.compute(sourceId, (k2, v2) -> {
                                 final Queue<Integer> targetList = (v2 == null) ? new ConcurrentLinkedQueue<>() : v2;
-                                targetList.add(idx);
+                                targetList.add((int) nodeMapping.toMappedNodeId(originalTargetId)); // XXX cast
                                 return targetList;
                             });
                             return sourceIdMap;
-                        });
-
-                        targetTypeIdMap.compute(type, (k, v) -> {
-                            final Map<Integer, Queue<Integer>> targetIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
-                            targetIdMap.compute(targetId, (k2, v2) -> {
-                                final Queue<Integer> sourceList = (v2 == null) ? new ConcurrentLinkedQueue<>() : v2;
-                                sourceList.add(idx);
-                                return sourceList;
-                            });
-                            return targetIdMap;
-                        });
-
-                        typeMap.compute(sourceId, (k, v) -> {
-                            final Set<String> sourceTypeSet = (v == null) ? new ConcurrentSkipListSet<>() : v;
-                            sourceTypeSet.add(type);
-                            return sourceTypeSet;
-                        });
-
-                        typeMap.compute(targetId, (k, v) -> { // XXX cast
-                            final Set<String> sourceTypeSet = (v == null) ? new ConcurrentSkipListSet<>() : v;
-                            sourceTypeSet.add(type);
-                            return sourceTypeSet;
                         });
                     });
 
@@ -451,11 +421,9 @@ public class GdsWriteJob extends WriteJob {
             types.forEach((type, cnt) -> {
                 // TODO: wire in maps
                 final Relationships rels = Relationships.of(cnt, Orientation.NATURAL, true,
-                        new ArrowAdjacencyList(sourceTypeIdMap.get(type), targetTypeIdMap.get(type),
-                                targetIdVector, (unused) -> root.close()));
-                logger.info("adding relationship type {} to graph {} (sourceMap: {}, targetMap: {})", type,
-                        storeWithConfig.config().graphName(), sourceTypeIdMap.get(type).size(),
-                        targetTypeIdMap.get(type).size());
+                        new ArrowAdjacencyList(sourceTypeIdMap.get(type), (unused) -> root.close()));
+                logger.info("adding relationship type {} to graph {} (type edge size: {})", type, storeWithConfig.config().graphName(),
+                        sourceTypeIdMap.get(type).size());
                 storeWithConfig.graphStore().addRelationshipType(RelationshipType.of(type), Optional.empty(), Optional.empty(), rels);
             });
 

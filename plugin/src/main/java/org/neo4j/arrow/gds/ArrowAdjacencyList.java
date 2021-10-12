@@ -11,32 +11,25 @@ import java.util.function.Consumer;
 public class ArrowAdjacencyList implements AdjacencyList {
 
     final private Map<Integer, Queue<Integer>> sourceIdMap;
-    final private Map<Integer, Queue<Integer>> targetIdMap;
-
-    final private BigIntVector targetIdVector;
-
     final private Consumer<Void> closeCallback;
 
-    public ArrowAdjacencyList(Map<Integer, Queue<Integer>> sourceIdMap, Map<Integer, Queue<Integer>> targetIdMap,
-                              BigIntVector targetIdVector, Consumer<Void> closeCallback) {
+    public ArrowAdjacencyList(Map<Integer, Queue<Integer>> sourceIdMap, Consumer<Void> closeCallback) {
         this.sourceIdMap = sourceIdMap;
-        this.targetIdMap = targetIdMap;
-        this.targetIdVector = targetIdVector;
         this.closeCallback = closeCallback;
     }
 
     @Override
     public int degree(long longNode) {
         final int node = (int)longNode; // XXX
-        return (sourceIdMap.containsKey(node) ? sourceIdMap.get(node).size() : 0)
-                + (targetIdMap.containsKey(node) ? targetIdMap.get(node).size() : 0);
+        return (sourceIdMap.containsKey(node) ? sourceIdMap.get(node).size() : 0);
+                //+ (targetIdMap.containsKey(node) ? targetIdMap.get(node).size() : 0);
     }
 
     @Override
     public AdjacencyCursor adjacencyCursor(long longNode) {
         final int node = (int)longNode; // XXX
         return (sourceIdMap.containsKey(node)) ?
-                new ArrowAdjacencyCursor(sourceIdMap.get(node), targetIdVector, Double.NaN)
+                new ArrowAdjacencyCursor(sourceIdMap.get(node), Double.NaN)
                 : AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
     }
 
@@ -44,22 +37,25 @@ public class ArrowAdjacencyList implements AdjacencyList {
     public AdjacencyCursor adjacencyCursor(long longNode, double fallbackValue) {
         final int node = (int)longNode; // XXX
         return (sourceIdMap.containsKey(node)) ?
-                new ArrowAdjacencyCursor(sourceIdMap.get(node), targetIdVector, fallbackValue)
-                : AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;    }
+                new ArrowAdjacencyCursor(sourceIdMap.get(node), fallbackValue)
+                : AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
+    }
 
     @Override
     public AdjacencyCursor adjacencyCursor(AdjacencyCursor reuse, long longNode) {
         final int node = (int)longNode; // XXX
         return (sourceIdMap.containsKey(node)) ?
-                new ArrowAdjacencyCursor(sourceIdMap.get(node), targetIdVector, Double.NaN)
-                : AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;    }
+                new ArrowAdjacencyCursor(sourceIdMap.get(node), Double.NaN)
+                : AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
+    }
 
     @Override
     public AdjacencyCursor adjacencyCursor(AdjacencyCursor reuse, long longNode, double fallbackValue) {
         final int node = (int)longNode; // XXX
         return (sourceIdMap.containsKey(node)) ?
-                new ArrowAdjacencyCursor(sourceIdMap.get(node), targetIdVector, Double.NaN)
-                : AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;    }
+                new ArrowAdjacencyCursor(sourceIdMap.get(node), Double.NaN)
+                : AdjacencyCursor.EmptyAdjacencyCursor.INSTANCE;
+    }
 
     @Override
     public AdjacencyCursor rawAdjacencyCursor() {
