@@ -2,6 +2,7 @@ package org.neo4j.arrow.action;
 
 import org.apache.arrow.flight.*;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
+import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
@@ -212,6 +213,12 @@ public class GdsActionHandler implements ActionHandler {
                             FieldType.nullable(new ArrowType.FixedSizeList(value.size())),
                             List.of(new Field(fieldName,
                                     FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
+                                    null))));
+                    break;
+                case STRING_LIST:
+                    fields.add(new Field(fieldName, FieldType.nullable(new ArrowType.List()),
+                            List.of(new Field(fieldName,
+                                    FieldType.nullable(new ArrowType.Utf8()),
                                     null))));
                     break;
                 default:

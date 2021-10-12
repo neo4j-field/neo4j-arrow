@@ -76,6 +76,5 @@ public class CypherRecordTest {
         Assertions.assertEquals(RowBasedRecord.Type.INT, record.get("int").type());
         Assertions.assertEquals(RowBasedRecord.Type.FLOAT, record.get("float").type());
         Assertions.assertEquals(RowBasedRecord.Type.STRING, record.get("string").type());
-
     }
 }

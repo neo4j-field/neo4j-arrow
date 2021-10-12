@@ -1,6 +1,5 @@
 package org.neo4j.arrow;
 
-import org.apache.arrow.compression.Lz4CompressionCodec;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
@@ -9,14 +8,15 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.UnionVector;
 import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
-import org.apache.arrow.vector.compression.CompressionUtil;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
@@ -270,24 +270,74 @@ public class Producer implements FlightProducer, AutoCloseable {
                             // Used for Cypher
                             final UnionListWriter writer =
                                     (UnionListWriter) writerMap.computeIfAbsent(field.getName(),
-                                            s -> ((ListVector) vector).getWriter());
+                                            s -> {
+                                                UnionListWriter w = ((ListVector) vector).getWriter();
+                                                w.start();
+                                                return w;
+                                            });
                             writer.startList();
-                            // XXX: Assumes all values are doubles for now :-(
-                            for (Double d : value.asDoubleList())
-                                writer.writeFloat8(d);
-                            writer.setValueCount(value.asList().size());
+                            switch (value.type()) {
+                                case INT_ARRAY:
+                                    for (int i : value.asIntArray())
+                                        writer.writeInt(i);
+                                    break;
+                                case LONG_ARRAY:
+                                    for (long l : value.asLongArray())
+                                        writer.writeBigInt(l);
+                                    break;
+                                case FLOAT_ARRAY:
+                                    for (float f : value.asFloatArray())
+                                        writer.writeFloat4(f);
+                                    break;
+                                case DOUBLE_ARRAY:
+                                    for (double d : value.asDoubleArray())
+                                        writer.writeFloat8(d);
+                                    break;
+                                case STRING_LIST:
+                                    for (final String s : value.asStringList()) {
+                                        // TODO: should we allocate a single byte array and not have to reallocate?
+                                        final byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
+                                        try (final ArrowBuf buf = streamAllocator.buffer(bytes.length)) {
+                                            buf.setBytes(0, bytes);
+                                            writer.writeVarChar(0, bytes.length, buf);
+                                            logger.trace("wrote string {}", s);
+                                        }
+                                    }
+                                    break;
+                                default:
+                                    for (final Object o : value.asList()) {
+                                        // TODO: should we allocate a single byte array and not have to reallocate?
+                                        final byte[] bytes = o.toString().getBytes(StandardCharsets.UTF_8);
+                                        try (final ArrowBuf buf = streamAllocator.buffer(bytes.length)) {
+                                            buf.setBytes(0, bytes);
+                                            writer.writeVarChar(0, bytes.length, buf);
+                                        }
+                                    }
+                                    break;
+                            }
                             writer.endList();
                         }
                     }
 
                     // Flush at our batch size limit and reset our batch states.
                     if ((idx + 1) == Config.arrowBatchSize) {
+                        writerMap.values().forEach(writer -> {
+                            if (writer instanceof UnionFixedSizeListWriter) {
+                                logger.trace("calling writer.end() on {}", writer);
+                                //((UnionFixedSizeListWriter) writer).end();
+                            } else if (writer instanceof UnionListWriter) {
+                                logger.trace("calling writer.end() on {}", writer);
+                                ((UnionListWriter) writer).end();
+                            } else {
+                                logger.warn("writer isn't what we thought! {}", writer.getClass().getCanonicalName());
+                            }
+                        });
                         // Yolo?
                         final ArrayList<ValueVector> copy = new ArrayList<>();
                         final int vectorSize = idx + 1;
                         try {
                             transferMutex.acquire();
-                            for (FieldVector vector : vectorList) {
+                            for (final FieldVector vector : vectorList) {
                                 final TransferPair tp = vector.getTransferPair(transmitAllocator);
                                 tp.transfer();
                                 copy.add(tp.getTo());
@@ -331,6 +381,18 @@ public class Producer implements FlightProducer, AutoCloseable {
                 final List<FieldVector> vectorList = partitionedVectorList[partition];
                 final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
                 final int vectorSize = partitionedCounts[partition].get();
+
+                writerMap.values().forEach(writer -> {
+                    if (writer instanceof UnionFixedSizeListWriter) {
+                        logger.trace("calling writer.end() on {}", writer);
+                        // ((UnionFixedSizeListWriter) writer).end();
+                    } else if (writer instanceof UnionListWriter) {
+                        logger.trace("calling writer.end() on {}", writer);
+                        ((UnionListWriter) writer).end();
+                    } else {
+                        logger.warn("writer isn't what we thought! {}", writer.getClass().getCanonicalName());
+                    }
+                });
 
                 if (vectorSize > 0) {
                     final ArrayList<ValueVector> copy = new ArrayList<>();
@@ -397,14 +459,14 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         try {
             for (ValueVector vector : vectors) {
-                logger.debug("flushing vector {}", vector.getName());
                 vector.setValueCount(dimension);
-                nodes.add(new ArrowFieldNode(dimension, 0));
+                nodes.add(new ArrowFieldNode(dimension, vector.getNullCount()));
 
                 if (vector instanceof BaseListVector) {
                     // Variable-width ListVectors have some special crap we need to deal with
                     if (vector instanceof ListVector) {
-                        ((ListVector) vector).setLastSet(dimension);
+                        logger.info("working on ListVector {}", vector.getName());
+                        ((ListVector) vector).setLastSet(dimension - 1);
                         buffers.add(vector.getValidityBuffer());
                         buffers.add(vector.getOffsetBuffer());
                     } else {
@@ -412,14 +474,27 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
 
                     for (FieldVector child : ((BaseListVector)vector).getChildrenFromFields()) {
-                        logger.debug("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
+                        logger.info("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
+
                         nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
-                        buffers.addAll(List.of(child.getBuffers(false)));
+                        if (vector instanceof ListVector && child instanceof UnionVector) {
+                            final UnionVector uv = (UnionVector) child;
+                            for (FieldVector grandchild : uv.getChildrenFromFields()) {
+                                if (grandchild instanceof VarCharVector) {
+                                    final VarCharVector vcv = (VarCharVector) grandchild;
+                                    buffers.add(vcv.getValidityBuffer());
+                                    buffers.add(vcv.getOffsetBuffer());
+                                    buffers.add(vcv.getDataBuffer());
+                                }
+                            }
+                        } else {
+                            buffers.addAll(List.of(child.getBuffers(false)));
+                        }
                     }
 
                 } else {
                     for (ArrowBuf buf : vector.getBuffers(false)) {
-                        logger.debug("adding buf {} for vector {}", buf, vector.getName());
+                        logger.info("adding buf {} for vector {}", buf, vector.getName());
                         buffers.add(buf);
                     }
                 }
@@ -429,12 +504,11 @@ public class Producer implements FlightProducer, AutoCloseable {
         }
 
         // The actual data transmission...
-        try (ArrowRecordBatch batch = new ArrowRecordBatch(dimension, nodes, buffers,
-                CompressionUtil.createBodyCompression(new Lz4CompressionCodec()))) {
+        try (ArrowRecordBatch batch = new ArrowRecordBatch(dimension, nodes, buffers)) {
             loader.load(batch);
             listener.putNext();
         } catch (Exception e) {
-            // logger.error(e.getMessage(), e);
+            logger.error(e.getMessage(), e);
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());
         }
 

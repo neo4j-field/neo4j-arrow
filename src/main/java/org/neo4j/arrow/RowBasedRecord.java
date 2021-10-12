@@ -30,6 +30,8 @@ public interface RowBasedRecord {
         DOUBLE_ARRAY,
         /** Variable length UTF-8 string (varchar) */
         STRING,
+        /** List of Strings */
+        STRING_LIST,
         /** Heterogeneous array of supported {@link Type}s */
         LIST,
         /** Catch-all...TBD */
@@ -110,6 +112,8 @@ public interface RowBasedRecord {
         default double[] asDoubleArray() {
             return new double[0];
         }
+
+        default List<String> asStringList() { return List.of(); }
 
         default Type type() {
             return Type.OBJECT;

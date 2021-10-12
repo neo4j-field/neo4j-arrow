@@ -13,10 +13,12 @@ import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.demo.Client;
 import org.neo4j.arrow.job.ReadJob;
+import org.neo4j.gds.NodeLabel;
 import org.neo4j.logging.Log;
 import org.neo4j.logging.log4j.Log4jLogProvider;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -46,17 +48,17 @@ public class GdsRecordBenchmarkTest {
                 float[] data = new float[size];
                 for (int i=0; i<size; i++)
                     data[i] = (float)i;
-                return new GdsNodeRecord(1, new String[] {"embedding"},
+                return new GdsNodeRecord(1, Set.of(NodeLabel.ALL_NODES), new String[] {"embedding"},
                         new RowBasedRecord.Value[] { GdsRecord.wrapFloatArray(data) },
                         Function.identity());
             case "double":
-                return new GdsNodeRecord(1, new String[] {"embedding"},
+                return new GdsNodeRecord(1, Set.of(NodeLabel.ALL_NODES), new String[] {"embedding"},
                         new RowBasedRecord.Value[] {
                                 GdsRecord.wrapDoubleArray(
                                         IntStream.range(1, size).boxed().mapToDouble(Integer::doubleValue).toArray())
                         }, Function.identity());
             case "long":
-                return new GdsNodeRecord(1, new String[] {"embedding"},
+                return new GdsNodeRecord(1,  Set.of(NodeLabel.ALL_NODES), new String[] {"embedding"},
                         new RowBasedRecord.Value[] {
                                 GdsRecord.wrapLongArray(LongStream.range(1, size).toArray())
                         }, Function.identity());

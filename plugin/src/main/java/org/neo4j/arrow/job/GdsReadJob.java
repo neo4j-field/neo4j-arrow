@@ -238,14 +238,13 @@ public class GdsReadJob extends ReadJob {
         return CompletableFuture.supplyAsync(() -> {
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
-            GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, keys, propertiesArray, graph::toOriginalNodeId);
+            GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, graph.nodeLabels(nodeId), keys, propertiesArray, graph::toOriginalNodeId);
             onFirstRecord(record);
             logger.debug("offered first record to producer");
             for (int i=0; i<keys.length; i++)
                 logger.info(" key {}/{}: {} -> {}", i, keys.length-1, keys[i], propertiesArray[i].valueType());
 
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
-
             logger.info("acquired consumer");
 
             // Blast off!
@@ -256,7 +255,7 @@ public class GdsReadJob extends ReadJob {
             // TODO: should it be nodeCount - 1? We advanced the iterator...maybe?
             var s = spliterate(iterator, graph.nodeCount() - 1);
             StreamSupport.stream(s, true).forEach(i ->
-                    consumer.accept(GdsNodeRecord.wrap(i, keys, propertiesArray, graph::toOriginalNodeId),
+                    consumer.accept(GdsNodeRecord.wrap(i, graph.nodeLabels(i), keys,propertiesArray, graph::toOriginalNodeId),
                             i.intValue()));
 
             final long delta = System.currentTimeMillis() - start;
