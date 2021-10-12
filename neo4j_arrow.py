@@ -88,7 +88,7 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
-    def gds_write_nodes(self, graph, database='neo4j', idField='id', labelsField='labels'):
+    def gds_write_nodes(self, graph, database='neo4j', idField='_node_id_', labelsField='_labels_'):
         """Submit a GDS Write Job for creating Nodes and Node Properties."""
         params = {
              'db': database,
@@ -101,13 +101,13 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
-    def gds_write_relationships(self, graph, database='neo4j', sourceField='sourceId', targetField='targetId', typeField='type'):
+    def gds_write_relationships(self, graph, database='neo4j', sourceField='_source_id_', targetField='_target_id_', typeField='_type_'):
         """Submit a GDS Write Job for creating Rels and Rel Properties."""
         params = {
              'db': database,
              'graph': graph,
-             'sourceIdField': sourceField,
-             'targetIdField': targetField,
+             'sourceField': sourceField,
+             'targetField': targetField,
              'typeField': typeField,
          }
         params_bytes = json.dumps(params).encode('utf8')
