@@ -165,5 +165,6 @@ class Neo4jArrow:
         table = pa.table(data=data)
         descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
         writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)
-        writer.write_table(table)
+        for batch in table.to_batches(max_chunksize=1024):
+            writer.write_batch(batch)
         writer.close()
