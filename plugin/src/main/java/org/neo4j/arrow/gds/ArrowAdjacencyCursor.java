@@ -1,6 +1,5 @@
 package org.neo4j.arrow.gds;
 
-import org.apache.arrow.vector.BigIntVector;
 import org.neo4j.gds.api.AdjacencyCursor;
 
 import java.util.ArrayList;

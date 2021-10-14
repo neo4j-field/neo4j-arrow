@@ -1,7 +1,11 @@
 package org.neo4j.arrow.gds;
 
 import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.BaseListVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.types.Types;
+import org.neo4j.arrow.ArrowBatch;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.api.nodeproperties.ValueType;
@@ -14,7 +18,7 @@ import java.util.function.Function;
 public class ArrowNodeProperties implements NodeProperties {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowNodeProperties.class);
 
-    final private FieldVector vector;
+    final private ArrowBatch.Neo4jArrowVector vector;
     final private ValueType type;
     final private NodeLabel label;
     final int maxId;
@@ -23,57 +27,59 @@ public class ArrowNodeProperties implements NodeProperties {
     final Function<Integer, Number> numberReader;
     final Function<Integer, Number[]> arrayReader;
 
-    public ArrowNodeProperties(FieldVector vector, NodeLabel label, int maxId) {
+    public ArrowNodeProperties(ArrowBatch.Neo4jArrowVector vector, NodeLabel label, int maxId) {
         this.vector = vector;
         this.label = label;
         this.maxId = maxId;
 
-        if (vector instanceof BigIntVector || vector instanceof IntVector) {
+        Class<?> clazz = vector.getBaseType();
+
+        if (clazz.isAssignableFrom(BigIntVector.class) || clazz.isAssignableFrom(IntVector.class)) {
             this.type = ValueType.LONG;
-            this.valueReader = (id) -> Values.longValue(((BaseIntVector) vector).getValueAsLong(id));
-            this.numberReader = ((BaseIntVector) vector)::getValueAsLong;
+            this.valueReader = (id) -> Values.longValue((Long) vector.getObject(id));
+            this.numberReader = (id) -> (Long) vector.getObject(id);
             this.arrayReader = (unused) -> null;
 
-        } else if (vector instanceof Float4Vector || vector instanceof Float8Vector) {
+        } else if (clazz.isAssignableFrom(Float4Vector.class) || clazz.isAssignableFrom(Float8Vector.class)) {
             this.type = ValueType.DOUBLE;
-            this.valueReader = (id) -> Values.doubleValue(((FloatingPointVector) vector).getValueAsDouble(id));
-            this.numberReader = ((FloatingPointVector) vector)::getValueAsDouble;
+            this.valueReader = (id) -> Values.doubleValue((Double) vector.getObject(id));
+            this.numberReader = (id) -> (Double) vector.getObject(id);
             this.arrayReader = (unused) -> null;
 
-        } else if (vector instanceof ListVector) {
-            this.numberReader = (unused) -> null;
+        } else if (clazz.isAssignableFrom(FixedSizeListVector.class)) {
+            this.numberReader = (unused) -> -1L;
+            final Class<?> dataClass = vector.getDataClass().get(); // XXX
 
-            final FieldVector dataVector = ((ListVector) vector).getDataVector();
-            if (dataVector instanceof BigIntVector || dataVector instanceof IntVector) {
+            if (dataClass.isAssignableFrom(BigIntVector.class) || dataClass.isAssignableFrom(IntVector.class)) {
                 this.type = ValueType.LONG_ARRAY;
                 this.valueReader = (id) -> {
-                    @SuppressWarnings("unchecked") final List<Long> list = (List<Long>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Long> list = (List<Long>) vector.getList(id); // XXX
                     return Values.longArray(list.stream().mapToLong(Long::longValue).toArray());
                 };
                 this.arrayReader = (id) -> {
-                    @SuppressWarnings("unchecked") final List<Long> list = (List<Long>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Long> list = (List<Long>) vector.getList(id); // XXX
                     return list.stream().mapToLong(Long::valueOf).boxed().toArray(Number[]::new);
                 };
 
-            } else if (dataVector instanceof Float4Vector) {
+            } else if (dataClass.isAssignableFrom(Float4Vector.class)) {
                 this.type = ValueType.FLOAT_ARRAY;
                 this.valueReader = (id) -> {
-                    @SuppressWarnings("unchecked") final List<Float> list = (List<Float>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Float> list = (List<Float>) vector.getList(id); // XXX
                     return Values.doubleArray(list.stream().mapToDouble(Float::doubleValue).toArray());
                 };
                 this.arrayReader = (id) -> {
-                    @SuppressWarnings("unchecked") final List<Float> list = (List<Float>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Float> list = (List<Float>) vector.getList(id); // XXX
                     return list.stream().mapToDouble(Float::valueOf).boxed().toArray(Number[]::new);
                 };
 
-            } else if (dataVector instanceof Float8Vector) {
+            } else if (dataClass.isAssignableFrom(Float8Vector.class)) {
                 this.type = ValueType.DOUBLE_ARRAY;
                 this.valueReader = (id) -> {
-                    @SuppressWarnings("unchecked") final List<Double> list = (List<Double>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Double> list = (List<Double>) vector.getList(id); // XXX
                     return Values.doubleArray(list.stream().mapToDouble(Double::doubleValue).toArray());
                 };
                 this.arrayReader = (id) -> {
-                    @SuppressWarnings("unchecked") final List<Double> list = (List<Double>) vector.getObject(id); // XXX
+                    @SuppressWarnings("unchecked") final List<Double> list = (List<Double>) vector.getList(id); // XXX
                     return list.stream().mapToDouble(Double::valueOf).boxed().toArray(Number[]::new);
                 };
 
@@ -84,8 +90,7 @@ public class ArrowNodeProperties implements NodeProperties {
             }
         } else {
             throw new RuntimeException(
-                    String.format("unsupported NodeProperties type in Arrow FieldVector: %s",
-                    vector.getClass().getCanonicalName()));
+                    String.format("unsupported NodeProperties type in Arrow FieldVector: %s", clazz));
         }
     }
 
@@ -162,7 +167,7 @@ public class ArrowNodeProperties implements NodeProperties {
     @Override
     public long release() {
         logger.info("NodeProperties({}) released", vector.getName());
-        vector.close();
+        //vector.close();
         return NodeProperties.super.release();
     }
 

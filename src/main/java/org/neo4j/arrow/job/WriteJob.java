@@ -1,7 +1,7 @@
 package org.neo4j.arrow.job;
 
 
-import org.apache.arrow.vector.VectorSchemaRoot;
+import org.neo4j.arrow.ArrowBatch;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
@@ -10,7 +10,7 @@ public abstract class WriteJob extends Job {
 
     public static final Mode mode = Mode.WRITE;
 
-    private final CompletableFuture<VectorSchemaRoot> streamComplete = new CompletableFuture<>();
+    private final CompletableFuture<ArrowBatch> streamComplete = new CompletableFuture<>();
 
     public WriteJob() {
         super();
@@ -26,11 +26,11 @@ public abstract class WriteJob extends Job {
         // TODO handle writejob close???
     }
 
-    public Future<VectorSchemaRoot> getStreamCompletion() {
+    public Future<ArrowBatch> getStreamCompletion() {
         return streamComplete;
     }
 
-    public void onComplete(VectorSchemaRoot root) {
+    public void onComplete(ArrowBatch root) {
         streamComplete.complete(root);
     }
 

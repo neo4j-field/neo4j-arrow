@@ -6,6 +6,7 @@ import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.neo4j.arrow.ArrowBatch;
 import org.neo4j.arrow.Config;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.GdsWriteNodeMessage;
@@ -94,25 +95,27 @@ public class GdsWriteJob extends WriteJob {
 
         return CompletableFuture.supplyAsync(() -> {
             // XXX we assume we're creating a graph (for now), not updating
-            final VectorSchemaRoot root;
+            final ArrowBatch arrowBatch;
             try {
-                root = getStreamCompletion().get(10, TimeUnit.MINUTES);    // XXX
+                arrowBatch = getStreamCompletion().get(30, TimeUnit.MINUTES);    // XXX
             } catch (InterruptedException | ExecutionException | TimeoutException e) {
                 e.printStackTrace();
                 return false;
             }
 
             // XXX push schema validation to Producer side prior to full stream being formed
-            final Schema schema = root.getSchema();
-            final long rowCount = root.getRowCount();
+            final Schema schema = arrowBatch.getSchema();
+            final long rowCount = arrowBatch.getRowCount();
 
             // XXX this assumes we only load up to ((1 << 31) - 1) (~2.1B) node ids
             // these will throw IllegalArg exceptions
             schema.findField(msg.getIdField());
-            final BigIntVector nodeIdVector = (BigIntVector) root.getVector(msg.getIdField());
+            //final BigIntVector nodeIdVector = (BigIntVector) arrowBatch.getVector(msg.getIdField());
+            final ArrowBatch.Neo4jArrowVector nodeIdVector = arrowBatch.getVector(msg.getIdField());
 
             schema.findField(msg.getLabelsField());
-            final ListVector labelsVector = (ListVector) root.getVector(msg.getLabelsField());
+            //final ListVector labelsVector = (ListVector) arrowBatch.getVector(msg.getLabelsField());
+            final ArrowBatch.Neo4jArrowVector labelsVector = arrowBatch.getVector(msg.getLabelsField());
 
             // This is ugly
             final Map<NodeLabel, Map<String, ArrowNodeProperties>> labelToPropMap = new ConcurrentHashMap<>();
@@ -122,18 +125,19 @@ public class GdsWriteJob extends WriteJob {
             final AtomicLong globalMaxId = new AtomicLong(0);
 
             // Brute force. Terrible.
-            logger.info("analyzing vectors to build label->propMap mapping");
-            IntStream.range(0, root.getRowCount())
-                    //.parallel()
+            logger.info("preprocessing {} nodes to build label->propMap mapping", arrowBatch.getRowCount());
+            IntStream.range(0, arrowBatch.getRowCount())
+                    .parallel()
                     .forEach(idx -> {
-                        final long originalNodeId = nodeIdVector.get(idx);
-                        final List<?> labels = labelsVector.getObject(idx);
+                        final long originalNodeId = nodeIdVector.getNodeId(idx);
+                        final List<?> labels = labelsVector.getLabels(idx);
 
                         labels.stream().map(Object::toString).forEach(label -> {
                             final NodeLabel nodeLabel = NodeLabel.of(label);
                             final Map<String, ArrowNodeProperties> propMap =
                                     labelToPropMap.getOrDefault(nodeLabel, new ConcurrentHashMap<>());
-                            root.getFieldVectors().stream()
+
+                            arrowBatch.getFieldVectors().stream()
                                     .filter(vec -> !Objects.equals(vec.getName(), msg.getIdField())
                                             && !Objects.equals(vec.getName(), msg.getLabelsField()))
                                     .forEach(vec -> {
@@ -156,17 +160,17 @@ public class GdsWriteJob extends WriteJob {
                                     .putIfAbsent(str, PropertySchema.of(str, propMap.get(str).valueType()))));
 
             final NodeSchema nodeSchema = NodeSchema.of(labelToPropSchemaMap);
-            assert(root.getRowCount() == nodeIdVector.getValueCount());
+            // assert(arrowBatch.getRowCount() == nodeIdVector.getValueCount());
 
             // We need our own style of NodeMapping do deal with the fact we manage the node ids
             final NodeMapping nodeMapping = new NodeMapping() {
 
                 @Override
                 public Set<NodeLabel> nodeLabels(long nodeId) {
-                    if (labelsVector.getObject((int) nodeId) == null)
+                    if (labelsVector.getLabels((int) nodeId) == null)
                         return Set.of();
 
-                    return labelsVector.getObject((int) nodeId).stream()
+                    return labelsVector.getLabels((int) nodeId).stream()
                             .map(Object::toString)
                             .map(NodeLabel::of)
                             .collect(Collectors.toUnmodifiableSet());
@@ -211,12 +215,12 @@ public class GdsWriteJob extends WriteJob {
 
                 @Override
                 public long toMappedNodeId(long nodeId) {
-                    return idMap.get(nodeId);
+                    return idMap.getOrDefault(nodeId, (int) NOT_FOUND);
                 }
 
                 @Override
                 public long toOriginalNodeId(long nodeId) {
-                    return nodeIdVector.get((int) nodeId);
+                    return nodeIdVector.getNodeId((int) nodeId);
                 }
 
                 @Override
@@ -268,7 +272,7 @@ public class GdsWriteJob extends WriteJob {
             };
 
             final HugeGraph hugeGraph = GraphFactory.create(nodeMapping, nodeSchema, globalPropMap,
-                    RelationshipType.ALL_RELATIONSHIPS, Relationships.of(0, Orientation.NATURAL, true,
+                    RelationshipType.of("__empty__"), Relationships.of(0, Orientation.NATURAL, true,
                             new AdjacencyList() {
                                 // See GraphStoreFilterTest.java for inspiration of how to stub out
                                 @Override
@@ -290,7 +294,7 @@ public class GdsWriteJob extends WriteJob {
                                 public void close() {
                                     // XXX hack
                                     logger.info("fauxAdjacencyList closing");
-                                    root.close();
+                                    arrowBatch.close();
                                 }
                             }), AllocationTracker.empty());
 
@@ -362,9 +366,9 @@ public class GdsWriteJob extends WriteJob {
         final NamedDatabaseId dbId = api.databaseId();
 
         return CompletableFuture.supplyAsync(() -> {
-            final VectorSchemaRoot root;
+            final ArrowBatch root;
             try {
-                root = getStreamCompletion().get(10, TimeUnit.MINUTES);    // XXX
+                root = getStreamCompletion().get(15, TimeUnit.MINUTES);    // XXX
             } catch (InterruptedException | ExecutionException | TimeoutException e) {
                 e.printStackTrace();
                 return false;
@@ -373,26 +377,33 @@ public class GdsWriteJob extends WriteJob {
             final GraphStoreWithConfig storeWithConfig = GraphStoreCatalog.get(CatalogRequest.of(username, dbId), msg.getGraphName());
             assert(storeWithConfig != null);
 
+/*
             final BigIntVector sourceIdVector = (BigIntVector) root.getVector(msg.getSourceField());
             assert(sourceIdVector != null);
             final BigIntVector targetIdVector = (BigIntVector) root.getVector(msg.getTargetField());
             assert(targetIdVector != null);
             final VarCharVector typesVector = (VarCharVector) root.getVector(msg.getTypeField());
             assert(typesVector != null);
+            */
+            final BigIntVector sourceIdVector = null;
+            final BigIntVector targetIdVector = null;
+            final VarCharVector typesVector = null;
 
             // Ugliness abounds...
             // Edge maps, keyed by Type. Each Type has it's own mapping of GDS Node Id to a Queue of target GDS node Ids
             // { type: { nodeVectorId: [ offsets into node vector ] } }
             final Map<String, Map<Integer, Queue<Integer>>> sourceTypeIdMap = new ConcurrentHashMap<>();
             final Map<String, Integer> types = new ConcurrentHashMap<>();
+            final Map<String, Map<Integer, Integer>> inDegreeMap = new ConcurrentHashMap<>();
+
 
             // Use our nodeMapping to deal with the fact we get "original" ids in the target vector and don't know the
             // "internal" GDS ids from our node vectors
             final NodeMapping nodeMapping = storeWithConfig.graphStore().nodes();
 
-            logger.info("analyzing vectors to build type->rel mappings");
+            logger.info("analyzing {} relationships to build type->rel mappings", root.getRowCount());
             IntStream.range(0, root.getRowCount())
-                    //.parallel() // XXX need to check if we solved the concurrency bug
+                    .parallel() // XXX need to check if we solved the concurrency bug
                     .forEach(idx -> {
                         final long originalSourceId = sourceIdVector.get(idx);
                         final int sourceId = (int) nodeMapping.toMappedNodeId(originalSourceId); // XXX cast
@@ -412,6 +423,12 @@ public class GdsWriteJob extends WriteJob {
                             });
                             return sourceIdMap;
                         });
+
+                        inDegreeMap.compute(type, (k, v) -> {
+                            final Map<Integer, Integer> outMap = (v == null) ? new ConcurrentHashMap<>() : v;
+                            outMap.compute(sourceId, (k2, v2) -> (v2 == null) ? 1 : v2 + 1);
+                            return outMap;
+                        });
                     });
 
             logger.info("types counts: {}", types);
@@ -421,10 +438,11 @@ public class GdsWriteJob extends WriteJob {
             types.forEach((type, cnt) -> {
                 // TODO: wire in maps
                 final Relationships rels = Relationships.of(cnt, Orientation.NATURAL, true,
-                        new ArrowAdjacencyList(sourceTypeIdMap.get(type), (unused) -> root.close()));
-                logger.info("adding relationship type {} to graph {} (type edge size: {})", type, storeWithConfig.config().graphName(),
-                        sourceTypeIdMap.get(type).size());
-                storeWithConfig.graphStore().addRelationshipType(RelationshipType.of(type), Optional.empty(), Optional.empty(), rels);
+                        new ArrowAdjacencyList(sourceTypeIdMap.get(type), inDegreeMap.get(type), (unused) -> root.close()));
+                logger.info("adding relationship type {} to graph {} (type edge size: {})", type,
+                        storeWithConfig.config().graphName(), sourceTypeIdMap.get(type).size());
+                storeWithConfig.graphStore()
+                        .addRelationshipType(RelationshipType.of(type), Optional.empty(), Optional.empty(), rels);
             });
 
             return true;

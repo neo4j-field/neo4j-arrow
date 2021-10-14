@@ -3,10 +3,7 @@ package org.neo4j.arrow;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.FieldVector;
-import org.apache.arrow.vector.VarCharVector;
-import org.apache.arrow.vector.VectorLoader;
-import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.complex.UnionVector;
@@ -17,6 +14,7 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.VectorBatchAppender;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -25,6 +23,31 @@ import java.util.List;
 
 @SuppressWarnings("all")
 public class StringListTest {
+
+    @Test
+    public void vectorAppendTest() {
+        try (BufferAllocator allocator = new RootAllocator(Config.maxGlobalMemory)) {
+            IntVector v1 = new IntVector("v1", allocator);
+
+            v1.allocateNew(1024);
+
+            for (int i=0; i<10; i++) {
+                IntVector v2 = new IntVector("v2", allocator);
+                v2.allocateNew(10);
+                for (int j=1; j<=10; j++)
+                    v2.setSafe(j-1, (i * 10) + j);
+                v2.setValueCount(10);
+
+                VectorBatchAppender.batchAppend(v1, v2);
+
+                v2.close();
+                v1.setValueCount((i * 10));
+            }
+
+            System.out.println(v1);
+            v1.close();
+        }
+    }
 
     @Test
     public void batchSizeTest() {

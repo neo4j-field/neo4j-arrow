@@ -18,6 +18,8 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
+import org.apache.arrow.vector.util.VectorBatchAppender;
+import org.apache.arrow.vector.util.VectorSchemaRootAppender;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
@@ -52,6 +54,8 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     final Location location;
     final BufferAllocator allocator;
+
+    final Queue<AutoCloseable> closables = new ConcurrentLinkedQueue<>();
 
     /* Holds all known current streams based on their tickets */
     final protected Map<Ticket, FlightInfo> flightMap = new ConcurrentHashMap<>();
@@ -423,8 +427,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 listener.error(CallStatus.INTERNAL.withDescription("unexpected state").toRuntimeException());
                 return;
             }
-            logger.info("waiting up to 5 mins for flushing to finish...");
-            flushJob.get(5, TimeUnit.MINUTES);
+            logger.info("waiting up to 15 mins for flushing to finish...");
+            flushJob.get(15, TimeUnit.MINUTES);
             logger.info("flushing complete");
 
             // Close the allocators for each partition
@@ -621,40 +625,41 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: validate root.Schema
 
             final WriteJob job = (WriteJob) rawJob;
-            final VectorSchemaRoot localRoot = VectorSchemaRoot.create(flightStream.getSchema(), allocator);
+            final ArrowBatch arrowBatch = new ArrowBatch(flightStream.getSchema(), allocator, job.getJobId());
 
             // Process our stream. Everything in here needs to be checked for memory leaks!
             try (final VectorSchemaRoot streamRoot = flightStream.getRoot()) {
-                final VectorUnloader unloader = new VectorUnloader(streamRoot);
-                final VectorLoader loader = new VectorLoader(localRoot);
-
                 logger.info("client putting stream with schema: {}", streamRoot.getSchema());
+                // Consume the entire stream into memory
+                long cnt = 0;
+                final List<FieldVector> incoming = streamRoot.getFieldVectors();
 
-                // Consume the entire stream into memory for now
                 while (flightStream.next()) {
-                    try (final ArrowRecordBatch batch = unloader.getRecordBatch()) {
-                        logger.info("consuming batch ({} rows)", batch.getLength());
-                        loader.load(batch);
-
-                        // TODO: what should we send back? Anything specific?
-                        ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
-                    }
+                    logger.info("consuming batch {} of {} rows", cnt, streamRoot.getRowCount());
+                    arrowBatch.appendRoot(streamRoot);
+                    ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
+                    cnt++;
                 }
+                logger.info("consumed {} batches", cnt);
 
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
-                job.onComplete(localRoot);
-
+                job.onComplete(arrowBatch); // TODO!!!
+                closables.add(arrowBatch);
             } catch (Exception e) {
                 logger.error("error during batch unloading", e);
                 ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());
-                localRoot.close();
+                try {
+                    arrowBatch.close();
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
                 return;
             }
             ackStream.onCompleted();
 
             // At this point we should have the full stream in memory.
-            logger.info("localRoot rowCount={}, schema={}", localRoot.getRowCount(), localRoot.getSchema());
+            logger.info("batch rowCount={}, schema={}", arrowBatch.getRowCount(), arrowBatch.getSchema());
         };
     }
 
@@ -704,6 +709,7 @@ public class Producer implements FlightProducer, AutoCloseable {
         for (Job job : jobMap.values()) {
             job.close();
         }
+        AutoCloseables.close(closables);
         AutoCloseables.close(allocator);
     }
 }
