@@ -4,11 +4,9 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.ValueVector;
-import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.Text;
@@ -34,7 +32,7 @@ public class ArrowBatch implements AutoCloseable {
     final String[] fieldNames;
 
     long rowCount = 0;
-    int batchSize = -1;
+    int maxBatchSize = -1;
 
     public ArrowBatch(Schema schema, BufferAllocator parentAllocator, String name) {
         this.schema = schema;
@@ -45,25 +43,30 @@ public class ArrowBatch implements AutoCloseable {
 
         IntStream.range(0, fields.size())
                 .forEach(idx -> {
-                    fieldNames[idx] = fields.get(idx).getName();
+                    final String fieldName = fields.get(idx).getName();
+                    fieldNames[idx] = fieldName;
                     vectorSpace.add(new ArrayList<>());
+                    logger.info("added {} to vectorspace", fieldName);
                 });
         rowCount = 0;
     }
 
     public void appendRoot(VectorSchemaRoot root) {
         // TODO: validate schema option?
-
-        if (batchSize < 0) {
-            batchSize = root.getRowCount();
+        if (maxBatchSize > 0 && root.getRowCount() > maxBatchSize) {
+            logger.error("maxBatchSize: {}, root row count: {}", maxBatchSize, root.getRowCount());
+            throw new RuntimeException("BOOP BOOP BOOP!");
         }
+        maxBatchSize = Math.max(maxBatchSize, root.getRowCount());
+
 
         final List<FieldVector> incoming = root.getFieldVectors();
         final int cols = incoming.size();
-        logger.debug("appending root with {} rows, {} vectors", root.getRowCount(), cols);
+        logger.trace("appending root with {} rows, {} vectors", root.getRowCount(), cols);
         IntStream.range(0, cols)
                 .forEach(idx -> {
                     final FieldVector fv = incoming.get(idx);
+                    logger.trace("fv: {}", fv);
                     final int valueCount = fv.getValueCount();
 
                     final TransferPair pair = fv.getTransferPair(allocator);
@@ -75,18 +78,33 @@ public class ArrowBatch implements AutoCloseable {
                 });
 
         rowCount += root.getRowCount();
-        logger.debug("new rowcount {}", rowCount);
+        logger.trace("new rowcount {}", rowCount);
     }
 
     public static class BatchedVector {
         private final List<ValueVector> vectors;
         private final int batchSize;
         private final String name;
+        private final long rowCount;
+        private int watermark = 0;
 
-        private BatchedVector(String name, List<ValueVector> vectors, int batchSize) {
+        private BatchedVector(String name, List<ValueVector> vectors, int batchSize, long rowCount) {
             this.name = name;
             this.vectors = vectors;
             this.batchSize = batchSize;
+            this.rowCount = rowCount;
+
+            // XXX this is ugly...but we need to know where our search gets tough
+            for (int i=0; i<vectors.size(); i++) {
+                if (vectors.get(i).getValueCount() < batchSize) {
+                    watermark = i;
+                    break;
+                }
+            }
+        }
+
+        public List<ValueVector> getVectors() {
+            return this.vectors;
         }
 
         public String getName() {
@@ -104,24 +122,31 @@ public class ArrowBatch implements AutoCloseable {
          * @return Object value if found, otherwise null
          */
         private Object translateIndex(long index) {
+            assert (index < rowCount);
+
             // assumption is our batches only become "short" at the end
-            int column = (int) (index / batchSize);
+            int column = (int) Math.floorDiv(index, batchSize);
             int offset = (int) (index % batchSize);
+            //logger.info("looking up index {} (col = {}, offset = {})", index, column, offset);
 
             try {
-                ValueVector vector = vectors.get(column);
-                if (vector.getValueCount() > offset) {
-                    // easy peasy
+                if (column < watermark) {
+                    // trivial case
+                    ValueVector vector = vectors.get(column);
                     return vector.getObject(offset);
                 }
 
-                while (vector.getValueCount() <= offset) {
-                    // we need to advance out pointers and offsets :-(
+                // harder, we need to search varying size columns. start at our watermark.
+                int pos = watermark * batchSize;
+                column = watermark;
+                ValueVector vector = vectors.get(column);
+                logger.trace("starting search from pos {} to find index {} (watermark: {})", pos, index, watermark);
+                while ((index - pos) >= vector.getValueCount()) {
                     column++;
-                    offset = offset - vector.getValueCount();
-                    vector = vectors.get(column);
+                    pos += vector.getValueCount();
+                    vector = vectors.get(column); // XXX eventually will barf...need better handling here
                 }
-                return vector.getObject(offset);
+                return vector.getObject((int) (index - pos));
             } catch (Exception e) {
                 logger.error(String.format("failed to get index %d (offset %d, column %d, batchSize %d)", index, offset, column, batchSize), e);
                 return null;
@@ -131,7 +156,7 @@ public class ArrowBatch implements AutoCloseable {
         public long getNodeId(long index) {
             final Long nodeId = (Long) translateIndex(index);
             if (nodeId == null) {
-                throw new RuntimeException(String.format("cant get nodeid for index %d", index));
+                throw new RuntimeException(String.format("cant get nodeId for index %d", index));
             }
             if (nodeId < 0) {
                 throw new RuntimeException("nodeId < 0?!?!");
@@ -139,13 +164,13 @@ public class ArrowBatch implements AutoCloseable {
             return nodeId;
         }
 
-        public List<?> getLabels(long index) {
+        public List<String> getLabels(long index) {
             final List<?> list = (List<?>) translateIndex(index);
             if (list == null) {
                 logger.warn("failed to find list at index {}, index", index);
                 return List.of();
             }
-            return list;
+            return list.stream().map(Object::toString).collect(Collectors.toList());
         }
 
         public String getType(long index) {
@@ -192,7 +217,7 @@ public class ArrowBatch implements AutoCloseable {
         if (index < 0 || index >= fieldNames.length)
             throw new RuntimeException("index out of range");
 
-        return new BatchedVector(fieldNames[index], vectorSpace.get(index), batchSize);
+        return new BatchedVector(fieldNames[index], vectorSpace.get(index), maxBatchSize, rowCount);
     }
 
     public BatchedVector getVector(String name) {
@@ -205,7 +230,7 @@ public class ArrowBatch implements AutoCloseable {
         if (index == fieldNames.length)
             throw new RuntimeException(String.format("name %s not found in arrow batch", name));
 
-        return new BatchedVector(name, vectorSpace.get(index), batchSize);
+        return new BatchedVector(name, vectorSpace.get(index), maxBatchSize, rowCount);
     }
 
     public List<BatchedVector> getFieldVectors() {

@@ -642,7 +642,23 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
+
+                // XXX check our batches
+                for (final String name : arrowBatch.fieldNames) {
+                    logger.info("building histogram for field: {}", name);
+                    final ArrowBatch.BatchedVector bv = arrowBatch.getVector(name);
+                    logger.info("bv: {}", bv.getBaseType());
+                    final Map<Integer, Integer> histo = new HashMap<>();
+                    for (ValueVector vector : bv.getVectors()) {
+                        final Integer key = vector.getValueCount();
+                        final Integer bucketCnt = histo.getOrDefault(key, 0);
+                        histo.put(key, bucketCnt + 1);
+                    }
+                    logger.info("histo: {}", histo);
+                }
+
                 job.onComplete(arrowBatch); // TODO!!!
+
                 closables.add(arrowBatch);
             } catch (Exception e) {
                 logger.error("error during batch unloading", e);
