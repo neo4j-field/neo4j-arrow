@@ -150,9 +150,9 @@ public class GdsReadJob extends ReadJob {
                         );
                     }
                 })
-                .peek(triple -> logger.info("constructed triple {}", triple))
+                .peek(triple -> logger.debug("constructed triple {}", triple))
                 .toArray(Triple[]::new);
-        logger.info("assembled {} triples", triples.length);
+        logger.info(String.format("assembled %,d triples", triples.length));
 
         if (baseGraph.nodeCount() == 0)
             throw CallStatus.NOT_FOUND.withDescription("no matching node ids for GDS job").toRuntimeException();
@@ -168,7 +168,7 @@ public class GdsReadJob extends ReadJob {
             // Make rocket go now
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
 
-            logger.info("finding rels for {} nodes", baseGraph.nodeCount());
+            logger.info(String.format("finding rels for %,d nodes", baseGraph.nodeCount()));
             LongStream.range(0, baseGraph.nodeCount())
                     .parallel()
                     .boxed()

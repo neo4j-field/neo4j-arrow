@@ -34,6 +34,7 @@ import org.neo4j.kernel.internal.GraphDatabaseAPI;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongPredicate;
 import java.util.stream.Collectors;
@@ -129,31 +130,34 @@ public class GdsWriteJob extends WriteJob {
 
             // Brute force. Terrible.
             logger.info("preprocessing {} nodes to build label->propMap mapping", arrowBatch.getRowCount());
-            for (int idx = 0; idx<arrowBatch.getRowCount(); idx++) {
-                    if (idx % 100_000 == 0)
-                        logger.info(String.format("...%,d", idx));
-
-                    final long originalNodeId = nodeIdVector.getNodeId(idx);
-                    if (idMap.put(originalNodeId, idx) != null) {
-                        logger.error("key collision! (nodeId: {}, idx: {})", originalNodeId, idx);
-                    }
-
-                    final List<String> labels = labelsVector.getLabels(idx);
-                    labels.forEach(label -> {
-                        final NodeLabel nodeLabel = NodeLabel.of(label);
-                        final Map<String, ArrowNodeProperties> propMap =
-                                labelToPropMap.getOrDefault(nodeLabel, new ConcurrentHashMap<>());
-
-                        // TODO: clean up
-                        propertyVectors.forEach(vec -> {
-                                    final ArrowNodeProperties props = new ArrowNodeProperties(vec, nodeLabel, (int) rowCount); // XXX cast
-                                    propMap.putIfAbsent(vec.getName(), props);
-                                    globalPropMap.putIfAbsent(vec.getName(), props);
-                                });
-                        labelToPropMap.put(nodeLabel, propMap); // ??? is this needed?
-                    });
-                    globalMaxId.updateAndGet(i -> Math.max(originalNodeId, i));
+            final AtomicInteger cnt = new AtomicInteger(0);
+            IntStream.range(0, arrowBatch.getRowCount()).parallel().forEach(idx -> {
+                int progress = cnt.incrementAndGet();
+                if (progress % 100_000 == 0) {
+                    logger.info(String.format("...%,d", progress));
                 }
+
+                final long originalNodeId = nodeIdVector.getNodeId(idx);
+                if (idMap.put(originalNodeId, idx) != null) {
+                    logger.error("key collision! (nodeId: {}, idx: {})", originalNodeId, idx);
+                }
+
+                final List<String> labels = labelsVector.getLabels(idx);
+                labels.forEach(label -> {
+                    final NodeLabel nodeLabel = NodeLabel.of(label);
+                    final Map<String, ArrowNodeProperties> propMap =
+                            labelToPropMap.getOrDefault(nodeLabel, new ConcurrentHashMap<>());
+
+                    // TODO: clean up
+                    propertyVectors.forEach(vec -> {
+                        final ArrowNodeProperties props = new ArrowNodeProperties(vec, nodeLabel, (int) rowCount); // XXX cast
+                        propMap.putIfAbsent(vec.getName(), props);
+                        globalPropMap.putIfAbsent(vec.getName(), props);
+                    });
+                    labelToPropMap.put(nodeLabel, propMap); // ??? is this needed?
+                });
+                globalMaxId.updateAndGet(i -> Math.max(originalNodeId, i));
+            });
 
             // groan
             labelToPropMap.forEach((label, propMap) ->
@@ -428,10 +432,15 @@ public class GdsWriteJob extends WriteJob {
             // "internal" GDS ids from our node vectors
             final NodeMapping nodeMapping = storeWithConfig.graphStore().nodes();
 
-            logger.info("analyzing {} relationships to build type->rel mappings", batch.getRowCount());
+            logger.info(String.format("analyzing %,d relationships to build type->rel mappings", batch.getRowCount()));
+            final AtomicInteger cnt = new AtomicInteger(0);
             IntStream.range(0, batch.getRowCount())
                     .parallel() // XXX need to check if we solved the concurrency bug
                     .forEach(idx -> {
+                        int progress = cnt.incrementAndGet();
+                        if (progress % 100_000 == 0) {
+                            logger.info(String.format("...%,d", progress));
+                        }
                         final long originalSourceId = sourceIdVector.getNodeId(idx);
                         final int sourceId = (int) nodeMapping.toMappedNodeId(originalSourceId); // XXX cast
                         final long originalTargetId = targetIdVector.getNodeId(idx);
@@ -440,7 +449,7 @@ public class GdsWriteJob extends WriteJob {
 
                         logger.trace("recording idx {}: ({} @ {})-[{}]->({} @ {})", idx, originalSourceId, sourceId, type, originalTargetId, targetId);
 
-                        types.compute(type, (key, cnt) -> (cnt == null) ? 1 : cnt + 1);
+                        types.compute(type, (key, n) -> (n == null) ? 1 : n + 1);
 
                         sourceTypeIdMap.compute(type, (k, v) -> {
                             final Map<Integer, List<Integer>> sourceIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
@@ -474,9 +483,9 @@ public class GdsWriteJob extends WriteJob {
                 logger.info("done sorting type {}", type);
             });
 
-            types.forEach((type, cnt) -> {
+            types.forEach((type, num) -> {
                 // TODO: wire in maps
-                final Relationships rels = Relationships.of(cnt, Orientation.NATURAL, true,
+                final Relationships rels = Relationships.of(num, Orientation.NATURAL, true,
                         new ArrowAdjacencyList(sourceTypeIdMap.get(type), inDegreeMap.get(type), (unused) -> batch.close()));
                 logger.info("adding relationship type {} to graph {} (type edge size: {})", type,
                         storeWithConfig.config().graphName(), sourceTypeIdMap.get(type).size());
