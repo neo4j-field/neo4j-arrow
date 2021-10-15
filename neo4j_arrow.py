@@ -165,6 +165,17 @@ class Neo4jArrow:
         table = pa.table(data=data)
         descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
         writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)
-        for batch in table.to_batches(max_chunksize=1024):
-            writer.write_batch(batch)
+        writer.write_table(table, max_chunksize=8192)
         writer.close()
+
+    def put_stream_batches(self, ticket, results):
+        descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
+        nbytes, num = 0, 0
+        writer, _ = self._client.do_put(descriptor, results.schema, options=self._options)
+        for (batch, _) in results:
+            nbytes = nbytes + batch.nbytes
+            writer.write_batch(batch)
+            num = num + 1
+        writer.close()
+        print(f"wrote {num:,} batches, {nbytes:,} bytes")
+
