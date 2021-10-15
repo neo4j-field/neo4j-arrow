@@ -632,10 +632,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 logger.info("client putting stream with schema: {}", streamRoot.getSchema());
                 // Consume the entire stream into memory
                 long cnt = 0;
-                final List<FieldVector> incoming = streamRoot.getFieldVectors();
-
                 while (flightStream.next()) {
-                    logger.info("consuming batch {} of {} rows", cnt, streamRoot.getRowCount());
+                    logger.debug("consuming batch {} of {} rows", cnt, streamRoot.getRowCount());
                     arrowBatch.appendRoot(streamRoot);
                     ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
                     cnt++;
@@ -656,6 +654,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 }
                 return;
             }
+            // TODO: we need to wait until the post-processing completes, need a callback here
             ackStream.onCompleted();
 
             // At this point we should have the full stream in memory.

@@ -3,31 +3,32 @@ package org.neo4j.arrow.gds;
 import org.neo4j.gds.api.AdjacencyCursor;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.Queue;
+import java.util.function.Function;
 
 public class ArrowAdjacencyCursor implements AdjacencyCursor {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowAdjacencyCursor.class);
 
-    private long index = 0;
+    private long pos = 0;
 
-    private final double fallbackValue;
-    private final List<Integer> targets;
+    private double fallbackValue = Double.NaN;
+    private List<Integer> targets = List.of();
+    private Function<Long, List<Integer>> queueResolver = (unused) -> new LinkedList<>();
 
-    protected ArrowAdjacencyCursor(Queue<Integer> targets, double fallbackValue) {
-        this(new ArrayList<>(targets), fallbackValue);
+    protected ArrowAdjacencyCursor(Function<Long, List<Integer>> queueResolver) {
+        this.queueResolver = queueResolver;
     }
 
-    private ArrowAdjacencyCursor(List<Integer> sortedOutgoing, double fallbackValue) {
-        this.targets = sortedOutgoing;
+    protected ArrowAdjacencyCursor(List<Integer> targets, double fallbackValue) {
+        this.targets = targets;
         this.fallbackValue = fallbackValue;
-        logger.trace("new cursor (outgoing: {}, fallbackValue: {})", sortedOutgoing, fallbackValue);
     }
 
     @Override
-    public void init(long index, int unused) {
-        this.index = index;
-        logger.trace("init: {}, {}", index, unused);
+    public void init(long node, int unused) {
+        pos = 0;
+        targets = new ArrayList<>(queueResolver.apply(node));
     }
 
     @Override
@@ -37,27 +38,32 @@ public class ArrowAdjacencyCursor implements AdjacencyCursor {
 
     @Override
     public boolean hasNextVLong() {
-        return (index < targets.size());
+        return (pos < targets.size());
     }
 
     @Override
     public long nextVLong() {
-        final int targetIdx = targets.get((int) index);
-        index++;
-        return targetIdx;
+        try {
+            final int targetIdx = targets.get((int) pos);
+            pos++;
+            return targetIdx;
+        } catch (IndexOutOfBoundsException e) {
+            logger.warn(String.format("nextVLong() index out of bounds (index=%d)", pos));
+            return NOT_FOUND;
+        }
     }
 
     @Override
     public long peekVLong() {
         if (hasNextVLong())
-            return targets.get((int) index); // XXX
+            return targets.get((int) pos); // XXX
         else
             return NOT_FOUND;
     }
 
     @Override
     public int remaining() {
-        return (int) (targets.size() - index + 1);
+        return (int) (targets.size() - pos);
     }
 
     @Override
@@ -87,7 +93,7 @@ public class ArrowAdjacencyCursor implements AdjacencyCursor {
         final AdjacencyCursor copy = (destination == null) ?
                 new ArrowAdjacencyCursor(targets, fallbackValue)
                 : destination;
-        copy.init(index, 0);
+        copy.init(pos, 0);
         return copy;
     }
 

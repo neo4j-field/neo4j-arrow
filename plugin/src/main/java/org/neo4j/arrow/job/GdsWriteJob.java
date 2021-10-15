@@ -3,8 +3,6 @@ package org.neo4j.arrow.job;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.VarCharVector;
-import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.ArrowBatch;
 import org.neo4j.arrow.Config;
@@ -111,11 +109,11 @@ public class GdsWriteJob extends WriteJob {
             // these will throw IllegalArg exceptions
             schema.findField(msg.getIdField());
             //final BigIntVector nodeIdVector = (BigIntVector) arrowBatch.getVector(msg.getIdField());
-            final ArrowBatch.Neo4jArrowVector nodeIdVector = arrowBatch.getVector(msg.getIdField());
+            final ArrowBatch.BatchedVector nodeIdVector = arrowBatch.getVector(msg.getIdField());
 
             schema.findField(msg.getLabelsField());
             //final ListVector labelsVector = (ListVector) arrowBatch.getVector(msg.getLabelsField());
-            final ArrowBatch.Neo4jArrowVector labelsVector = arrowBatch.getVector(msg.getLabelsField());
+            final ArrowBatch.BatchedVector labelsVector = arrowBatch.getVector(msg.getLabelsField());
 
             // This is ugly
             final Map<NodeLabel, Map<String, ArrowNodeProperties>> labelToPropMap = new ConcurrentHashMap<>();
@@ -164,13 +162,15 @@ public class GdsWriteJob extends WriteJob {
 
             // We need our own style of NodeMapping do deal with the fact we manage the node ids
             final NodeMapping nodeMapping = new NodeMapping() {
+                @Override
+                public NodeMapping withFilteredLabels(Collection<NodeLabel> nodeLabels, int concurrency) {
+                    // TODO: add in filtered label support
+                    throw new UnsupportedOperationException("sorry...I haven't implemented filtered label support yet! -dv");
+                }
 
                 @Override
                 public Set<NodeLabel> nodeLabels(long nodeId) {
-                    if (labelsVector.getLabels((int) nodeId) == null)
-                        return Set.of();
-
-                    return labelsVector.getLabels((int) nodeId).stream()
+                    return labelsVector.getLabels(nodeId).stream()
                             .map(Object::toString)
                             .map(NodeLabel::of)
                             .collect(Collectors.toUnmodifiableSet());
@@ -193,6 +193,7 @@ public class GdsWriteJob extends WriteJob {
 
                 @Override
                 public Collection<PrimitiveLongIterable> batchIterables(long batchSize) {
+                    logger.info("generating iterable batches of size {}", batchSize);
                     final List<PrimitiveLongIterable> iterables = new ArrayList<>();
                     for (long l = 0; l < rowCount; l += batchSize) {
                         long start = l;
@@ -215,21 +216,38 @@ public class GdsWriteJob extends WriteJob {
 
                 @Override
                 public long toMappedNodeId(long nodeId) {
-                    return idMap.getOrDefault(nodeId, (int) NOT_FOUND);
+                    if (nodeId < 0) {
+                        throw new IllegalArgumentException("nodeId < 0?!?");
+                    }
+                    final Integer mappedId = idMap.get(nodeId);
+                    if (mappedId == null) {
+                        logger.warn("attempted to translate original id {}, but have no mapping!", nodeId);
+                        return NOT_FOUND;
+                    }
+                    return mappedId.longValue();
                 }
 
                 @Override
                 public long toOriginalNodeId(long nodeId) {
-                    return nodeIdVector.getNodeId((int) nodeId);
+                    if (nodeId < 0) {
+                        throw new IllegalArgumentException("nodeId < 0?!?");
+                    }
+                    return nodeIdVector.getNodeId(nodeId);
                 }
 
                 @Override
                 public long toRootNodeId(long nodeId) {
+                    if (nodeId < 0) {
+                        throw new IllegalArgumentException("nodeId < 0?!?");
+                    }
                     return nodeId;
                 }
 
                 @Override
                 public boolean contains(long nodeId) {
+                    if (nodeId < 0) {
+                        throw new IllegalArgumentException("nodeId < 0?!?");
+                    }
                     return (nodeId < rowCount);
                 }
 
@@ -246,16 +264,19 @@ public class GdsWriteJob extends WriteJob {
                 @Override
                 public long highestNeoId() {
                     // UNSUPPORTED
+                    logger.info("someone wants the highest neo id?");
                     return globalMaxId.get();
                 }
 
                 @Override
                 public void forEachNode(LongPredicate consumer) {
+                    logger.info("walking nodes (0 -> {}) via LongPredicate...", rowCount);
                     LongStream.range(0, rowCount).forEach(consumer::test);
                 }
 
                 @Override
                 public PrimitiveLongIterator nodeIterator() {
+                    logger.info("someone wants a nodeIterator!");
                     return new PrimitiveLongIterator() {
                         final private Iterator<Long> iterator = LongStream.range(0, rowCount).iterator();
                         @Override
@@ -299,7 +320,7 @@ public class GdsWriteJob extends WriteJob {
                             }), AllocationTracker.empty());
 
             final GraphStore store = CSRGraphStoreUtil.createFromGraph(
-                    dbId, hugeGraph, "REL", Optional.empty(),
+                    dbId, hugeGraph, "__empty__", Optional.empty(),
                     Config.arrowMaxPartitions, AllocationTracker.create());
 
             // Try wiring in our arbitrary node properties.
@@ -323,6 +344,7 @@ public class GdsWriteJob extends WriteJob {
                 @Override
                 public <R> R accept(Cases<R> visitor) {
                     // TODO: what the heck is this Cases<R> stuff?!
+                    logger.info("accept called with visitor: {}", visitor);
                     return null;
                 }
 
@@ -354,6 +376,7 @@ public class GdsWriteJob extends WriteJob {
 
             GraphStoreCatalog.set(config, store);
 
+            //store.deleteRelationships(RelationshipType.of("__empty__"));
             return true;
         });
     }
@@ -366,9 +389,9 @@ public class GdsWriteJob extends WriteJob {
         final NamedDatabaseId dbId = api.databaseId();
 
         return CompletableFuture.supplyAsync(() -> {
-            final ArrowBatch root;
+            final ArrowBatch batch;
             try {
-                root = getStreamCompletion().get(15, TimeUnit.MINUTES);    // XXX
+                batch = getStreamCompletion().get(15, TimeUnit.MINUTES);    // XXX
             } catch (InterruptedException | ExecutionException | TimeoutException e) {
                 e.printStackTrace();
                 return false;
@@ -377,48 +400,47 @@ public class GdsWriteJob extends WriteJob {
             final GraphStoreWithConfig storeWithConfig = GraphStoreCatalog.get(CatalogRequest.of(username, dbId), msg.getGraphName());
             assert(storeWithConfig != null);
 
-/*
-            final BigIntVector sourceIdVector = (BigIntVector) root.getVector(msg.getSourceField());
+
+            final ArrowBatch.BatchedVector sourceIdVector = batch.getVector(msg.getSourceField());
             assert(sourceIdVector != null);
-            final BigIntVector targetIdVector = (BigIntVector) root.getVector(msg.getTargetField());
+            final ArrowBatch.BatchedVector targetIdVector = batch.getVector(msg.getTargetField());
             assert(targetIdVector != null);
-            final VarCharVector typesVector = (VarCharVector) root.getVector(msg.getTypeField());
+            final ArrowBatch.BatchedVector typesVector = batch.getVector(msg.getTypeField());
             assert(typesVector != null);
-            */
-            final BigIntVector sourceIdVector = null;
-            final BigIntVector targetIdVector = null;
-            final VarCharVector typesVector = null;
 
             // Ugliness abounds...
             // Edge maps, keyed by Type. Each Type has it's own mapping of GDS Node Id to a Queue of target GDS node Ids
             // { type: { nodeVectorId: [ offsets into node vector ] } }
-            final Map<String, Map<Integer, Queue<Integer>>> sourceTypeIdMap = new ConcurrentHashMap<>();
+            final Map<String, Map<Integer, List<Integer>>> sourceTypeIdMap = new ConcurrentHashMap<>();
             final Map<String, Integer> types = new ConcurrentHashMap<>();
             final Map<String, Map<Integer, Integer>> inDegreeMap = new ConcurrentHashMap<>();
-
 
             // Use our nodeMapping to deal with the fact we get "original" ids in the target vector and don't know the
             // "internal" GDS ids from our node vectors
             final NodeMapping nodeMapping = storeWithConfig.graphStore().nodes();
 
-            logger.info("analyzing {} relationships to build type->rel mappings", root.getRowCount());
-            IntStream.range(0, root.getRowCount())
-                    .parallel() // XXX need to check if we solved the concurrency bug
+            logger.info("analyzing {} relationships to build type->rel mappings", batch.getRowCount());
+            IntStream.range(0, batch.getRowCount())
+                    //.parallel() // XXX need to check if we solved the concurrency bug
                     .forEach(idx -> {
-                        final long originalSourceId = sourceIdVector.get(idx);
+                        if (idx % 100_000 == 0) {
+                            logger.info(String.format("processing relationship index %,d", idx));
+                        }
+                        final long originalSourceId = sourceIdVector.getNodeId(idx);
                         final int sourceId = (int) nodeMapping.toMappedNodeId(originalSourceId); // XXX cast
-                        final long originalTargetId = targetIdVector.get(idx);
-                        final String type = new String(typesVector.get(idx), StandardCharsets.UTF_8);
+                        final long originalTargetId = targetIdVector.getNodeId(idx);
+                        final int targetId = (int) nodeMapping.toMappedNodeId(originalTargetId); // XXX cast
+                        final String type = typesVector.getType(idx);
 
-                        logger.trace("recording {} -[{}]> {}", originalSourceId, type, originalTargetId);
+                        logger.info("recording idx {}: ({} @ {})-[{}]->({})", idx, originalSourceId, sourceId, type, originalTargetId);
 
                         types.compute(type, (key, cnt) -> (cnt == null) ? 1 : cnt + 1);
 
                         sourceTypeIdMap.compute(type, (k, v) -> {
-                            final Map<Integer, Queue<Integer>> sourceIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
+                            final Map<Integer, List<Integer>> sourceIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
                             sourceIdMap.compute(sourceId, (k2, v2) -> {
-                                final Queue<Integer> targetList = (v2 == null) ? new ConcurrentLinkedQueue<>() : v2;
-                                targetList.add((int) nodeMapping.toMappedNodeId(originalTargetId)); // XXX cast
+                                final List<Integer> targetList = (v2 == null) ? new ArrayList<>() : v2;
+                                    targetList.add(targetId);
                                 return targetList;
                             });
                             return sourceIdMap;
@@ -435,16 +457,28 @@ public class GdsWriteJob extends WriteJob {
 
             // TODO: properties
 
+            // Sort our lists
+            sourceTypeIdMap.forEach((type, map) -> {
+                logger.info("sorting adjacency lists for type {}", type);
+                map.keySet().parallelStream()
+                        .forEach(key -> {
+                            final List<Integer> list = map.get(key);
+                            map.put(key, list.stream().sorted().collect(Collectors.toList()));
+                        });
+            });
+
             types.forEach((type, cnt) -> {
                 // TODO: wire in maps
                 final Relationships rels = Relationships.of(cnt, Orientation.NATURAL, true,
-                        new ArrowAdjacencyList(sourceTypeIdMap.get(type), inDegreeMap.get(type), (unused) -> root.close()));
+                        new ArrowAdjacencyList(sourceTypeIdMap.get(type), inDegreeMap.get(type), (unused) -> batch.close()));
                 logger.info("adding relationship type {} to graph {} (type edge size: {})", type,
                         storeWithConfig.config().graphName(), sourceTypeIdMap.get(type).size());
                 storeWithConfig.graphStore()
                         .addRelationshipType(RelationshipType.of(type), Optional.empty(), Optional.empty(), rels);
             });
 
+            logger.info("finished relationship write, graph has the following relationships: {}",
+                    storeWithConfig.graphStore().relationshipTypes());
             return true;
         });
     }

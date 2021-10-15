@@ -2,18 +2,17 @@ package org.neo4j.arrow;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
-import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
-import org.apache.arrow.vector.util.VectorBatchAppender;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -21,6 +20,9 @@ import java.util.stream.IntStream;
 
 /**
  * Container of Arrow vectors and metadata, schema, etc.
+ * <p>
+ *     This is a mess right now :-(
+ * </p>
  */
 public class ArrowBatch implements AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowBatch.class);
@@ -58,7 +60,7 @@ public class ArrowBatch implements AutoCloseable {
 
         final List<FieldVector> incoming = root.getFieldVectors();
         final int cols = incoming.size();
-        logger.info("appending root with {} rows, {} vectors", root.getRowCount(), cols);
+        logger.debug("appending root with {} rows, {} vectors", root.getRowCount(), cols);
         IntStream.range(0, cols)
                 .forEach(idx -> {
                     final FieldVector fv = incoming.get(idx);
@@ -69,18 +71,19 @@ public class ArrowBatch implements AutoCloseable {
                     final ValueVector to = pair.getTo();
                     to.setValueCount(valueCount);
                     vectorSpace.get(idx).add(to);
+                    fv.close();
                 });
 
         rowCount += root.getRowCount();
-        logger.info("new rowcount {}", rowCount);
+        logger.debug("new rowcount {}", rowCount);
     }
 
-    public static class Neo4jArrowVector {
+    public static class BatchedVector {
         private final List<ValueVector> vectors;
         private final int batchSize;
         private final String name;
 
-        private Neo4jArrowVector(String name, List<ValueVector> vectors, int batchSize) {
+        private BatchedVector(String name, List<ValueVector> vectors, int batchSize) {
             this.name = name;
             this.vectors = vectors;
             this.batchSize = batchSize;
@@ -125,38 +128,13 @@ public class ArrowBatch implements AutoCloseable {
             }
         }
 
-        private Object translateIndexInList(long index) {
-            // assumption is our batches only become "short" at the end
-            int column = (int) (index / batchSize);
-            int offset = (int) (index % batchSize);
-
-            try {
-                ValueVector vector = vectors.get(column);
-                assert(vector instanceof ListVector);
-
-                if (vector.getValueCount() > offset) {
-                    // easy peasy
-                    return ((ListVector)vector).getDataVector().getObject(offset);
-                }
-
-                while (vector.getValueCount() <= offset) {
-                    // we need to advance out pointers and offsets :-(
-                    column++;
-                    offset = offset - vector.getValueCount();
-                    vector = vectors.get(column);
-                }
-                return ((ListVector)vector).getDataVector().getObject(offset);
-            } catch (Exception e) {
-                logger.error(String.format("failed to get index %d (offset %d, column %d, batchSize %d)", index, offset, column, batchSize), e);
-                return null;
-            }
-        }
-
         public long getNodeId(long index) {
             final Long nodeId = (Long) translateIndex(index);
             if (nodeId == null) {
-                logger.warn("failed to get nodeId at index {}", index);
-                return -1;
+                throw new RuntimeException(String.format("cant get nodeid for index %d", index));
+            }
+            if (nodeId < 0) {
+                throw new RuntimeException("nodeId < 0?!?!");
             }
             return nodeId;
         }
@@ -168,6 +146,16 @@ public class ArrowBatch implements AutoCloseable {
                 return List.of();
             }
             return list;
+        }
+
+        public String getType(long index) {
+            // XXX Assumption for now is we're dealing with a VarCharVector
+            final Text type = (Text) translateIndex(index);
+            if (type == null) {
+                logger.warn("failed to find type string at index {}, index", index);
+                return "";
+            }
+            return type.toString();
         }
 
         public Object getObject(long index) {
@@ -198,20 +186,16 @@ public class ArrowBatch implements AutoCloseable {
             }
             return Optional.empty();
         }
-
-        public Types.MinorType getMinorType() {
-            return vectors.get(0).getMinorType();
-        }
     }
 
-    public Neo4jArrowVector getVector(int index) {
+    public BatchedVector getVector(int index) {
         if (index < 0 || index >= fieldNames.length)
             throw new RuntimeException("index out of range");
 
-        return new Neo4jArrowVector(fieldNames[index], vectorSpace.get(index), batchSize);
+        return new BatchedVector(fieldNames[index], vectorSpace.get(index), batchSize);
     }
 
-    public Neo4jArrowVector getVector(String name) {
+    public BatchedVector getVector(String name) {
         logger.info("...finding vector for name {}", name);
         int index = 0;
         for ( ; index<fieldNames.length; index++) {
@@ -221,10 +205,10 @@ public class ArrowBatch implements AutoCloseable {
         if (index == fieldNames.length)
             throw new RuntimeException(String.format("name %s not found in arrow batch", name));
 
-        return new Neo4jArrowVector(name, vectorSpace.get(index), batchSize);
+        return new BatchedVector(name, vectorSpace.get(index), batchSize);
     }
 
-    public List<Neo4jArrowVector> getFieldVectors() {
+    public List<BatchedVector> getFieldVectors() {
         return IntStream.range(0, fieldNames.length)
                 .mapToObj(this::getVector)
                 .collect(Collectors.toList());
