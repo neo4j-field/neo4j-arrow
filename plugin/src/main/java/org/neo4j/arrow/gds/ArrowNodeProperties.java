@@ -2,6 +2,7 @@ package org.neo4j.arrow.gds;
 
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
+import org.apache.arrow.vector.complex.ListVector;
 import org.neo4j.arrow.ArrowBatch;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.api.NodeProperties;
@@ -43,7 +44,8 @@ public class ArrowNodeProperties implements NodeProperties {
             this.numberReader = (id) -> (Double) vector.getObject(id);
             this.arrayReader = (unused) -> null;
 
-        } else if (clazz.isAssignableFrom(FixedSizeListVector.class)) {
+        } else if (clazz.isAssignableFrom(FixedSizeListVector.class) || clazz.isAssignableFrom(ListVector.class)) {
+            // XXX this part is a mess...we need a better approach to types to avoid all the boxing/unboxing
             this.numberReader = (unused) -> -1L;
             final Class<?> dataClass = vector.getDataClass().get(); // XXX
 
