@@ -454,7 +454,7 @@ public class GdsWriteJob extends WriteJob {
                         sourceTypeIdMap.compute(type, (k, v) -> {
                             final Map<Integer, List<Integer>> sourceIdMap = (v == null) ? new ConcurrentHashMap<>() : v;
                             sourceIdMap.compute(sourceId, (k2, v2) -> {
-                                final List<Integer> targetList = (v2 == null) ? new ArrayList<>() : v2;
+                                final List<Integer> targetList = (v2 == null) ? new Vector<>() : v2;
                                     targetList.add(targetId);
                                 return targetList;
                             });
