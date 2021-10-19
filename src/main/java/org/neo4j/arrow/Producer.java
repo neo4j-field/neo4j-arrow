@@ -3,6 +3,7 @@ package org.neo4j.arrow;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
@@ -16,10 +17,7 @@ import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
-import org.apache.arrow.vector.util.VectorBatchAppender;
-import org.apache.arrow.vector.util.VectorSchemaRootAppender;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
@@ -55,7 +53,7 @@ public class Producer implements FlightProducer, AutoCloseable {
     final Location location;
     final BufferAllocator allocator;
 
-    final Queue<AutoCloseable> closables = new ConcurrentLinkedQueue<>();
+    final Queue<AutoCloseable> closeable = new ConcurrentLinkedQueue<>();
 
     /* Holds all known current streams based on their tickets */
     final protected Map<Ticket, FlightInfo> flightMap = new ConcurrentHashMap<>();
@@ -427,8 +425,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 listener.error(CallStatus.INTERNAL.withDescription("unexpected state").toRuntimeException());
                 return;
             }
-            logger.info("waiting up to 15 mins for flushing to finish...");
-            flushJob.get(15, TimeUnit.MINUTES);
+            logger.info("waiting up to {} seconds for flushing to finish...", Config.arrowFlushTimeout);
+            flushJob.get(Config.arrowFlushTimeout, TimeUnit.SECONDS);
             logger.info("flushing complete");
 
             // Close the allocators for each partition
@@ -633,9 +631,10 @@ public class Producer implements FlightProducer, AutoCloseable {
                 // Consume the entire stream into memory
                 long cnt = 0;
                 while (flightStream.next()) {
-                    logger.debug("consuming batch {} of {} rows", cnt, streamRoot.getRowCount());
+                    logger.info("consuming batch {} of {} rows", cnt, streamRoot.getRowCount());
                     arrowBatch.appendRoot(streamRoot);
                     ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
+                    streamRoot.clear();
                     cnt++;
                 }
                 logger.info("consumed {} batches", cnt);
@@ -658,8 +657,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 }
 
                 job.onComplete(arrowBatch); // TODO!!!
-
-                closables.add(arrowBatch);
+                closeable.add(arrowBatch);
             } catch (Exception e) {
                 logger.error("error during batch unloading", e);
                 ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());
@@ -724,7 +722,7 @@ public class Producer implements FlightProducer, AutoCloseable {
         for (Job job : jobMap.values()) {
             job.close();
         }
-        AutoCloseables.close(closables);
+        AutoCloseables.close(closeable);
         AutoCloseables.close(allocator);
     }
 }

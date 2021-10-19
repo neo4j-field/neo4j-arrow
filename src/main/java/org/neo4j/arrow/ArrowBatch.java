@@ -1,6 +1,7 @@
 package org.neo4j.arrow;
 
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.ValueVector;
@@ -12,7 +13,9 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -48,37 +51,36 @@ public class ArrowBatch implements AutoCloseable {
                     vectorSpace.add(new ArrayList<>());
                     logger.info("added {} to vectorspace", fieldName);
                 });
-        rowCount = 0;
     }
 
     public void appendRoot(VectorSchemaRoot root) {
         // TODO: validate schema option?
-        if (maxBatchSize > 0 && root.getRowCount() > maxBatchSize) {
-            logger.error("maxBatchSize: {}, root row count: {}", maxBatchSize, root.getRowCount());
+        final int rows = root.getRowCount();
+
+        if (maxBatchSize > 0 && rows > maxBatchSize) {
+            logger.error("maxBatchSize: {}, root row count: {}", maxBatchSize, rows);
             throw new RuntimeException("BOOP BOOP BOOP!");
         }
-        maxBatchSize = Math.max(maxBatchSize, root.getRowCount());
-
+        maxBatchSize = Math.max(maxBatchSize, rows);
 
         final List<FieldVector> incoming = root.getFieldVectors();
         final int cols = incoming.size();
-        logger.trace("appending root with {} rows, {} vectors", root.getRowCount(), cols);
+        logger.debug("appending root with {} rows, {} vectors", rows, cols);
         IntStream.range(0, cols)
                 .forEach(idx -> {
-                    final FieldVector fv = incoming.get(idx);
-                    logger.trace("fv: {}", fv);
-                    final int valueCount = fv.getValueCount();
-
-                    final TransferPair pair = fv.getTransferPair(allocator);
-                    pair.transfer();
-                    final ValueVector to = pair.getTo();
-                    to.setValueCount(valueCount);
-                    vectorSpace.get(idx).add(to);
-                    fv.close();
+                    try (final FieldVector fv = incoming.get(idx)) {
+                        final TransferPair pair = fv.getTransferPair(allocator);
+                        pair.transfer();
+                        final ValueVector to = pair.getTo();
+                        vectorSpace.get(idx).add(to);
+                    } catch (Exception e) {
+                        logger.error("Exception caught while transferring field vector", e);
+                        throw new RuntimeException(e);
+                    }
                 });
 
-        rowCount += root.getRowCount();
-        logger.trace("new rowcount {}", rowCount);
+        rowCount += rows;
+        logger.debug("new rowcount {}", rowCount);
     }
 
     public static class BatchedVector {

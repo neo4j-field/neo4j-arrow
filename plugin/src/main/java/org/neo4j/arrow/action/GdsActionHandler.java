@@ -2,7 +2,6 @@ package org.neo4j.arrow.action;
 
 import org.apache.arrow.flight.*;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
-import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
@@ -79,7 +78,7 @@ public class GdsActionHandler implements ActionHandler {
                 } catch (IOException e) {
                     return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription("invalid gds message"));
                 }
-                return handleGdsWriteAction(producer, username, (GdsWriteNodeMessage) msg);
+                return handleGdsWriteAction(producer, username, msg);
             case RELS_WRITE_ACTION:
                 try {
                     msg = GdsWriteRelsMessage.deserialize(action.getBody());

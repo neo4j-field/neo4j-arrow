@@ -1,6 +1,9 @@
 package org.neo4j.arrow.gds;
 
-import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.BigIntVector;
+import org.apache.arrow.vector.Float4Vector;
+import org.apache.arrow.vector.Float8Vector;
+import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.neo4j.arrow.ArrowBatch;
@@ -10,7 +13,10 @@ import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.values.storable.Value;
 import org.neo4j.values.storable.Values;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.OptionalDouble;
+import java.util.OptionalLong;
 import java.util.function.Function;
 
 public class ArrowNodeProperties implements NodeProperties {

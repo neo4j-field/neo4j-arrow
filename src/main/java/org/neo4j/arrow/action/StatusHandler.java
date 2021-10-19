@@ -15,7 +15,7 @@ import java.util.List;
  * Report on the status of active, completed, or pending Jobs
  */
 public class StatusHandler implements ActionHandler {
-    private static Logger logger = LoggerFactory.getLogger(StatusHandler.class);
+    private static final Logger logger = LoggerFactory.getLogger(StatusHandler.class);
 
     public static final String STATUS_ACTION = "jobStatus";
 

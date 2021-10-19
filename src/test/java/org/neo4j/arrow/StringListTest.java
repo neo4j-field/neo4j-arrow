@@ -1,8 +1,6 @@
 package org.neo4j.arrow;
 
-import org.apache.arrow.memory.ArrowBuf;
-import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.memory.*;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
@@ -149,6 +147,214 @@ public class StringListTest {
                 loader.load(batch);
             }
             vector.close();
+        }
+    }
+
+    @Test
+    public void testMemoryUsage() {
+        try (BufferAllocator allocator = new RootAllocator(1 << 20)) {
+            try (UInt4Vector vector = new UInt4Vector("test", allocator);
+                UInt4Vector source = new UInt4Vector("source", allocator)) {
+
+                source.allocateNew(64);
+                for (int i=0; i<64; i++) {
+                    source.set(i, i);
+                }
+                source.setValueCount(64);
+                System.out.printf("source capacity: %,d\n", source.getValueCapacity());
+                System.out.printf("vector capacity: %,d\n", vector.getValueCapacity());
+
+                System.out.printf("source valcount: %,d\n", source.getValueCount());
+                System.out.printf("vector valcount: %,d\n", vector.getValueCount());
+
+                System.out.printf("source buf size: %,d\n", source.getBufferSize());
+                System.out.printf("vector buf size: %,d\n", vector.getBufferSize());
+
+                System.out.printf("allocator: %,d\n", allocator.getAllocatedMemory());
+
+                source.transferTo(vector);
+                System.out.println("------xfer ------");
+
+                System.out.printf("source capacity: %,d\n", source.getValueCapacity());
+                System.out.printf("vector capacity: %,d\n", vector.getValueCapacity());
+
+                System.out.printf("source valcount: %,d\n", source.getValueCount());
+                System.out.printf("vector valcount: %,d\n", vector.getValueCount());
+
+                System.out.printf("source buf size: %,d\n", source.getBufferSize());
+                System.out.printf("vector buf size: %,d\n", vector.getBufferSize());
+
+                System.out.printf("allocator: %,d\n", allocator.getAllocatedMemory());
+
+                System.out.println("------close? ------");
+                vector.close();
+
+                System.out.printf("source capacity: %,d\n", source.getValueCapacity());
+                System.out.printf("vector capacity: %,d\n", vector.getValueCapacity());
+
+                System.out.printf("source valcount: %,d\n", source.getValueCount());
+                System.out.printf("vector valcount: %,d\n", vector.getValueCount());
+
+                System.out.printf("source buf size: %,d\n", source.getBufferSize());
+                System.out.printf("vector buf size: %,d\n", vector.getBufferSize());
+                System.out.printf("allocator: %,d\n", allocator.getAllocatedMemory());
+
+            }
+        }
+    }
+
+    @Test
+    public void testVectorSchemaRootMemory() {
+
+        AllocationListener listener = new AllocationListener() {
+
+            @Override
+            public void onAllocation(long size) {
+                System.out.println("ALLOC(" + size + ")");
+            }
+
+            @Override
+            public void onRelease(long size) {
+                System.out.println("FREE(" + size + ")");
+            }
+        };
+
+        try (BufferAllocator allocator = new RootAllocator(listener, 1 << 20)) {
+            Field field = new Field("test",
+                    FieldType.nullable(new ArrowType.Int(32, true)), null);
+            Schema schema = new Schema(List.of(field));
+
+            FieldVector fv = field.createVector(allocator);
+            fv.setInitialCapacity(12);
+            fv.allocateNew();
+            for (int i=0; i<12; i++) {
+                ((IntVector) fv).set(i, i);
+            }
+            fv.setValueCount(12);
+            System.out.println(fv);
+            System.out.printf("fv: %,d\n", fv.getBufferSize());
+
+            try (VectorSchemaRoot root = VectorSchemaRoot.of(fv);
+                VectorSchemaRoot sink = VectorSchemaRoot.create(schema, allocator)) {
+                VectorLoader loader = new VectorLoader(sink);
+                VectorUnloader unloader = new VectorUnloader(root);
+
+                System.out.printf("root: %,d\n", root.getRowCount());
+                System.out.printf("sink: %,d\n", sink.getRowCount());
+                System.out.printf("fv: %,d\n", fv.getBufferSize());
+                System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                try (ArrowRecordBatch batch = unloader.getRecordBatch()) {
+                    System.out.println("batch : " + batch);
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv: %,d\n", fv.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                    loader.load(batch);
+                    System.out.println("loaded...");
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv: %,d\n", fv.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                    root.clear();
+
+                    System.out.println("cleared root...");
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv: %,d\n", fv.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                    sink.clear();
+
+                    System.out.println("cleared sink...");
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv: %,d\n", fv.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+                }
+
+                fv.close();
+                System.out.println("fv closed...");
+                System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+
+                FieldVector fv2 = field.createVector(allocator);
+                fv2.setInitialCapacity(12);
+                fv2.allocateNew();
+                for (int i=0; i<12; i++) {
+                    ((IntVector) fv2).set(i, i);
+                }
+                fv2.setValueCount(12);
+                System.out.println(fv2);
+                System.out.printf("fv2: %,d\n", fv2.getBufferSize());
+
+                ArrowRecordBatch batch = new ArrowRecordBatch(12,
+                        List.of(new ArrowFieldNode(12, 0)),
+                        List.of(fv2.getBuffers(false)));
+                VectorLoader rootLoader = new VectorLoader(root);
+                rootLoader.load(batch);
+                batch.close();
+
+                System.out.println("added fv2 to root via batch...");
+
+                System.out.printf("root: %,d\n", root.getRowCount());
+                System.out.printf("sink: %,d\n", sink.getRowCount());
+                System.out.printf("fv: %,d\n", fv.getBufferSize());
+                System.out.printf("fv2 %,d\n", fv2.getBufferSize());
+                System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+                fv2.close();
+                System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                try (ArrowRecordBatch batch2 = unloader.getRecordBatch()) {
+                    System.out.println("batch : " + batch2);
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv2: %,d\n", fv2.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                    loader.load(batch2);
+                    System.out.println("loaded...");
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv2: %,d\n", fv2.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                    root.clear();
+
+                    System.out.println("cleared root...");
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv2: %,d\n", fv2.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
+                    sink.clear();
+
+                    System.out.println("cleared sink...");
+
+                    System.out.printf("root: %,d\n", root.getRowCount());
+                    System.out.printf("sink: %,d\n", sink.getRowCount());
+                    System.out.printf("fv2: %,d\n", fv2.getBufferSize());
+                    System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+                }
+
+                root.getFieldVectors().forEach(FieldVector::close);
+                sink.getFieldVectors().forEach(FieldVector::close);
+                fv.close();
+                fv2.close();
+
+            }
+
+            System.out.printf("FINAL ALLOC: %,d\n", allocator.getAllocatedMemory());
+
         }
     }
 }

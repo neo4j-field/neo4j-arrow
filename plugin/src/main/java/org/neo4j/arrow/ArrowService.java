@@ -8,7 +8,6 @@ import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.CypherActionHandler;
 import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.action.GdsMessage;
-import org.neo4j.arrow.action.GdsWriteNodeMessage;
 import org.neo4j.arrow.auth.NativeAuthValidator;
 import org.neo4j.arrow.job.GdsReadJob;
 import org.neo4j.arrow.job.GdsWriteJob;

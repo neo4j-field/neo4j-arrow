@@ -39,6 +39,12 @@ public class Config {
                     String.valueOf(Runtime.getRuntime().availableProcessors() > 2 ?
                         Runtime.getRuntime().availableProcessors() - 2 : 1))));
 
+    /** Arrow flush timeout in seconds */
+    public final static int arrowFlushTimeout = Math.abs(Integer.parseInt(
+            System.getenv().getOrDefault("ARROW_FLUSH_TIMEOUT", Integer.toString(60 * 30))
+    ));
+
+
     /** Bolt fetch size controls how many Records we PULL at a given time. Should be set lower
      * than the Arrow Batch size.
      */

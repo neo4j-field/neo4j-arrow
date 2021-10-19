@@ -1,8 +1,6 @@
 package org.neo4j.arrow.job;
 
 import org.apache.arrow.flight.CallStatus;
-import org.apache.arrow.vector.BigIntVector;
-import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.ArrowBatch;
 import org.neo4j.arrow.Config;
