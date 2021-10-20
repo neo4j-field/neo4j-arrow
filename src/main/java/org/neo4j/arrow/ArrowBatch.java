@@ -68,16 +68,20 @@ public class ArrowBatch implements AutoCloseable {
         logger.debug("appending root with {} rows, {} vectors", rows, cols);
         IntStream.range(0, cols)
                 .forEach(idx -> {
-                    try (final FieldVector fv = incoming.get(idx)) {
+                    try {
+                        final FieldVector fv = incoming.get(idx);
                         final TransferPair pair = fv.getTransferPair(allocator);
                         pair.transfer();
                         final ValueVector to = pair.getTo();
                         vectorSpace.get(idx).add(to);
+                        fv.clear();
                     } catch (Exception e) {
                         logger.error("Exception caught while transferring field vector", e);
                         throw new RuntimeException(e);
                     }
                 });
+
+        root.clear();
 
         rowCount += rows;
         logger.debug("new rowcount {}", rowCount);
@@ -251,13 +255,7 @@ public class ArrowBatch implements AutoCloseable {
 
     @Override
     public void close() {
-        try {
-            for (List<ValueVector> list : vectorSpace) {
-                AutoCloseables.close(list);
-            }
-            AutoCloseables.close(allocator);
-        } catch (Exception e) {
-            e.printStackTrace(); // TODO logger
-        }
+        vectorSpace.forEach(list -> list.forEach(ValueVector::close));
+        allocator.close();
     }
 }

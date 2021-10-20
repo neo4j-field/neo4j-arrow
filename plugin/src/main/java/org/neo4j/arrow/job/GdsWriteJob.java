@@ -131,7 +131,7 @@ public class GdsWriteJob extends WriteJob {
             final AtomicInteger cnt = new AtomicInteger(0);
             IntStream.range(0, arrowBatch.getRowCount()).parallel().forEach(idx -> {
                 int progress = cnt.incrementAndGet();
-                if (progress % 100_000 == 0) {
+                if (progress % 1_000_000 == 0) {
                     logger.info(String.format("...%,d", progress));
                 }
 
@@ -148,7 +148,11 @@ public class GdsWriteJob extends WriteJob {
 
                     // TODO: clean up
                     propertyVectors.forEach(vec -> {
-                        final ArrowNodeProperties props = new ArrowNodeProperties(vec, nodeLabel, (int) rowCount); // XXX cast
+                        final ArrowNodeProperties props = new ArrowNodeProperties(vec, nodeLabel, (int) rowCount, () -> {
+                            // XXX: We need some mechanism to free arrow bufs...so far this is a quick hack to do so
+                            // Calling clear/close multiple times should be fine, but not sure if there's a race
+                            arrowBatch.close();
+                        }); // XXX cast
                         propMap.putIfAbsent(vec.getName(), props);
                         globalPropMap.putIfAbsent(vec.getName(), props);
                     });
@@ -298,6 +302,12 @@ public class GdsWriteJob extends WriteJob {
                         }
                     };
                 }
+
+                @Override
+                public IdMapping cloneIdMapping() {
+                    // TODO: implement cloning for id maps
+                    return NodeMapping.super.cloneIdMapping();
+                }
             };
 
             final HugeGraph hugeGraph = GraphFactory.create(nodeMapping, nodeSchema, globalPropMap,
@@ -323,7 +333,6 @@ public class GdsWriteJob extends WriteJob {
                                 public void close() {
                                     // XXX hack
                                     logger.info("fauxAdjacencyList closing");
-                                    arrowBatch.close();
                                 }
                             }), AllocationTracker.empty());
 
@@ -436,7 +445,7 @@ public class GdsWriteJob extends WriteJob {
                     .parallel() // XXX need to check if we solved the concurrency bug
                     .forEach(idx -> {
                         int progress = cnt.incrementAndGet();
-                        if (progress % 100_000 == 0) {
+                        if (progress % 1_000_000 == 0) {
                             logger.info(String.format("...%,d", progress));
                         }
                         final long originalSourceId = sourceIdVector.getNodeId(idx);

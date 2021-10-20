@@ -22,6 +22,8 @@ import org.neo4j.logging.Log;
 import org.neo4j.logging.internal.LogService;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -39,6 +41,7 @@ public class ArrowService extends LifecycleAdapter {
     private App app;
     private Location location;
     private BufferAllocator allocator;
+    private CompletableFuture<Void> allocatorDebugLogger;
 
     public ArrowService(DatabaseManagementService dbms, LogService logService) {
         this.dbms = dbms;
@@ -51,6 +54,28 @@ public class ArrowService extends LifecycleAdapter {
         log.info(">>>--[Arrow]--> init()");
         allocator = new RootAllocator(Config.maxGlobalMemory);
         location = Location.forGrpcInsecure(Config.host, Config.port);
+
+        allocatorDebugLogger = CompletableFuture.runAsync(() -> {
+            // Allocator debug logging...
+            if (!System.getenv()
+                    .getOrDefault("ARROW_ALLOCATOR_HEARTBEAT", "")
+                    .isBlank()) {
+                final Executor delayedExecutor = CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS);
+                while (true) {
+                    try {
+                        CompletableFuture.runAsync(() ->
+                                        log.info("A: %,d MiB  L: %,d MiB",
+                                                (allocator.getAllocatedMemory() >> 20),
+                                                (allocator.getLimit() >> 20)),
+                                delayedExecutor)
+                                .get();
+                    } catch (InterruptedException | ExecutionException e) {
+                        // swallow the exception
+                        break;
+                    }
+                }
+            }
+        });
 
         // Use GDS's handy hooks to get our Auth Manager. Needs to be deferred as it will fail
         // if we try to get a reference here since it doesn't exist yet.

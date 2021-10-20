@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.OptionalDouble;
 import java.util.OptionalLong;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 public class ArrowNodeProperties implements NodeProperties {
@@ -31,10 +32,17 @@ public class ArrowNodeProperties implements NodeProperties {
     final Function<Integer, Number> numberReader;
     final Function<Integer, Number[]> arrayReader;
 
+    final Runnable onReleaseCallback;
+
     public ArrowNodeProperties(ArrowBatch.BatchedVector vector, NodeLabel label, int maxId) {
+        this(vector, label, maxId, () -> {});
+    }
+
+    public ArrowNodeProperties(ArrowBatch.BatchedVector vector, NodeLabel label, int maxId, Runnable onReleaseCallback) {
         this.vector = vector;
         this.label = label;
         this.maxId = maxId;
+        this.onReleaseCallback = onReleaseCallback;
 
         Class<?> clazz = vector.getBaseType();
 

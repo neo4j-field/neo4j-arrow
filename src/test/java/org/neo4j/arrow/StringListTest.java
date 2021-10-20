@@ -345,11 +345,20 @@ public class StringListTest {
                     System.out.printf("fv2: %,d\n", fv2.getBufferSize());
                     System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
                 }
+                fv.clear();
+                fv2.clear();
+
+
+                System.out.println("cleared fv{,2}");
+                System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
 
                 root.getFieldVectors().forEach(FieldVector::close);
                 sink.getFieldVectors().forEach(FieldVector::close);
-                fv.close();
-                fv2.close();
+
+
+                System.out.println("closed all via roots fv{,2}");
+                System.out.printf("alloc: %,d\n", allocator.getAllocatedMemory());
+
 
             }
 
