@@ -54,7 +54,7 @@ public class ArrowService extends LifecycleAdapter {
     public void init() throws Exception {
         super.init();
         log.info(">>>--[Arrow]--> init()");
-        allocator = new RootAllocator(Config.maxGlobalMemory);
+        allocator = new RootAllocator(Config.maxArrowMemory);
         location = Location.forGrpcInsecure(Config.host, Config.port);
 
         allocatorDebugLogger = CompletableFuture.runAsync(() -> {

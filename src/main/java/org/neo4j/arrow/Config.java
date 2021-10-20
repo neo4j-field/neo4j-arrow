@@ -1,5 +1,9 @@
 package org.neo4j.arrow;
 
+import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Stream;
+
 /**
  * Super simple environment-based config.
  * <p>
@@ -7,6 +11,29 @@ package org.neo4j.arrow;
  * </p>
  */
 public class Config {
+    public final static Long TiB = (1L << 40);
+    public final static Long GiB = (1L << 30);
+    public final static Long MiB = (1L << 20);
+    public final static Map<String, Long> scaleMap = Map.of(
+            "T", TiB, "t", TiB,
+            "G", GiB, "g", GiB,
+            "M", MiB, "m", MiB,
+            "", 1L
+    );
+
+    public static Long parseMemory(String memory) {
+        return Stream.of(memory)
+                .map(s -> {
+                    if (!Character.isDigit(s.charAt(s.length() - 1))) {
+                        return new String[] { s.substring(0, s.length() - 1), s.substring(s.length() - 1) };
+                    }
+                    return new String[] { s, "" };
+                })
+                .map(pair -> Long.parseLong(pair[0]) * scaleMap.get(pair[1]))
+                .findFirst()
+                .orElse(Long.MAX_VALUE);
+    }
+
     /** Bolt URL for accessing a remote Neo4j database */
     public final static String neo4jUrl = System.getenv().getOrDefault("NEO4J_URL", "neo4j://localhost:7687");
     /** Username for any Neo4j driver connection */
@@ -22,11 +49,12 @@ public class Config {
     public final static int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "9999"));
 
     /** Maximum native memory allowed to be allocated by the global allocator and its children */
-    public final static long maxGlobalMemory = Math.abs(Long.parseLong(
-            System.getenv().getOrDefault("MAX_MEM_GLOBAL", Long.toString(Long.MAX_VALUE))));
+    public final static long maxArrowMemory = parseMemory(
+            System.getenv().getOrDefault("MAX_MEM_GLOBAL", Long.toString(Long.MAX_VALUE)));
+
     /** Maximum native memory allowed to be allocated by a single stream */
-    public final static long maxStreamMemory = Math.abs(Long.parseLong(
-            System.getenv().getOrDefault("MAX_MEM_STREAM",  Long.toString(Long.MAX_VALUE))));
+    public final static long maxStreamMemory = parseMemory(
+            System.getenv().getOrDefault("MAX_MEM_STREAM",  Long.toString(Long.MAX_VALUE)));
 
     /** Arrow Batch Size controls the size of the transmitted vectors.*/
     public final static int arrowBatchSize = Math.abs(Integer.parseInt(

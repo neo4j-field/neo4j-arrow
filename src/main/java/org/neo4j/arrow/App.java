@@ -62,7 +62,7 @@ public class App implements AutoCloseable {
      * @param authenticator a {@link CallHeaderAuthenticator} to use for authenticating API calls
      */
     public App(BufferAllocator rootAllocator, Location location, String name, CallHeaderAuthenticator authenticator) {
-        allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Long.MAX_VALUE);
+        allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Config.maxArrowMemory);
         this.location = location;
         this.producer = new Producer(allocator, location);
         this.server = FlightServer.builder(rootAllocator, location, this.producer)

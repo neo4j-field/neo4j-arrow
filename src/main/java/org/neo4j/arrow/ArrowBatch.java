@@ -10,6 +10,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
+import org.apache.arrow.vector.util.ValueVectorUtility;
 
 import java.io.Closeable;
 import java.util.ArrayList;
@@ -69,10 +70,11 @@ public class ArrowBatch implements AutoCloseable {
                 .forEach(idx -> {
                     try {
                         final FieldVector fv = incoming.get(idx);
-                        final TransferPair pair = fv.getTransferPair(allocator);
-                        pair.transfer();
-                        final ValueVector to = pair.getTo();
-                        vectorSpace.get(idx).add(to);
+                        final FieldVector copy = fv.getField().createVector(allocator);
+                        copy.setInitialCapacity(fv.getValueCount());
+                        fv.makeTransferPair(copy).transfer();
+
+                        vectorSpace.get(idx).add(copy);
                         fv.clear();
                     } catch (Exception e) {
                         logger.error("Exception caught while transferring field vector", e);

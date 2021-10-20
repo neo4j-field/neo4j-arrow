@@ -63,7 +63,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     public Producer(BufferAllocator parentAllocator, Location location) {
         this.location = location;
-        this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer", 0, Long.MAX_VALUE);
+        this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer", 0, Config.maxArrowMemory);
 
         // Default event handlers
         handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
