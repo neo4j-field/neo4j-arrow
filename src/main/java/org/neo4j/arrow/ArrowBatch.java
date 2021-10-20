@@ -1,8 +1,6 @@
 package org.neo4j.arrow;
 
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -13,6 +11,7 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.Text;
 import org.apache.arrow.vector.util.TransferPair;
 
+import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -87,7 +86,7 @@ public class ArrowBatch implements AutoCloseable {
         logger.debug("new rowcount {}", rowCount);
     }
 
-    public static class BatchedVector {
+    public static class BatchedVector implements Closeable {
         private final List<ValueVector> vectors;
         private final int batchSize;
         private final String name;
@@ -216,6 +215,11 @@ public class ArrowBatch implements AutoCloseable {
                 return Optional.of(fv.getDataVector().getClass());
             }
             return Optional.empty();
+        }
+
+        @Override
+        public void close() {
+            vectors.forEach(ValueVector::close);
         }
     }
 

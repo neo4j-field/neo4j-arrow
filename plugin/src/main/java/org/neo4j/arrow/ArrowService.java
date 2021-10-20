@@ -26,6 +26,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * An Apache Arrow service for Neo4j, offering Arrow RPC-based access to Cypher and GDS services.
@@ -63,14 +65,22 @@ public class ArrowService extends LifecycleAdapter {
                 final Executor delayedExecutor = CompletableFuture.delayedExecutor(30, TimeUnit.SECONDS);
                 while (true) {
                     try {
-                        CompletableFuture.runAsync(() ->
-                                        log.info("A: %,d MiB  L: %,d MiB",
-                                                (allocator.getAllocatedMemory() >> 20),
-                                                (allocator.getLimit() >> 20)),
-                                delayedExecutor)
+                        CompletableFuture.runAsync(() -> {
+                            var s = Stream.concat(Stream.of(allocator), allocator.getChildAllocators()
+                                            .stream()
+                                            .flatMap(child -> Stream.concat(Stream.of(child), child.getChildAllocators()
+                                                    .stream()
+                                                    .flatMap(grandkid -> Stream.concat(Stream.of(grandkid), grandkid.getChildAllocators()
+                                                            .stream()
+                                                            .flatMap(greatgrandkid -> Stream.concat(Stream.of(greatgrandkid),
+                                                                    greatgrandkid.getChildAllocators().stream())))))))
+                                    .map(a -> String.format("%s - %,d MiB allocated, %,d MiB limit",
+                                            a.getName(), (a.getAllocatedMemory() >> 20), (a.getLimit() >> 20)));
+                            log.info(String.join("\n", s.collect(Collectors.toList())));
+                            }, delayedExecutor)
                                 .get();
                     } catch (InterruptedException | ExecutionException e) {
-                        // swallow the exception
+                        log.error(e.getMessage(), e);
                         break;
                     }
                 }
@@ -129,7 +139,6 @@ public class ArrowService extends LifecycleAdapter {
         super.shutdown();
         log.info(">>>--[Arrow]--> shutdown()");
 
-        // XXX you must close the allocator BEFORE the app!
-        AutoCloseables.close(allocator, app);
+        AutoCloseables.close(app, allocator);
     }
 }

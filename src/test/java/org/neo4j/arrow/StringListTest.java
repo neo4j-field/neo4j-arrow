@@ -1,6 +1,9 @@
 package org.neo4j.arrow;
 
-import org.apache.arrow.memory.*;
+import org.apache.arrow.memory.AllocationListener;
+import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;

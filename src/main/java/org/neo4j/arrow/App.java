@@ -99,7 +99,7 @@ public class App implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        logger.debug("closing");
+        logger.info("closing");
         AutoCloseables.close(producer, server, allocator);
     }
 }

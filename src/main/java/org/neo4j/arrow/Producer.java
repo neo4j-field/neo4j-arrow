@@ -3,7 +3,6 @@ package org.neo4j.arrow;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
@@ -631,18 +630,21 @@ public class Producer implements FlightProducer, AutoCloseable {
                 // Consume the entire stream into memory
                 long cnt = 0;
                 while (flightStream.next()) {
-                    logger.info("consuming batch {} of {} rows", cnt, streamRoot.getRowCount());
+                    if (cnt % 1_000 == 0) {
+                        logger.info(String.format("consuming @ batch %,d of %,d rows", cnt, streamRoot.getRowCount()));
+                    }
                     arrowBatch.appendRoot(streamRoot);
                     ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
                     streamRoot.clear();
                     cnt++;
                 }
-                logger.info("consumed {} batches", cnt);
+                logger.info(String.format("consumed %,d batches (%,d rows)", cnt, arrowBatch.rowCount));
 
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
 
                 // XXX check our batches
+                /*
                 for (final String name : arrowBatch.fieldNames) {
                     logger.info("building histogram for field: {}", name);
                     final ArrowBatch.BatchedVector bv = arrowBatch.getVector(name);
@@ -653,8 +655,9 @@ public class Producer implements FlightProducer, AutoCloseable {
                         final Integer bucketCnt = histo.getOrDefault(key, 0);
                         histo.put(key, bucketCnt + 1);
                     }
-                    logger.info("histo: {}", histo);
+                    logger.info("histogram: {}", histo);
                 }
+                 */
 
                 job.onComplete(arrowBatch); // TODO!!!
                 closeable.add(arrowBatch);
@@ -672,7 +675,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             ackStream.onCompleted();
 
             // At this point we should have the full stream in memory.
-            logger.info("batch rowCount={}, schema={}", arrowBatch.getRowCount(), arrowBatch.getSchema());
+            logger.debug("batch rowCount={}, schema={}", arrowBatch.getRowCount(), arrowBatch.getSchema());
         };
     }
 
@@ -718,7 +721,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        logger.debug("closing");
+        logger.info("closing");
         for (Job job : jobMap.values()) {
             job.close();
         }

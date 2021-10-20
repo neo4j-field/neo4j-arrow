@@ -9,12 +9,14 @@ import org.neo4j.arrow.action.GdsWriteNodeMessage;
 import org.neo4j.arrow.action.GdsWriteRelsMessage;
 import org.neo4j.arrow.action.Message;
 import org.neo4j.arrow.gds.ArrowAdjacencyList;
+import org.neo4j.arrow.gds.ArrowGraphStore;
 import org.neo4j.arrow.gds.ArrowNodeProperties;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
 import org.neo4j.gds.RelationshipType;
 import org.neo4j.gds.api.*;
+import org.neo4j.gds.api.schema.GraphSchema;
 import org.neo4j.gds.api.schema.NodeSchema;
 import org.neo4j.gds.api.schema.PropertySchema;
 import org.neo4j.gds.config.GraphCreateConfig;
@@ -148,11 +150,7 @@ public class GdsWriteJob extends WriteJob {
 
                     // TODO: clean up
                     propertyVectors.forEach(vec -> {
-                        final ArrowNodeProperties props = new ArrowNodeProperties(vec, nodeLabel, (int) rowCount, () -> {
-                            // XXX: We need some mechanism to free arrow bufs...so far this is a quick hack to do so
-                            // Calling clear/close multiple times should be fine, but not sure if there's a race
-                            arrowBatch.close();
-                        }); // XXX cast
+                        final ArrowNodeProperties props = new ArrowNodeProperties(vec, nodeLabel, (int) rowCount); // XXX cast
                         propMap.putIfAbsent(vec.getName(), props);
                         globalPropMap.putIfAbsent(vec.getName(), props);
                     });
@@ -391,7 +389,12 @@ public class GdsWriteJob extends WriteJob {
                 }
             };
 
-            GraphStoreCatalog.set(config, store);
+            GraphStoreCatalog.set(config, ArrowGraphStore.wrap(store, () -> {
+                nodeIdVector.close();
+                labelsVector.close();
+                arrowBatch.close();
+                logger.debug("closed nodeIdVector, labelsVector, and arrowBatch");
+            }));
 
             // nuke our grabage rel?
             store.deleteRelationships(RelationshipType.of("__empty__"));
@@ -478,6 +481,13 @@ public class GdsWriteJob extends WriteJob {
             logger.info("reltypes counts: {}", types);
 
             // TODO: relationship properties!
+            // We don't really use Arrow buffers for the adjacency data (yet?)
+            sourceIdVector.close();
+            targetIdVector.close();
+            typesVector.close();
+
+            // TODO: XXX when we implement rel props, do NOT close this here!
+            batch.close();
 
             // Sort our lists
             sourceTypeIdMap.forEach((type, map) -> {
