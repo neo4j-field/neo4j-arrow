@@ -31,18 +31,23 @@ class Neo4jArrow:
     working with large datasets, retrieving bulk data, and async batch jobs!
     """
 
-    def __init__(self, username, password, location=()):
-        token = base64.b64encode(f'{username}:{password}'.encode('utf8'))
+    def __init__(self, user, password, location=(), tls=False, verifyTls=True):
+        token = base64.b64encode(f'{user}:{password}'.encode('utf8'))
         self._options = flight.FlightCallOptions(headers=[
             (b'authorization', b'Basic ' + token)
         ])
 
-        real_location = [_DEFAULT_HOST, _DEFAULT_PORT]
+        host, port = _DEFAULT_HOST, _DEFAULT_PORT
         if len(location) > 0:
-            real_location[0] = location[0]
+            host = location[0]
         if len(location) > 1:
-            real_location[1] = location[1]
-        self._client = flight.FlightClient(tuple(real_location))
+            port = location[1]
+        if tls:
+            self._location = flight.Location.for_grpc_tls(host, port)
+        else:
+            self._location = flight.Location.for_grpc_tcp(host, port)
+        self._client = flight.FlightClient(self._location,
+                disable_server_verification=(not verifyTls))
 
     def list_actions(self):
         """List all actions available on the server."""

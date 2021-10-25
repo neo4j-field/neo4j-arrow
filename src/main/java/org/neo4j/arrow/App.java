@@ -2,6 +2,7 @@ package org.neo4j.arrow;
 
 import org.apache.arrow.flight.FlightServer;
 import org.apache.arrow.flight.Location;
+import org.apache.arrow.flight.LocationSchemes;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
 import org.apache.arrow.memory.BufferAllocator;
@@ -9,7 +10,10 @@ import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.auth.HorribleBasicAuthValidator;
 
+import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -65,12 +69,22 @@ public class App implements AutoCloseable {
         allocator = rootAllocator.newChildAllocator("neo4j-flight-server", 0, Config.maxArrowMemory);
         this.location = location;
         this.producer = new Producer(allocator, location);
-        this.server = FlightServer.builder(rootAllocator, location, this.producer)
+        final FlightServer.Builder builder = FlightServer.builder(rootAllocator, location, this.producer)
                 // XXX header auth expects basic HTTP headers in the GRPC calls
-                .headerAuthenticator(authenticator)
-                // XXX this approach for some reason didn't work for me in python :-(
-                //.authHandler(new BasicServerAuthHandler(new Neo4jBasicAuthValidator()))
-                .build();
+                .headerAuthenticator(authenticator);
+
+        if (location.getUri().getScheme().equalsIgnoreCase(LocationSchemes.GRPC_TLS)) {
+            try {
+                final File cert = new File(Config.tlsCertficate);
+                final File privateKey = new File(Config.tlsPrivateKey);
+                builder.useTls(cert, privateKey);
+            } catch (IOException e) {
+                logger.error("could not initialize TLS FlightServer", e);
+                throw new RuntimeException("failed to initialize a TLS FlightServer", e);
+            }
+        }
+
+        this.server = builder.build();
         this.name = name;
     }
 

@@ -56,7 +56,13 @@ public class ArrowService extends LifecycleAdapter {
         super.init();
         log.info(">>>--[Arrow]--> init()");
         allocator = new RootAllocator(Config.maxArrowMemory);
-        location = Location.forGrpcInsecure(Config.host, Config.port);
+
+        // Our TLS support is not yet integrated into neo4j.conf
+        if (!Config.tlsCertficate.isBlank() && !Config.tlsPrivateKey.isBlank()) {
+            location = Location.forGrpcTls(Config.host, Config.port);
+        } else {
+            location = Location.forGrpcInsecure(Config.host, Config.port);
+        }
 
         // Allocator debug logging...
         CompletableFuture.runAsync(() -> {

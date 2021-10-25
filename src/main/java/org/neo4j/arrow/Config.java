@@ -79,4 +79,7 @@ public class Config {
     public final static long boltFetchSize = Math.abs(Long.parseLong(
             System.getenv().getOrDefault("BOLT_FETCH_SIZE", Long.toString(1_000))
     ));
+
+    public final static String tlsCertficate = System.getenv().getOrDefault("ARROW_TLS_CERTIFICATE", "");
+    public final static String tlsPrivateKey = System.getenv().getOrDefault("ARROW_TLS_PRIVATE_KEY", "");
 }
