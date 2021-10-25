@@ -1,42 +1,55 @@
 package org.neo4j.arrow;
 
+import com.google.common.util.concurrent.AtomicDouble;
 import org.apache.arrow.memory.AllocationListener;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.memory.util.MemoryUtil;
 import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.complex.UnionVector;
+import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.VectorBatchAppender;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.stream.IntStream;
 
 @SuppressWarnings("all")
 public class StringListTest {
 
     @Test
     public void vectorAppendTest() {
-        try (BufferAllocator allocator = new RootAllocator(Config.maxGlobalMemory)) {
+        try (BufferAllocator allocator = new RootAllocator((5 << 20))) {
             IntVector v1 = new IntVector("v1", allocator);
 
             v1.allocateNew(1024);
 
-            for (int i=0; i<10; i++) {
+            for (int i = 0; i < 10; i++) {
                 IntVector v2 = new IntVector("v2", allocator);
                 v2.allocateNew(10);
-                for (int j=1; j<=10; j++)
-                    v2.setSafe(j-1, (i * 10) + j);
+                for (int j = 1; j <= 10; j++)
+                    v2.setSafe(j - 1, (i * 10) + j);
                 v2.setValueCount(10);
 
                 VectorBatchAppender.batchAppend(v1, v2);
@@ -69,13 +82,13 @@ public class StringListTest {
                         null)));
         Schema schema = new Schema(List.of(field));
 
-        try (BufferAllocator allocator = new RootAllocator(Config.maxGlobalMemory);
+        try (BufferAllocator allocator = new RootAllocator((5 << 20));
              VectorSchemaRoot root = VectorSchemaRoot.create(schema, allocator)) {
 
             List<ArrowBuf> buffers = new ArrayList<>();
 
             FieldVector fv = field.createVector(allocator);
-            assert(fv instanceof ListVector);
+            assert (fv instanceof ListVector);
             ListVector vector = ((ListVector) fv);
             vector.allocateNewSafe();
             UnionListWriter writer = vector.getWriter();
@@ -157,10 +170,10 @@ public class StringListTest {
     public void testMemoryUsage() {
         try (BufferAllocator allocator = new RootAllocator(1 << 20)) {
             try (UInt4Vector vector = new UInt4Vector("test", allocator);
-                UInt4Vector source = new UInt4Vector("source", allocator)) {
+                 UInt4Vector source = new UInt4Vector("source", allocator)) {
 
                 source.allocateNew(64);
-                for (int i=0; i<64; i++) {
+                for (int i = 0; i < 64; i++) {
                     source.set(i, i);
                 }
                 source.setValueCount(64);
@@ -230,7 +243,7 @@ public class StringListTest {
             FieldVector fv = field.createVector(allocator);
             fv.setInitialCapacity(12);
             fv.allocateNew();
-            for (int i=0; i<12; i++) {
+            for (int i = 0; i < 12; i++) {
                 ((IntVector) fv).set(i, i);
             }
             fv.setValueCount(12);
@@ -238,7 +251,7 @@ public class StringListTest {
             System.out.printf("fv: %,d\n", fv.getBufferSize());
 
             try (VectorSchemaRoot root = VectorSchemaRoot.of(fv);
-                VectorSchemaRoot sink = VectorSchemaRoot.create(schema, allocator)) {
+                 VectorSchemaRoot sink = VectorSchemaRoot.create(schema, allocator)) {
                 VectorLoader loader = new VectorLoader(sink);
                 VectorUnloader unloader = new VectorUnloader(root);
 
@@ -290,7 +303,7 @@ public class StringListTest {
                 FieldVector fv2 = field.createVector(allocator);
                 fv2.setInitialCapacity(12);
                 fv2.allocateNew();
-                for (int i=0; i<12; i++) {
+                for (int i = 0; i < 12; i++) {
                     ((IntVector) fv2).set(i, i);
                 }
                 fv2.setValueCount(12);
@@ -368,5 +381,97 @@ public class StringListTest {
             System.out.printf("FINAL ALLOC: %,d\n", allocator.getAllocatedMemory());
 
         }
+    }
+
+    @Test
+    public void testBufferGrowth() {
+        final int dim = 2;
+        final BufferAllocator rootAllocator = new RootAllocator(1024 * 1024 * 1024);
+        final Map<String, BiFunction<BufferAllocator, Integer, FieldVector>> fnMap = new ConcurrentHashMap<>();
+
+        fnMap.put("scalar", (allocator, capacity) -> {
+            final Field field = new Field("scalar",
+                    FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
+                    null);
+            final Float8Vector sourceVector = (Float8Vector) field.createVector(allocator);
+            sourceVector.setInitialCapacity(capacity);
+            sourceVector.allocateNew(capacity);
+            for (int i = 0; i < capacity; i++) {
+                sourceVector.set(i, Integer.valueOf(i).doubleValue());
+            }
+            sourceVector.setValueCount(capacity);
+            return sourceVector;
+        });
+
+        // populate
+        fnMap.put("fixedList256", (allocator, capacity) -> {
+            final Field field = new Field("embedding",
+                    FieldType.nullable(new ArrowType.FixedSizeList(256)),
+                    List.of(new Field("embedding-data",
+                            FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)), null)));
+            final FixedSizeListVector sourceVector = (FixedSizeListVector) field.createVector(allocator);
+            sourceVector.setInitialCapacity(capacity);
+            sourceVector.allocateNew();
+            final UnionFixedSizeListWriter writer = sourceVector.getWriter();
+            writer.start();
+            for (int i = 0; i < capacity; i++) {
+                writer.startList();
+                for (int j = 0; j < dim; j++) {
+                    writer.writeFloat8(Integer.valueOf(j).doubleValue());
+                }
+                writer.endList();
+            }
+            writer.end();
+            sourceVector.setValueCount(capacity);
+
+            return sourceVector;
+        });
+
+        fnMap.put("list256", (allocator, capacity) -> {
+            final Field field = new Field("embedding",
+                    FieldType.nullable(new ArrowType.List()),
+                    List.of(new Field("embedding-data",
+                            FieldType.nullable(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)), null)));
+            final ListVector sourceVector = (ListVector) field.createVector(allocator);
+            sourceVector.setInitialCapacity(capacity);
+            try {
+                sourceVector.allocateNew();
+            } catch (Exception e) {
+                Assertions.fail(e);
+            }
+            final UnionListWriter writer = sourceVector.getWriter();
+            writer.start();
+            for (int i = 0; i < capacity; i++) {
+                writer.startList();
+                for (int j = 0; j < dim; j++) {
+                    writer.writeFloat8(Integer.valueOf(j).doubleValue());
+                }
+                writer.endList();
+            }
+            writer.end();
+            sourceVector.setValueCount(capacity);
+
+            return sourceVector;
+        });
+
+        final Map<Double, Integer> results = new ConcurrentHashMap<>();
+        fnMap.forEach((name, fn) -> {
+            IntStream.range(128, 4100).forEach(capacity -> {
+                try (FieldVector sourceVector = fn.apply(rootAllocator, capacity)) {
+
+                    final AtomicInteger sz = new AtomicInteger(0);
+                    Arrays.stream(sourceVector.getBuffers(false)).forEach(buf -> sz.addAndGet((int) buf.capacity()));
+                    results.put(sz.get() / (1.0d * dim * capacity), capacity);
+                }
+            });
+            Double lowestRatio = results.keySet().stream().mapToDouble(Double::doubleValue).min().getAsDouble();
+            Double highestRatio = results.keySet().stream().mapToDouble(Double::doubleValue).max().getAsDouble();
+
+            System.out.printf("(%s) Lowest Ratio: %02f @ %,d capacity\n", name, lowestRatio, results.get(lowestRatio));
+            System.out.printf("(%s) Highest Ratio: %02f @ %,d capacity\n", name, highestRatio, results.get(highestRatio));
+            results.clear();
+        });
+
+        rootAllocator.close();
     }
 }

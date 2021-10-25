@@ -129,7 +129,7 @@ public class GdsWriteJob extends WriteJob {
                     .collect(Collectors.toList());
 
             // Brute force. Terrible.
-            logger.info("preprocessing {} nodes to build label->propMap mapping", arrowBatch.getRowCount());
+            logger.info(String.format("preprocessing %,d nodes to build label->propMap mapping", arrowBatch.getRowCount()));
             final AtomicInteger cnt = new AtomicInteger(0);
             IntStream.range(0, arrowBatch.getRowCount()).parallel().forEach(idx -> {
                 int progress = cnt.incrementAndGet();
@@ -396,11 +396,12 @@ public class GdsWriteJob extends WriteJob {
                 logger.debug("closed nodeIdVector, labelsVector, and arrowBatch");
             }));
 
-            // nuke our grabage rel?
+            // nuke our garbage rel?
             store.deleteRelationships(RelationshipType.of("__empty__"));
 
             logger.info("node job complete. nodes = {}, mapping size = {}", store.nodeCount(), idMap.keySet().size());
-
+            logger.info(String.format("processed ArrowBatch of size %,d MiB", (arrowBatch.estimateSize() >> 20)));
+            // logger.info("batch output: {}", arrowBatch.getAllocatorOverview());
             return true;
         });
     }

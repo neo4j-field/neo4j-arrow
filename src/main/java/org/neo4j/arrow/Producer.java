@@ -1,6 +1,7 @@
 package org.neo4j.arrow;
 
 import org.apache.arrow.flight.*;
+import org.apache.arrow.memory.AllocationListener;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
@@ -31,6 +32,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -63,7 +65,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     public Producer(BufferAllocator parentAllocator, Location location) {
         this.location = location;
-        this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer", 0, Config.maxArrowMemory);
+        this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer",0, Config.maxArrowMemory);
 
         // Default event handlers
         handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
@@ -626,16 +628,16 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Process our stream. Everything in here needs to be checked for memory leaks!
             try (final VectorSchemaRoot streamRoot = flightStream.getRoot()) {
+
                 logger.info("client putting stream with schema: {}", streamRoot.getSchema());
                 // Consume the entire stream into memory
                 long cnt = 0;
                 while (flightStream.next()) {
                     if (cnt % 1_000 == 0) {
-                        logger.info(String.format("consuming @ batch %,d of %,d rows", cnt, streamRoot.getRowCount()));
+                        logger.info(String.format("consuming @ batch %,d each with %,d rows", cnt, streamRoot.getRowCount()));
                     }
                     arrowBatch.appendRoot(streamRoot);
                     ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
-                    streamRoot.clear();
                     cnt++;
                 }
                 logger.info(String.format("consumed %,d batches (%,d rows)", cnt, arrowBatch.rowCount));
@@ -643,22 +645,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
 
-                // XXX check our batches
-                /*
-                for (final String name : arrowBatch.fieldNames) {
-                    logger.info("building histogram for field: {}", name);
-                    final ArrowBatch.BatchedVector bv = arrowBatch.getVector(name);
-                    logger.info("bv: {}", bv.getBaseType());
-                    final Map<Integer, Integer> histo = new HashMap<>();
-                    for (ValueVector vector : bv.getVectors()) {
-                        final Integer key = vector.getValueCount();
-                        final Integer bucketCnt = histo.getOrDefault(key, 0);
-                        histo.put(key, bucketCnt + 1);
-                    }
-                    logger.info("histogram: {}", histo);
-                }
-                 */
-
+                logger.info(String.format("produced ArrowBatch of est. size %,d MiB, actual size %,d MiB",
+                        (arrowBatch.estimateSize() >> 20), (arrowBatch.actualSize() >> 20)));
                 job.onComplete(arrowBatch); // TODO!!!
                 closeable.add(arrowBatch);
             } catch (Exception e) {

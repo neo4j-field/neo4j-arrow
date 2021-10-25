@@ -2,6 +2,7 @@ package org.neo4j.arrow;
 
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
+import org.apache.arrow.memory.AllocationListener;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
@@ -25,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -43,7 +45,6 @@ public class ArrowService extends LifecycleAdapter {
     private App app;
     private Location location;
     private BufferAllocator allocator;
-    private CompletableFuture<Void> allocatorDebugLogger;
 
     public ArrowService(DatabaseManagementService dbms, LogService logService) {
         this.dbms = dbms;
@@ -57,7 +58,8 @@ public class ArrowService extends LifecycleAdapter {
         allocator = new RootAllocator(Config.maxArrowMemory);
         location = Location.forGrpcInsecure(Config.host, Config.port);
 
-        allocatorDebugLogger = CompletableFuture.runAsync(() -> {
+        // Allocator debug logging...
+        CompletableFuture.runAsync(() -> {
             // Allocator debug logging...
             if (!System.getenv()
                     .getOrDefault("ARROW_ALLOCATOR_HEARTBEAT", "")
@@ -76,7 +78,7 @@ public class ArrowService extends LifecycleAdapter {
                                                                     greatgrandkid.getChildAllocators().stream())))))))
                                     .map(a -> String.format("%s - %,d MiB allocated, %,d MiB limit",
                                             a.getName(), (a.getAllocatedMemory() >> 20), (a.getLimit() >> 20)));
-                            log.info(String.join("\n", s.collect(Collectors.toList())));
+                            log.info("allocator report:\n" + String.join("\n", s.collect(Collectors.toList())));
                             }, delayedExecutor)
                                 .get();
                     } catch (InterruptedException | ExecutionException e) {

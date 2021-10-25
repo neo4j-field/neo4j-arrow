@@ -1,21 +1,36 @@
 package org.neo4j.arrow;
 
+import org.apache.arrow.memory.AllocationListener;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorLoader;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.UnionVector;
+import org.apache.arrow.vector.complex.impl.UnionListReader;
+import org.apache.arrow.vector.complex.impl.UnionListWriter;
+import org.apache.arrow.vector.complex.writer.BaseWriter;
+import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
+import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.apache.arrow.vector.types.Types;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.apache.arrow.vector.util.Text;
-import org.apache.arrow.vector.util.TransferPair;
-import org.apache.arrow.vector.util.ValueVectorUtility;
+import org.apache.arrow.vector.util.*;
+import org.checkerframework.checker.units.qual.A;
 
 import java.io.Closeable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAccumulator;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -39,8 +54,7 @@ public class ArrowBatch implements AutoCloseable {
 
     public ArrowBatch(Schema schema, BufferAllocator parentAllocator, String name) {
         this.schema = schema;
-        this.allocator = parentAllocator.newChildAllocator("arrow-batch-" + name, 0, Long.MAX_VALUE);
-
+        this.allocator = parentAllocator.newChildAllocator("arrow-batch-" + name, 0, Config.maxStreamMemory);
         final List<Field> fields = schema.getFields();
         fieldNames = new String[fields.size()];
 
@@ -63,29 +77,44 @@ public class ArrowBatch implements AutoCloseable {
         }
         maxBatchSize = Math.max(maxBatchSize, rows);
 
-        final List<FieldVector> incoming = root.getFieldVectors();
-        final int cols = incoming.size();
+        final int cols = root.getSchema().getFields().size();
         logger.debug("appending root with {} rows, {} vectors", rows, cols);
+
         IntStream.range(0, cols)
+                .parallel()
                 .forEach(idx -> {
                     try {
-                        final FieldVector fv = incoming.get(idx);
-                        final FieldVector copy = fv.getField().createVector(allocator);
-                        copy.setInitialCapacity(fv.getValueCount());
-                        fv.makeTransferPair(copy).transfer();
-
-                        vectorSpace.get(idx).add(copy);
-                        fv.clear();
+                        final FieldVector fv = root.getVector(idx);
+                        final TransferPair pair = fv.getTransferPair(allocator);
+                        pair.transfer();
+                        final ValueVector to = pair.getTo();
+                        vectorSpace.get(idx).add(to);
                     } catch (Exception e) {
                         logger.error("Exception caught while transferring field vector", e);
                         throw new RuntimeException(e);
                     }
                 });
 
-        root.clear();
-
         rowCount += rows;
-        logger.debug("new rowcount {}", rowCount);
+        logger.debug("new rowCount {}", rowCount);
+    }
+
+    public long estimateSize() {
+        // XXX not thread safe
+        return vectorSpace.stream()
+                .flatMap(Collection::stream)
+                .mapToLong(ValueVector::getBufferSize)
+                .sum();
+    }
+
+    public long actualSize() {
+        // XXX not thread safe
+        return vectorSpace.stream()
+                .flatMap(Collection::stream)
+                .map(vec -> vec.getBuffers(false))
+                .flatMap(Arrays::stream)
+                .mapToLong(ArrowBuf::capacity)
+                .sum();
     }
 
     public static class BatchedVector implements Closeable {
@@ -155,7 +184,13 @@ public class ArrowBatch implements AutoCloseable {
                 }
                 return vector.getObject((int) (index - pos));
             } catch (Exception e) {
-                logger.error(String.format("failed to get index %d (offset %d, column %d, batchSize %d)", index, offset, column, batchSize), e);
+                logger.error(String.format("failed to get index %d for %s (offset %d, column %d, batchSize %d)",
+                        index, vectors.get(0).getName(), offset, column, batchSize), e);
+                logger.trace(String.format("debug: %s",
+                        vectors.stream()
+                                .map(ValueVector::getValueCount)
+                                .map(String::valueOf)
+                                .collect(Collectors.joining(", "))));
                 return null;
             }
         }

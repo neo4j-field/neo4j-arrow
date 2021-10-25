@@ -31,7 +31,7 @@ public class Neo4jProxyServer {
         long timeout = 15;
         TimeUnit unit = TimeUnit.MINUTES;
 
-        final BufferAllocator bufferAllocator = new RootAllocator(Config.maxGlobalMemory);
+        final BufferAllocator bufferAllocator = new RootAllocator(Config.maxArrowMemory);
         final App app = new App(
                 bufferAllocator,
                 Location.forGrpcInsecure(Config.host, Config.port));
