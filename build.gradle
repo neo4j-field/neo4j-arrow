@@ -252,6 +252,7 @@ project(':plugin') {
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-params', version: rootProject.ext.jupiterVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
+                [group: 'org.neo4j.gds', name: 'proc-catalog', version: rootProject.ext.neo4j.gdsVersion],
                 project(':client'),
                 rootProject.ext.arrowFlightGrpc
         )
