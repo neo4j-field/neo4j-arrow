@@ -161,14 +161,23 @@ class Neo4jArrow:
 
     def put_stream(self, ticket, data):
         """Write a stream to the server"""
-        # no need to wait for writes
-        table = pa.table(data=data)
-        descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
-        writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)
-        writer.write_table(table, max_chunksize=8192)
-        writer.close()
+        if type(data) is not pa.lib.Table:
+            table = pa.table(data=data)
+        else:
+            table = data
+        try:
+            descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
+            writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)
+            writer.write_table(table, max_chunksize=8192)
+            writer.close()
+            # TODO: server should be telling us what the results were...shouldn't assume!
+            return table.num_rows, table.nbytes
+        except Exception as e:
+            printf("error during put_stream: {e}")
+            return 0, 0
 
     def put_stream_batches(self, ticket, results):
+        """Write a stream using a batch producer"""
         descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
         nbytes, num = 0, 0
         writer, _ = self._client.do_put(descriptor, results.schema, options=self._options)
@@ -178,4 +187,5 @@ class Neo4jArrow:
             num = num + 1
         writer.close()
         print(f"wrote {num:,} batches, {nbytes:,} bytes")
+        return (num, nbytes)
 
