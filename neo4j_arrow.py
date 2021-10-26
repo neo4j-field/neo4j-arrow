@@ -176,21 +176,20 @@ class Neo4jArrow:
             writer.write_table(table, max_chunksize=8192)
             writer.close()
             # TODO: server should be telling us what the results were...shouldn't assume!
-            return table.num_rows, table.nbytes
+            return (table.num_rows, table.nbytes)
         except Exception as e:
             printf("error during put_stream: {e}")
-            return 0, 0
+            return (0, 0)
 
     def put_stream_batches(self, ticket, results):
         """Write a stream using a batch producer"""
         descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
-        nbytes, num = 0, 0
+        num_rows, nbytes = 0, 0
         writer, _ = self._client.do_put(descriptor, results.schema, options=self._options)
         for (batch, _) in results:
             nbytes = nbytes + batch.nbytes
             writer.write_batch(batch)
-            num = num + 1
+            num_rows = num_rows + batch.num_rows
         writer.close()
-        print(f"wrote {num:,} batches, {nbytes:,} bytes")
-        return (num, nbytes)
+        return (num_rows, nbytes)
 
