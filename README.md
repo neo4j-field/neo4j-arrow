@@ -102,11 +102,12 @@ df = table.to_pandas()
 A few *IPython notebooks* are provided that demonstrate more complex
 usage of `neo4j-arrow` via PyArrow:
 
-* [./PyArrow Demo.ipynb](Basic usage and lifecycle)
-* [./live_migration_demo.ipynb](Live migration) of a graph between
+1. [Basic usage](./PyArrow%20Demo.ipynb) and lifecycle
+2. [Live migration](./live_migration_demo.ipynb) of a graph between
   disparate Neo4j instances
 
 Some code examples:
 
-* [./arrow_to_bq.py](Integration with BigQuery) showing how to relay a
+* [Integration with BigQuery](arrow_to_bq.py) showing how to relay a
   `neo4j-arrow` stream to a target BigQuery table.
+* [Trivial example](./example.py) of reading some nodes from GDS
