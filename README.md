@@ -41,7 +41,8 @@ Simply run: `$ ./gradlew plugin:shadowJar`
 You should end up with a Neo4j plugin jar in `./plugin/build/libs/`
 that you can drop into a Neo4j system.
 
-### Runtime Requirements
+
+## Plugin Operation
 
 `neo4j-arrow` should work out of the box with **Neo4j 4.3** and **GDS
 v1.7**. If you have earlier versions of either, you'll need to compile
@@ -50,7 +51,49 @@ your own jars from source.
 The `neo4j_arrow.py` PyArrow client requires **Python 3** and
 **PyArrow 5.0.0**.
 
-## The `neo4j-arrow` Lifecycle
+Any other Arrow Flight clients should use `v5.0.0` of Arrow/Arrow Flight.
+
+### Configuration
+
+All configuration for `neo4j-arrow` is performed via environment
+variables. (Currently there is no support for property-based config in
+`neo4j.conf`.) This holds true for all subprojects of `neo4j-arrow`.
+
+Available configuration options specific to the `neo4j-arrow` plugin:
+
+| Option                  | Description                                                                                                 | Default             |
+|-------------------------|-------------------------------------------------------------------------------------------------------------|---------------------|
+| `HOST`                  | Hostname or IP for `neo4j-arrow` to listen on                                                               | `"localhost"`       |
+| `PORT`                  | TCP Port for `neo4j-arrow` to listen on                                                                     | `9999`              |
+| `MAX_MEM_GLOBAL`        | Global memory limit for Arrow memory allocator                                                              | `Long.MAX_VALUE`    |
+| `MAX_MEM_STREAM`        | Per-stream memory limit                                                                                     | `Long.MAX_VALUE`    |
+| `ARROW_BATCH_SIZE`      | Max number of rows to include when sending a vector batch to a client                                       | `1000`              |
+| `ARROW_MAX_PARTITIONS`  | Max number of partitions to create when generating streams, roughly translates to # of CPU cores to utilize | `max(vcpus - 2, 1)` |
+| `ARROW_FLUSH_TIMEOUT`   | Max time (in seconds) to wait before flushing a stream to the client                                        | `1800`              |
+| `ARROW_TLS_CERTIFICATE` | Path to x.509 full-chain certifcate in PEM format                                                           | `""`                |
+| `ARROW_TLS_PRIVATE_KEY` | Path to PEM private key file                                                                                | `""`                |
+
+> See also: the `org.neo4j.arrow.Config` class.
+
+### Performance Tuning
+
+The primary knobs available for tuning for read or write performance
+is the `ARROW_BATCH_SIZE` and `ARROW_MAX_PARTITIONS` value. Given the
+partition number defaults to a value based on the host cpu core count,
+in practice this means tuning the batch size.
+
+Some general advice:
+
+- **Reads** tend to perform better with smaller batch sizes (such as the default)
+- **Writes** benefit from much larger (150-200x than the default) values.
+
+In practice, the true performance will depend heavily on the _type_ of
+vectors being created. Scalars generally outperform List-based vectors
+for multiple reasons: total buffer size and cpu instructions required
+to read/write a value.
+
+
+## The `neo4j-arrow` Protocol/Lifecycle
 
 `neo4j-arrow` uses the *Arrow Flight* RPC framework to expose
 read/write operations to Neo4j. While you can implement the protocol
@@ -97,6 +140,7 @@ table = client.stream(ticket).read_all()
 df = table.to_pandas()
 ```
 
+
 ## Some Examples
 
 A few *IPython notebooks* are provided that demonstrate more complex
@@ -111,3 +155,34 @@ Some code examples:
 * [Integration with BigQuery](arrow_to_bq.py) showing how to relay a
   `neo4j-arrow` stream to a target BigQuery table.
 * [Trivial example](./example.py) of reading some nodes from GDS
+
+
+## Known Issues or Incomplete Things
+
+Keep in mind `neo4j-arrow` is a work in progress. The following are
+areas still requiring some development cycles or help.
+
+- Cannot currently _write_ relationship properties to a GDS graph.
+  * On the todo list.
+- Cannot _read_ string properties (not counting Labels or Relationship
+  Types) from a GDS graph.
+  * GDS doesn't natively support strings and reads them from the db.
+  * This could be implemented, but may slow down streaming.
+- Only basic Cypher types are supported for _cypher jobs_ (mostly
+  scalars, Strings, and simple Lists of scalars).
+  * The cardinality of the set of types Cypher supports is _too damn
+    high_.
+  * What, you don't like numbers? :-)
+- Error handling and cleanup for failed/incomplete jobs needs work.
+- Batch sizes are not dynamically configurable or chosen. Ideally they
+  would be determined based on schema and host hardware.
+  * As we develop and utilize `neo4j-arrow` a best practice should be
+    baked in, but we're not there yet.
+- Cannot currently _write_ to the database via Cypher jobs.
+  * Requires more complex Cypher transaction jobs.
+  * Not out of the realm of possibility, but not a priority.
+- GDS _write_ jobs report completion to the client before completion
+  of server-side processing. Client's may start writing
+  _relationships_ while _nodes_ are still being post-processed,
+  resulting in a "graph not found" error.
+  * On the todo list.
