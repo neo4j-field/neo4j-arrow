@@ -186,3 +186,10 @@ areas still requiring some development cycles or help.
   _relationships_ while _nodes_ are still being post-processed,
   resulting in a "graph not found" error.
   * On the todo list.
+
+
+# Licensing & Copyright
+Like other `neo4j-labs` and `neo4j-contrib` projects, this project is
+provided under the terms of the [Apache 2.0](./LICENSE) license.
+
+All files and code are copyright 2021, Neo4j, Inc.
