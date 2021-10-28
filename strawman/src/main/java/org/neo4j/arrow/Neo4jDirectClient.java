@@ -27,6 +27,9 @@ public class Neo4jDirectClient {
             case "RANDOM":
                 cypher = "UNWIND range(1, 10000000) AS row RETURN row, [_ IN range(1, 256) | rand()] as fauxEmbedding";
                 break;
+            case "SIMPLE":
+                cypher = "UNWIND range(1, toInteger(1e7)) AS row RETURN row, range(0, 64) AS data";
+                break;
             case "CYPHER":
             default:
                 cypher = "MATCH (n) RETURN id(n) as nodeId, n.fastRp AS embedding";
