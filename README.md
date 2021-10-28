@@ -1,4 +1,4 @@
-# neo4j-arrow -- Data Science workflows 10-100x faster
+# neo4j-arrow 🏹 -- Graph Data Science Workflows _Accelerated_
 
 > “When you want to do something, do it right away. Do it when you can.
 > It’s the only way to live a life without regrets.”
@@ -6,23 +6,23 @@
 
 ![gotta-go-fast](./fast.gif)
 
-## tl;dr: neo4j-arrow in a nutshell
+## tl;dr: neo4j-arrow in a nutshell 🥜
 
 This project aims to step outside of traditional ways of integrating with Neo4j and expose things like the in-memory GDS graph projection via high-performance Arrow Flight APIs for streaming nodes, relationships, and their properties.
 
 `neo4j-arrow` has been shown to:
-* Move data out of Neo4j **20x faster** than the Neo4j Java Driver
-* Move data out of Neo4j **450x faster** than the Neo4j Python Driver
-* Facilitate live-migration of GDS graph projections, moving _50m
+* ⏩ Move data out of Neo4j **20x faster** than the Neo4j Java Driver
+* ⏩ Move data out of Neo4j **450x faster** than the Neo4j Python Driver
+* 🏎️ Facilitate live-migration of GDS graph projections, moving _50m
   nodes, 200m relationship, and 50m 256-degree feature vectors_
   between live Neo4j instances in different GCP regions in **under 15
   minutes**.
 * Provide a faster integration with *BigQuery*, extracting and loading
   _50m nodes with 256-degree feature vector properties_ in under **2
   minutes**.
-* Make you happier and more at peace.
+* 😃 Make you happier and more at peace.
 
-## Building and Deploying
+## Building and Deploying 🛠️
 
 Most users will want to use the `plugin` form of `neo4j-arrow`. The
 most recent tagged version is available on the [./releases](Releases)
@@ -42,7 +42,7 @@ You should end up with a Neo4j plugin jar in `./plugin/build/libs/`
 that you can drop into a Neo4j system.
 
 
-## Plugin Operation
+## Plugin Operation 🔌
 
 `neo4j-arrow` should work out of the box with **Neo4j 4.3** and **GDS
 v1.7**. If you have earlier versions of either, you'll need to compile
@@ -53,7 +53,7 @@ The `neo4j_arrow.py` PyArrow client requires **Python 3** and
 
 Any other Arrow Flight clients should use `v5.0.0` of Arrow/Arrow Flight.
 
-### Configuration
+### Configuration ✔️
 
 All configuration for `neo4j-arrow` is performed via environment
 variables. (Currently there is no support for property-based config in
@@ -75,7 +75,7 @@ Available configuration options specific to the `neo4j-arrow` plugin:
 
 > See also: the `org.neo4j.arrow.Config` class.
 
-### Performance Tuning
+### Performance Tuning 🔧
 
 The primary knobs available for tuning for read or write performance
 is the `ARROW_BATCH_SIZE` and `ARROW_MAX_PARTITIONS` value. Given the
@@ -93,7 +93,7 @@ for multiple reasons: total buffer size and cpu instructions required
 to read/write a value.
 
 
-## The `neo4j-arrow` Protocol/Lifecycle
+## The `neo4j-arrow` Protocol/Lifecycle 🗣️
 
 `neo4j-arrow` uses the *Arrow Flight* RPC framework to expose
 read/write operations to Neo4j. While you can implement the protocol
@@ -119,7 +119,7 @@ The general lifecycle looks like:
 In practice, the nuances of jobs, tickets, etc. are handled for you if
 you use the provided Python wrapper.
 
-### Using Python
+### Using Python 🐍
 
 Assuming you've using `neo4j_arrow.py`, a simple GDS read operation to
 request and stream computed node embeddings (for example) looks like:
@@ -141,7 +141,7 @@ df = table.to_pandas()
 ```
 
 
-## Some Examples
+## Some Examples 🧑‍🏫
 
 A few *IPython notebooks* are provided that demonstrate more complex
 usage of `neo4j-arrow` via PyArrow:
@@ -157,7 +157,7 @@ Some code examples:
 * [Trivial example](./example.py) of reading some nodes from GDS
 
 
-## Known Issues or Incomplete Things
+## Known Issues or Incomplete Things ⚠️
 
 Keep in mind `neo4j-arrow` is a work in progress. The following are
 areas still requiring some development cycles or help.
