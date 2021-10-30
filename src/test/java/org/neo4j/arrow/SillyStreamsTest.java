@@ -3,13 +3,13 @@ package org.neo4j.arrow;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.LongStream;
-import java.util.stream.Stream;
+import java.util.stream.*;
 
 public class SillyStreamsTest {
     @Disabled
@@ -56,6 +56,21 @@ public class SillyStreamsTest {
         System.out.println("sup? " + sup.get());
         Thread.sleep(1233);
         System.out.println("sup? " + sup.get());
+
+    }
+
+    @Test
+    public void testStreamExecutors() throws Exception {
+        final ThreadGroup group = new ThreadGroup("test-group");
+        group.setDaemon(true);
+
+        Executor executor = Executors.newFixedThreadPool(3, runnable -> new Thread(group, runnable));
+
+        CompletableFuture.runAsync(() -> {
+            LongStream.range(0, 33).parallel()
+                    .forEach(l -> System.out.printf("%s: %d\n", Thread.currentThread(), l));
+
+        }, executor).join();
 
     }
 }

@@ -1,5 +1,7 @@
 package org.neo4j.arrow.job;
 
+import com.google.common.hash.BloomFilter;
+import com.google.common.hash.Funnels;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
@@ -14,6 +16,10 @@ import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
+import org.neo4j.gds.core.utils.mem.AllocationTracker;
+import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
+import org.neo4j.gds.core.utils.paged.HugeCursor;
+import org.neo4j.gds.core.utils.paged.HugeObjectArray;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -103,18 +109,20 @@ public class GdsReadJob extends ReadJob {
         // XXX faux record
         onFirstRecord(SubGraphRecord.of(0L, 0L, store.nodeLabels(), "TYPE", 1L, store.nodeLabels()));
 
-        final Map<Long, List<Pair<Long, Long>>> adjacencyCache = new ConcurrentHashMap<>(); // XXX type?
+        // See if saving pre-generated adjacency lists helps.
+        final HugeObjectArray<List> cache = HugeObjectArray.newArray(List.class, graph.nodeCount(), AllocationTracker.empty());
 
         return CompletableFuture.supplyAsync(() -> {
-            final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join(); // XXX join()
             logger.info("starting node stream for gds khop job {}", jobId);
+            final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join(); // XXX join()
 
             Pair<Long, Long> result = StreamSupport.stream(spliterate(iterator, graph.nodeCount()), true)
                     .map(startNodeId -> {
-                        final List<Pair<Long, Long>> cached = adjacencyCache.get(startNodeId);
-
                         Stream<Triple<Long, Pair<Long, Long>, Long>> stream;
-                        if (cached == null) {
+
+                        List<Pair<Long, Long>> cachedList = cache.get(startNodeId); // XXX unchecked
+
+                        if (cachedList == null) {
                             final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(startNodeId));
                             stream = graph.concurrentCopy()
                                     .streamRelationships(startNodeId, Double.NaN)
@@ -125,9 +133,9 @@ public class GdsReadJob extends ReadJob {
                                         targets.add(edge);
                                         return Triple.of(startNodeId, edge, (source == startNodeId) ? target : source);
                                     })
-                                    .onClose(() -> adjacencyCache.put(startNodeId, targets));
+                                    .onClose(() -> cache.set(startNodeId, targets));
                         } else {
-                            stream = cached.stream()
+                            stream = cachedList.stream()
                                     .map(pair -> {
                                         final long source = pair.getLeft();
                                         final long target = pair.getRight();
@@ -140,8 +148,8 @@ public class GdsReadJob extends ReadJob {
                             stream = stream.flatMap(triple -> {
                                 final long next = triple.getRight();
 
-                                final List<Pair<Long, Long>> cached2 = adjacencyCache.get(next);
-                                if (cached2 == null) {
+                                List<Pair<Long, Long>> cachedList2 = cache.get(startNodeId); // XXX unchecked
+                                if (cachedList2 == null) {
                                     final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(next));
 
                                     return graph.concurrentCopy() // XXX do we need another copy?
@@ -153,9 +161,9 @@ public class GdsReadJob extends ReadJob {
                                                 targets.add(edge);
                                                 return Triple.of(startNodeId, edge, (source == next) ? target : source);
                                             })
-                                            .onClose(() -> adjacencyCache.put(next, targets));
+                                            .onClose(() -> cache.set(next, targets));
                                 } else {
-                                    return cached2.stream()
+                                    return cachedList2.stream()
                                             .map(pair -> {
                                                 final long source = pair.getLeft();
                                                 final long target = pair.getRight();
