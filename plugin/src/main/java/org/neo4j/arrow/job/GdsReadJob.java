@@ -101,7 +101,7 @@ public class GdsReadJob extends ReadJob {
         final int k = 2;
 
         // XXX faux record
-        onFirstRecord(new SubGraphRecord(0, 0, store.nodeLabels(), 1, "TYPE", 2, store.nodeLabels()));
+        onFirstRecord(SubGraphRecord.of(0L, 0L, store.nodeLabels(), "TYPE", 1L, store.nodeLabels()));
 
         final Map<Long, List<Pair<Long, Long>>> adjacencyCache = new ConcurrentHashMap<>(); // XXX type?
 
@@ -176,7 +176,7 @@ public class GdsReadJob extends ReadJob {
 
                             return SubGraphRecord.of(graph.toOriginalNodeId(origin),
                                     graph.toOriginalNodeId(source), graph.nodeLabels(source),
-                                    0L, "UNKNOWN", // XXX lame
+                                    "UNKNOWN", // XXX lame
                                     graph.toOriginalNodeId(target), graph.nodeLabels(target));
                         })
                         .peek(row -> consumer.accept(row, (int) row.get(1).asLong())) // XXX cast
