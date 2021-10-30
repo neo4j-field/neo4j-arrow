@@ -1,5 +1,6 @@
 package org.neo4j.arrow.job;
 
+import com.google.common.hash.BloomFilter;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
@@ -35,6 +36,8 @@ public class KHopJob extends ReadJob {
 
     private final CompletableFuture<Boolean> future;
     private final AtomicBoolean alreadyFailed = new AtomicBoolean(false);
+    private final BloomFilter<Long> relIdBloomFilter = BloomFilter.create(
+            (from, into) -> into.putLong(from), 1_000_000_000);
 
     /**
      * Generate a {@link Stream} of {@link Triple}s of {@link Relationship}s and
@@ -122,7 +125,7 @@ public class KHopJob extends ReadJob {
         final long[] nodeIds = LongStream.range(0, maxId).toArray();
 
         // XXX Fake result just to get things moving
-        onFirstRecord(new SubGraphRecord(0, List.of(NodeLabel.ALL_NODES), 1, "TYPE", 2, List.of(NodeLabel.ALL_NODES)));
+        //onFirstRecord(new SubGraphRecord(0, List.of(NodeLabel.ALL_NODES), 1, "TYPE", 2, List.of(NodeLabel.ALL_NODES)));
 
         this.future = CompletableFuture.supplyAsync(() -> {
             try {

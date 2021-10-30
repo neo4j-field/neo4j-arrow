@@ -1,11 +1,9 @@
 package org.neo4j.arrow.job;
 
 import org.apache.arrow.flight.CallStatus;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
-import org.neo4j.arrow.GdsNodeRecord;
-import org.neo4j.arrow.GdsRecord;
-import org.neo4j.arrow.GdsRelationshipRecord;
-import org.neo4j.arrow.RowBasedRecord;
+import org.neo4j.arrow.*;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.RelationshipType;
@@ -13,9 +11,12 @@ import org.neo4j.gds.api.Graph;
 import org.neo4j.gds.api.GraphStore;
 import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.api.nodeproperties.ValueType;
+import org.neo4j.gds.compat.Neo4jProxy;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
+import org.neo4j.gds.core.utils.mem.AllocationTracker;
+import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -60,6 +61,10 @@ public class GdsReadJob extends ReadJob {
             case relationship:
                 job = handleRelationshipsJob(msg, store);
                 break;
+            case khop:
+                job = handleKHopJob(msg, store);
+                break;
+
             default:
                 throw CallStatus.UNIMPLEMENTED.withDescription("unhandled request type").toRuntimeException();
         }
@@ -87,6 +92,74 @@ public class GdsReadJob extends ReadJob {
                 return iterator.hasNext();
             }
         }, nodeCount, 0);
+    }
+
+
+    private CompletableFuture<Boolean> handleKHopJob(GdsMessage msg, GraphStore store) {
+        final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
+        final PrimitiveLongIterator iterator = graph.nodeIterator();
+
+        // XXX faux record
+        onFirstRecord(new SubGraphRecord(0, 0, store.nodeLabels(), 1, "TYPE", 2, store.nodeLabels()));
+
+        return CompletableFuture.supplyAsync(() -> {
+            final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join(); // XXX join()
+            logger.info("starting node stream for gds khop job {}", jobId);
+
+            Pair<Long, Long> result = StreamSupport.stream(spliterate(iterator, graph.nodeCount()), true)
+                    .map(startNodeId -> {
+                        // XXX manual 2 k-hop for now...no rel type and no dedupe :-(
+                        long cnt = graph.concurrentCopy()
+                                .streamRelationships(startNodeId, Double.NaN)
+                                .map(relCursor -> {
+                                    final long source = relCursor.sourceId();
+                                    final long target = relCursor.targetId();
+
+                                    // only traverse outwards regardless of direction
+                                    return Triple.of(startNodeId, startNodeId,
+                                            (source == startNodeId) ? target : source);
+                                }).flatMap(triple -> {
+                                    final long next = triple.getRight();
+                                    return graph.concurrentCopy()
+                                            .streamRelationships(next, Double.NaN)
+                                            .map(relCursor -> {
+                                                final long source = relCursor.sourceId();
+                                                final long target = relCursor.targetId();
+                                                // only traverse outwards regardless of direction
+                                                return Triple.of(startNodeId, startNodeId,
+                                                        (source == next) ? target : source);
+                                            });
+                                }).map(triple -> {
+                                    final long source = triple.getMiddle();
+                                    final long target = triple.getRight();
+
+                                    return SubGraphRecord.of(graph.toOriginalNodeId(startNodeId),
+                                            graph.toOriginalNodeId(source), graph.nodeLabels(source),
+                                            0L, "UNKNOWN",
+                                            graph.toOriginalNodeId(target), graph.nodeLabels(target));
+                                })
+                                .map(row -> {
+                                    consumer.accept(row, (int) row.get(1).asLong()); // XXX cast
+                                    return 1L;
+                                })
+                                .reduce(0L, Long::sum);
+                        logger.trace("finished k-hop for {} ({} rows)", startNodeId, cnt);
+                        return Pair.of(1L, cnt);
+                    })
+                    .reduce(Pair.of(0L, 0L),
+                            (p1, p2) -> Pair.of(p1.getLeft() + p2.getLeft(), p1.getRight() + p2.getRight()));
+
+            logger.info("completed gds k-hop job: {} nodes, {} total rows", result.getLeft(), result.getRight());
+            return true;
+        }).handleAsync((isOk, err) -> {
+            if (isOk != null && isOk) {
+                onCompletion(() -> String.format("job %s finished OK!", jobId));
+                return true;
+            }
+            onCompletion(() -> String.format("job %s FAILED!", jobId));
+            logger.error(String.format("job %s FAILED!", jobId), err);
+            return false;
+        });
     }
 
     protected CompletableFuture<Boolean> handleRelationshipsJob(GdsMessage msg, GraphStore store) {

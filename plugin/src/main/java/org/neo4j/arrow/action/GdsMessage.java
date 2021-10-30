@@ -22,7 +22,8 @@ public class GdsMessage implements Message {
 
     public enum RequestType {
         node("node"),
-        relationship("relationship");
+        relationship("relationship"),
+        khop("khop");
 
         final String type;
 
