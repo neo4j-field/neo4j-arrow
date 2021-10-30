@@ -40,7 +40,7 @@ public class GdsReadJob extends ReadJob {
      * The supplied username is assumed to allow GDS to enforce authorization and is assumed to be
      * previously authenticated.
      *
-     * @param msg the {@link GdsMessage} to process in the job
+     * @param msg      the {@link GdsMessage} to process in the job
      * @param username an already authenticated username
      */
     public GdsReadJob(GdsMessage msg, String username) throws RuntimeException {
@@ -50,7 +50,7 @@ public class GdsReadJob extends ReadJob {
 
         // TODO: error handling for graph store retrieval
         final GraphStore store = GraphStoreCatalog.get(
-                ImmutableCatalogRequest.of(username, msg.getDbName()), msg.getGraphName())
+                        ImmutableCatalogRequest.of(username, msg.getDbName()), msg.getGraphName())
                 .graphStore();
         logger.info("got GraphStore for graph named {}", msg.getGraphName());
 
@@ -99,6 +99,9 @@ public class GdsReadJob extends ReadJob {
         final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
         final PrimitiveLongIterator iterator = graph.nodeIterator();
 
+        // XXX get from msg
+        final int k = 2;
+
         // XXX faux record
         onFirstRecord(new SubGraphRecord(0, 0, store.nodeLabels(), 1, "TYPE", 2, store.nodeLabels()));
 
@@ -109,7 +112,8 @@ public class GdsReadJob extends ReadJob {
             Pair<Long, Long> result = StreamSupport.stream(spliterate(iterator, graph.nodeCount()), true)
                     .map(startNodeId -> {
                         // XXX manual 2 k-hop for now...no rel type and no dedupe :-(
-                        long cnt = graph.concurrentCopy()
+
+                        var s = graph.concurrentCopy()
                                 .streamRelationships(startNodeId, Double.NaN)
                                 .map(relCursor -> {
                                     final long source = relCursor.sourceId();
@@ -118,31 +122,38 @@ public class GdsReadJob extends ReadJob {
                                     // only traverse outwards regardless of direction
                                     return Triple.of(startNodeId, startNodeId,
                                             (source == startNodeId) ? target : source);
-                                }).flatMap(triple -> {
-                                    final long next = triple.getRight();
-                                    return graph.concurrentCopy()
-                                            .streamRelationships(next, Double.NaN)
-                                            .map(relCursor -> {
-                                                final long source = relCursor.sourceId();
-                                                final long target = relCursor.targetId();
-                                                // only traverse outwards regardless of direction
-                                                return Triple.of(startNodeId, startNodeId,
-                                                        (source == next) ? target : source);
-                                            });
-                                }).map(triple -> {
-                                    final long source = triple.getMiddle();
-                                    final long target = triple.getRight();
+                                });
 
-                                    return SubGraphRecord.of(graph.toOriginalNodeId(startNodeId),
-                                            graph.toOriginalNodeId(source), graph.nodeLabels(source),
-                                            0L, "UNKNOWN",
-                                            graph.toOriginalNodeId(target), graph.nodeLabels(target));
-                                })
-                                .map(row -> {
-                                    consumer.accept(row, (int) row.get(1).asLong()); // XXX cast
-                                    return 1L;
-                                })
-                                .reduce(0L, Long::sum);
+                        // k-hop
+                        for (int i = 1; i < k; i++) {
+                            s = s.flatMap(triple -> {
+                                final long next = triple.getRight();
+                                return graph.concurrentCopy() // XXX do we need another copy?
+                                        .streamRelationships(next, Double.NaN)
+                                        .map(relCursor -> {
+                                            final long source = relCursor.sourceId();
+                                            final long target = relCursor.targetId();
+
+                                            // only traverse "outwards" regardless of direction
+                                            return Triple.of(startNodeId, startNodeId,
+                                                    (source == next) ? target : source);
+                                        });
+                            });
+                        }
+
+                        // Convert and consume
+                        long cnt = s.map(triple -> {
+                            final long source = triple.getMiddle();
+                            final long target = triple.getRight();
+
+                            return SubGraphRecord.of(graph.toOriginalNodeId(startNodeId),
+                                    graph.toOriginalNodeId(source), graph.nodeLabels(source),
+                                    0L, "UNKNOWN", // XXX lame
+                                    graph.toOriginalNodeId(target), graph.nodeLabels(target));
+                        })
+                        .peek(row -> consumer.accept(row, (int) row.get(1).asLong())) // XXX cast
+                        .count();
+
                         logger.trace("finished k-hop for {} ({} rows)", startNodeId, cnt);
                         return Pair.of(1L, cnt);
                     })
@@ -166,9 +177,9 @@ public class GdsReadJob extends ReadJob {
         // TODO: support both rel type and node label filtering
         final Collection<RelationshipType> relTypes = (msg.getFilters().size() > 0) ?
                 msg.getFilters().stream()
-                    .map(RelationshipType::of)
-                    .filter(store::hasRelationshipType)
-                    .collect(Collectors.toUnmodifiableList())
+                        .map(RelationshipType::of)
+                        .filter(store::hasRelationshipType)
+                        .collect(Collectors.toUnmodifiableList())
                 : store.relationshipTypes();
         logger.info("proceeding with relTypes: {}", relTypes);
 
@@ -303,7 +314,7 @@ public class GdsReadJob extends ReadJob {
         // Setup some arrays
         final String[] keys = msg.getProperties().toArray(new String[0]);
         final NodeProperties[] propertiesArray = new NodeProperties[keys.length];
-        for (int i=0; i<keys.length; i++)
+        for (int i = 0; i < keys.length; i++)
             propertiesArray[i] = store.nodePropertyValues(keys[i]);
 
         final PrimitiveLongIterator iterator = graph.nodeIterator();
@@ -314,8 +325,8 @@ public class GdsReadJob extends ReadJob {
             GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, graph.nodeLabels(nodeId), keys, propertiesArray, graph::toOriginalNodeId);
             onFirstRecord(record);
             logger.debug("offered first record to producer");
-            for (int i=0; i<keys.length; i++)
-                logger.info(" key {}/{}: {} -> {}", i, keys.length-1, keys[i], propertiesArray[i].valueType());
+            for (int i = 0; i < keys.length; i++)
+                logger.info(" key {}/{}: {} -> {}", i, keys.length - 1, keys[i], propertiesArray[i].valueType());
 
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
             logger.info("acquired consumer");
@@ -328,7 +339,7 @@ public class GdsReadJob extends ReadJob {
             // TODO: should it be nodeCount - 1? We advanced the iterator...maybe?
             var s = spliterate(iterator, graph.nodeCount() - 1);
             StreamSupport.stream(s, true).forEach(i ->
-                    consumer.accept(GdsNodeRecord.wrap(i, graph.nodeLabels(i), keys,propertiesArray, graph::toOriginalNodeId),
+                    consumer.accept(GdsNodeRecord.wrap(i, graph.nodeLabels(i), keys, propertiesArray, graph::toOriginalNodeId),
                             i.intValue()));
 
             final long delta = System.currentTimeMillis() - start;
