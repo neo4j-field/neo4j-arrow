@@ -12,7 +12,7 @@ USERNAME = os.environ.get('NEO4J_USERNAME', 'neo4j')
 PASSWORD = os.environ.get('NEO4J_PASSWORD', 'password')
 GRAPH = os.environ.get('NEO4J_GRAPH', 'random')
 PROPERTIES = [
-        p for p in os.environ.get('NEO4J_PROPERTIES', '').split(',') 
+        p for p in os.environ.get('NEO4J_PROPERTIES', '').split(',')
         if len(p) > 0]
 TLS = len(os.environ.get('NEO4J_ARROW_TLS', '')) > 0
 TLS_VERIFY = len(os.environ.get('NEO4J_ARROW_TLS_NO_VERIFY', '')) < 1
@@ -22,7 +22,8 @@ DELETE = len(os.environ.get('BQ_DELETE_FIRST', '')) > 0
 
 ### Globals
 bq_client = bigquery.Client()
-q = queue.Queue(maxsize=32)
+data_q = queue.Queue()
+job_q = queue.Queue(maxsize=8)
 done_feeding = threading.Event()
 
 ### Various Load Options
@@ -105,7 +106,7 @@ def stream_records(reader):
     # signal we're done consuming the source feed and wait for work to complete
     done_feeding.set()
     q.join()
-    
+
     finish = time()
     print(f"Done! Time Delta: {round(finish - start, 1):,}s")
     print(f"Count: {cnt:,} rows, Rate: {round(cnt / (finish - start)):,} rows/s")
@@ -118,7 +119,7 @@ if __name__ == "__main__":
 
     print("Submitting read job for graph '{GRAPH}'")
     ticket = client.gds_nodes(GRAPH, properties=PROPERTIES)
- 
+
     print("Starting worker threads")
     threads = []
     for i in range(0, 12):
@@ -134,4 +135,3 @@ if __name__ == "__main__":
     # try to nicely wait for threads to finish just in case
     for t in threads:
         t.join(timeout=60)
-

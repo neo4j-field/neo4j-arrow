@@ -173,7 +173,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                        return;
                    }
                }
-            });
+               logger.info("flusher for job {} finished", job);
+            }, Executors.newSingleThreadExecutor());
 
             // Wasteful, but pre-init for now
             for (int i=0; i<maxPartitions; i++) {
@@ -199,6 +200,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
 
                     if (idx == 0) {
+                        logger.trace("starting new batch for partition {}", partition);
                         // (re)init field vectors
                         if (vectorList.size() == 0) {
                             for (Field field : fieldList) {
@@ -350,6 +352,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         }
 
                         // Queue the flush work
+                        logger.trace("flushing partition {}", partition);
                         workQueue.add(FlushWork.from(copy, vectorSize));
 
                         // Reset our partition state

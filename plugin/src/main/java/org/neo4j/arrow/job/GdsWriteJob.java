@@ -16,7 +16,6 @@ import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.Orientation;
 import org.neo4j.gds.RelationshipType;
 import org.neo4j.gds.api.*;
-import org.neo4j.gds.api.schema.GraphSchema;
 import org.neo4j.gds.api.schema.NodeSchema;
 import org.neo4j.gds.api.schema.PropertySchema;
 import org.neo4j.gds.config.GraphCreateConfig;
