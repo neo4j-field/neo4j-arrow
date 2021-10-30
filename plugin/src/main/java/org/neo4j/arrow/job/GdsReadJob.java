@@ -11,15 +11,13 @@ import org.neo4j.gds.api.Graph;
 import org.neo4j.gds.api.GraphStore;
 import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.api.nodeproperties.ValueType;
-import org.neo4j.gds.compat.Neo4jProxy;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
-import org.neo4j.gds.core.utils.mem.AllocationTracker;
-import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
@@ -105,48 +103,78 @@ public class GdsReadJob extends ReadJob {
         // XXX faux record
         onFirstRecord(new SubGraphRecord(0, 0, store.nodeLabels(), 1, "TYPE", 2, store.nodeLabels()));
 
+        final Map<Long, List<Pair<Long, Long>>> adjacencyCache = new ConcurrentHashMap<>(); // XXX type?
+
         return CompletableFuture.supplyAsync(() -> {
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join(); // XXX join()
             logger.info("starting node stream for gds khop job {}", jobId);
 
             Pair<Long, Long> result = StreamSupport.stream(spliterate(iterator, graph.nodeCount()), true)
                     .map(startNodeId -> {
-                        // XXX manual 2 k-hop for now...no rel type and no dedupe :-(
+                        final List<Pair<Long, Long>> cached = adjacencyCache.get(startNodeId);
 
-                        var s = graph.concurrentCopy()
-                                .streamRelationships(startNodeId, Double.NaN)
-                                .map(relCursor -> {
-                                    final long source = relCursor.sourceId();
-                                    final long target = relCursor.targetId();
-
-                                    // only traverse outwards regardless of direction
-                                    return Triple.of(startNodeId, startNodeId,
-                                            (source == startNodeId) ? target : source);
-                                });
+                        Stream<Triple<Long, Pair<Long, Long>, Long>> stream;
+                        if (cached == null) {
+                            final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(startNodeId));
+                            stream = graph.concurrentCopy()
+                                    .streamRelationships(startNodeId, Double.NaN)
+                                    .map(cursor -> {
+                                        final long source = cursor.sourceId();
+                                        final long target = cursor.targetId();
+                                        final Pair<Long, Long> edge = Pair.of(source, target);
+                                        targets.add(edge);
+                                        return Triple.of(startNodeId, edge, (source == startNodeId) ? target : source);
+                                    })
+                                    .onClose(() -> adjacencyCache.put(startNodeId, targets));
+                        } else {
+                            stream = cached.stream()
+                                    .map(pair -> {
+                                        final long source = pair.getLeft();
+                                        final long target = pair.getRight();
+                                        return Triple.of(startNodeId, pair, (source == startNodeId) ? target : source);
+                                    });
+                        }
 
                         // k-hop
                         for (int i = 1; i < k; i++) {
-                            s = s.flatMap(triple -> {
+                            stream = stream.flatMap(triple -> {
                                 final long next = triple.getRight();
-                                return graph.concurrentCopy() // XXX do we need another copy?
-                                        .streamRelationships(next, Double.NaN)
-                                        .map(relCursor -> {
-                                            final long source = relCursor.sourceId();
-                                            final long target = relCursor.targetId();
 
-                                            // only traverse "outwards" regardless of direction
-                                            return Triple.of(startNodeId, startNodeId,
-                                                    (source == next) ? target : source);
-                                        });
+                                final List<Pair<Long, Long>> cached2 = adjacencyCache.get(next);
+                                if (cached2 == null) {
+                                    final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(next));
+
+                                    return graph.concurrentCopy() // XXX do we need another copy?
+                                            .streamRelationships(next, Double.NaN)
+                                            .map(relCursor -> {
+                                                final long source = relCursor.sourceId();
+                                                final long target = relCursor.targetId();
+                                                final Pair<Long, Long> edge = Pair.of(source, target);
+                                                targets.add(edge);
+                                                return Triple.of(startNodeId, edge, (source == next) ? target : source);
+                                            })
+                                            .onClose(() -> adjacencyCache.put(next, targets));
+                                } else {
+                                    return cached2.stream()
+                                            .map(pair -> {
+                                                final long source = pair.getLeft();
+                                                final long target = pair.getRight();
+                                                return Triple.of(startNodeId, pair, (source == next) ? target : source);
+                                            });
+                                }
                             });
                         }
 
                         // Convert and consume
-                        long cnt = s.map(triple -> {
-                            final long source = triple.getMiddle();
-                            final long target = triple.getRight();
+                        long cnt = stream.map(triple -> {
+                            final long origin = triple.getLeft();
+                            final Pair<Long, Long> edge = triple.getMiddle();
 
-                            return SubGraphRecord.of(graph.toOriginalNodeId(startNodeId),
+                            final long source = edge.getLeft();
+                            final long target = edge.getRight();
+                            // discard the Right...it's the terminus
+
+                            return SubGraphRecord.of(graph.toOriginalNodeId(origin),
                                     graph.toOriginalNodeId(source), graph.nodeLabels(source),
                                     0L, "UNKNOWN", // XXX lame
                                     graph.toOriginalNodeId(target), graph.nodeLabels(target));
