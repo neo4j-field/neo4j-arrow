@@ -18,12 +18,14 @@ import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
+import org.neo4j.gds.core.utils.paged.HugeAtomicLongArray;
 import org.neo4j.gds.core.utils.paged.HugeCursor;
 import org.neo4j.gds.core.utils.paged.HugeObjectArray;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
@@ -101,6 +103,7 @@ public class GdsReadJob extends ReadJob {
 
     private CompletableFuture<Boolean> handleKHopJob(GdsMessage msg, GraphStore store) {
         final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
+        final long nodeCount = graph.nodeCount();
 
         // XXX get from msg
         final int k = 2;
@@ -140,31 +143,51 @@ public class GdsReadJob extends ReadJob {
 
         // XXX analyze degrees
         final Map<Integer, Long> histogram = new ConcurrentHashMap<>();
+        final Queue<Long> superNodes = new ConcurrentLinkedQueue<Long>();
 
-        LongStream.range(0, graph.nodeCount())
-                .map(graph::degree)
-                .mapToDouble(degree -> (degree == 0) ? Double.NaN : Math.log10(degree))
-                .map(Math::floor)
-                .boxed()
-                .mapToInt(d -> (Double.isNaN(d)) ? 0 : d.intValue() + 1)
-                .forEach(magnitude ->
-                        histogram.compute(magnitude,
-                                (key, val) -> (val == null) ? 1L : val + 1L));
+        LongStream.range(0, nodeCount)
+                .mapToObj(id -> Pair.of(id, 0))
+                .map(pair -> Pair.of(pair.getLeft(), graph.degree(pair.getLeft())))
+                .map(pair -> (pair.getRight() == 0) ? Pair.of(pair.getLeft(), Double.NaN)
+                        : Pair.of(pair.getLeft(), Math.floor(Math.log10(pair.getRight()))))
+                .map(pair -> (pair.getRight().isNaN()) ? Pair.of(pair.getLeft(), 0)
+                        : Pair.of(pair.getLeft(), pair.getRight().intValue() + 1))
+                .forEach(pair -> {
+                    int magnitude = pair.getRight();
+                    histogram.compute(magnitude, (key, val) -> (val == null) ? 1L : val + 1L);
+                    if (magnitude > 3) // XXX cutoff?
+                        superNodes.add(pair.getLeft());
+                });
 
-        logger.info("\t[ 10x ]\t- # of nodes");
         histogram.keySet().stream()
                 .sorted()
                 .forEach(key ->
-                        logger.info(String.format("\t[ %d ]\t- %,d nodes", key, histogram.get(key))));
-
+                        logger.info(String.format("\t[ %d x 10]\t- %,d nodes", key, histogram.get(key))));
         histogram.clear();
+        logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         return CompletableFuture.supplyAsync(() -> {
-            final long nodeCount = graph.nodeCount();
             logger.info(String.format("starting node stream for gds khop job %s (%,d nodes)", jobId, nodeCount));
+
+            // XXX precompute supernode pairs
+            logger.info("optimizing supernodes...");
+            superNodes.parallelStream().forEach(superNodeId -> {
+                final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(superNodeId));
+                graph.concurrentCopy()
+                        .streamRelationships(superNodeId, Double.NaN)
+                        .forEach(cursor -> {
+                            final long source = cursor.sourceId();
+                            final long target = cursor.targetId();
+                            final Pair<Long, Long> edge = Pair.of(source, target);
+                            targets.add(edge);
+                        });
+                cache.set(superNodeId, targets);
+            });
+            logger.info(String.format("preprocessed %,d supernodes", superNodes.size()));
 
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
+            // TODO: only randomize if supernodes?
             var nodes = LongStream.range(0, nodeCount).boxed().collect(Collectors.toList());
             Collections.shuffle(nodes); // XXX
 
