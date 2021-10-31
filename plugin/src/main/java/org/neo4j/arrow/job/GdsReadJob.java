@@ -25,11 +25,11 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
-import java.util.stream.LongStream;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.stream.*;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -101,22 +101,76 @@ public class GdsReadJob extends ReadJob {
 
     private CompletableFuture<Boolean> handleKHopJob(GdsMessage msg, GraphStore store) {
         final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
-        final PrimitiveLongIterator iterator = graph.nodeIterator();
 
         // XXX get from msg
         final int k = 2;
+
+        // XXX what's the max degree?
+        final OptionalInt maxDegree = LongStream.range(0, graph.nodeCount())
+                .mapToInt(graph::degree)
+                .max();
+        logger.info("max degree for graph '{}': {}", msg.getGraphName(), maxDegree.orElse(0));
 
         // XXX faux record
         onFirstRecord(SubGraphRecord.of(0L, 0L, store.nodeLabels(), "TYPE", 1L, store.nodeLabels()));
 
         // See if saving pre-generated adjacency lists helps.
-        final HugeObjectArray<List> cache = HugeObjectArray.newArray(List.class, graph.nodeCount(), AllocationTracker.empty());
+        final HugeObjectArray<List> cache = HugeObjectArray
+                .newArray(List.class, graph.nodeCount(), AllocationTracker.empty());
+
+        // TODO: pull out as static methods once we move into a dedicated class
+        final Function<Triple<Long, Pair<Long, Long>, Long>, SubGraphRecord> convert =
+                (triple)-> {
+                    final long origin = triple.getLeft();
+                    final Pair<Long, Long> edge = triple.getMiddle();
+
+                    final long source = edge.getLeft();
+                    final long target = edge.getRight();
+                    // discard the Right...it's the terminus
+
+                    return SubGraphRecord.of(graph.toOriginalNodeId(origin),
+                            graph.toOriginalNodeId(source), graph.nodeLabels(source),
+                            "UNKNOWN", // XXX lame
+                            graph.toOriginalNodeId(target), graph.nodeLabels(target));
+                };
+
+        final Function<BiConsumer<RowBasedRecord, Integer>, Consumer<RowBasedRecord>> wrapConsumer =
+                (consumer) ->
+                        (row) -> consumer.accept(row, (int) row.get(1).asLong());
+
+        // XXX analyze degrees
+        final Map<Integer, Long> histogram = new ConcurrentHashMap<>();
+
+        LongStream.range(0, graph.nodeCount())
+                .map(graph::degree)
+                .mapToDouble(degree -> (degree == 0) ? Double.NaN : Math.log10(degree))
+                .map(Math::floor)
+                .boxed()
+                .mapToInt(d -> (Double.isNaN(d)) ? 0 : d.intValue() + 1)
+                .forEach(magnitude ->
+                        histogram.compute(magnitude,
+                                (key, val) -> (val == null) ? 1L : val + 1L));
+
+        logger.info("\t[ 10x ]\t- # of nodes");
+        histogram.keySet().stream()
+                .sorted()
+                .forEach(key ->
+                        logger.info(String.format("\t[ %d ]\t- %,d nodes", key, histogram.get(key))));
+
+        histogram.clear();
 
         return CompletableFuture.supplyAsync(() -> {
-            logger.info("starting node stream for gds khop job {}", jobId);
-            final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join(); // XXX join()
+            final long nodeCount = graph.nodeCount();
+            logger.info(String.format("starting node stream for gds khop job %s (%,d nodes)", jobId, nodeCount));
 
-            Pair<Long, Long> result = StreamSupport.stream(spliterate(iterator, graph.nodeCount()), true)
+            var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
+
+            var nodes = LongStream.range(0, nodeCount).boxed().collect(Collectors.toList());
+            Collections.shuffle(nodes); // XXX
+
+            final AtomicLong cacheHits = new AtomicLong(0);
+
+            Pair<Long, Long> result = nodes.parallelStream()
                     .map(startNodeId -> {
                         Stream<Triple<Long, Pair<Long, Long>, Long>> stream;
 
@@ -135,6 +189,7 @@ public class GdsReadJob extends ReadJob {
                                     })
                                     .onClose(() -> cache.set(startNodeId, targets));
                         } else {
+                            cacheHits.incrementAndGet();
                             stream = cachedList.stream()
                                     .map(pair -> {
                                         final long source = pair.getLeft();
@@ -163,6 +218,7 @@ public class GdsReadJob extends ReadJob {
                                             })
                                             .onClose(() -> cache.set(next, targets));
                                 } else {
+                                    cacheHits.incrementAndGet();
                                     return cachedList2.stream()
                                             .map(pair -> {
                                                 final long source = pair.getLeft();
@@ -173,22 +229,11 @@ public class GdsReadJob extends ReadJob {
                             });
                         }
 
-                        // Convert and consume
-                        long cnt = stream.map(triple -> {
-                            final long origin = triple.getLeft();
-                            final Pair<Long, Long> edge = triple.getMiddle();
-
-                            final long source = edge.getLeft();
-                            final long target = edge.getRight();
-                            // discard the Right...it's the terminus
-
-                            return SubGraphRecord.of(graph.toOriginalNodeId(origin),
-                                    graph.toOriginalNodeId(source), graph.nodeLabels(source),
-                                    "UNKNOWN", // XXX lame
-                                    graph.toOriginalNodeId(target), graph.nodeLabels(target));
-                        })
-                        .peek(row -> consumer.accept(row, (int) row.get(1).asLong())) // XXX cast
-                        .count();
+                        // Consume the stream
+                        long cnt = stream
+                                .map(convert)
+                                .peek(consume)
+                                .count();
 
                         logger.trace("finished k-hop for {} ({} rows)", startNodeId, cnt);
                         return Pair.of(1L, cnt);
@@ -196,7 +241,9 @@ public class GdsReadJob extends ReadJob {
                     .reduce(Pair.of(0L, 0L),
                             (p1, p2) -> Pair.of(p1.getLeft() + p2.getLeft(), p1.getRight() + p2.getRight()));
 
-            logger.info("completed gds k-hop job: {} nodes, {} total rows", result.getLeft(), result.getRight());
+            logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows",
+                    result.getLeft(), result.getRight()));
+            logger.info(String.format("cache hits: %,d", cacheHits.get()));
             return true;
         }).handleAsync((isOk, err) -> {
             if (isOk != null && isOk) {
