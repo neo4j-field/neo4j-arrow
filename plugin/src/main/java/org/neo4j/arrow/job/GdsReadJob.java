@@ -116,6 +116,19 @@ public class GdsReadJob extends ReadJob {
         return left | right;
     }
 
+    private Stream<Triple<Long, Long, Boolean>> hop(long next, Graph graph, Map<Long, List<Triple<Long, Long, Boolean>>> cache, AtomicLong cacheHits) {
+        final List<Triple<Long, Long, Boolean>> cachedList = cache.get(next); // XXX unchecked
+
+        if (cachedList == null) {
+            return graph.concurrentCopy()
+                    .streamRelationships(next, Double.NaN)
+                    .map(cursor -> Triple.of(cursor.sourceId(), cursor.targetId(), Double.isNaN(cursor.property())));
+        } else {
+            cacheHits.incrementAndGet();
+            return cachedList.parallelStream();
+        }
+    }
+
     private CompletableFuture<Boolean> handleKHopJob(KHopMessage msg, GraphStore store) {
         final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.of("cnt"));
         final long nodeCount = graph.nodeCount();
@@ -222,63 +235,31 @@ public class GdsReadJob extends ReadJob {
             final long rows = nodeStream
                     .parallel()
                     .map(startNodeId -> {
-                        final List<Triple<Long, Long, Boolean>> cachedList = supernodeCache.get(startNodeId); // XXX unchecked
                         final Set<Long> relHistory = new ConcurrentSkipListSet<>();
-                        Stream<Triple<Long, Long, Boolean>> stream;
-
-                        if (cachedList == null) {
-                            stream = graph.concurrentCopy()
-                                    .streamRelationships(startNodeId, Double.NaN)
-                                    .map(cursor -> {
-                                        final long source = cursor.sourceId();
-                                        final long target = cursor.targetId();
-                                        final boolean isNatural = Double.isNaN(cursor.property());
-
-                                        return Triple.of(source, target, isNatural);
-                                    });
-                        } else {
-                            cacheHits.incrementAndGet();
-                            stream = cachedList.parallelStream();
-                        }
+                        Stream<Triple<Long, Long, Boolean>> stream = hop(startNodeId, graph, supernodeCache, cacheHits);
 
                         // k-hop
                         for (int i = 1; i < k; i++) {
                             stream = stream.flatMap(edge -> {
                                 final long next = edge.getMiddle();
-                                final List<Triple<Long, Long, Boolean>> cachedList2 = supernodeCache.get(next); // XXX unchecked
-                                Stream<Triple<Long, Long, Boolean>> newStream;
-
-                                if (cachedList2 == null) {
-                                    newStream = graph.concurrentCopy() // XXX do we need another copy?
-                                            .streamRelationships(next, Double.NaN)
-                                            .map(cursor -> {
-                                                final long source = cursor.sourceId();
-                                                final long target = cursor.targetId();
-                                                final boolean isNatural = Double.isNaN(cursor.property());
-
-                                                return Triple.of(source, target, isNatural);
-                                            });
-                                } else {
-                                    cacheHits.incrementAndGet();
-                                    newStream = cachedList2.parallelStream();
-                                }
-                                return Stream.concat(Stream.of(edge), newStream);
+                                return Stream.concat(Stream.of(edge), hop(next, graph, supernodeCache, cacheHits));
                             });
                         }
 
                         // Consume the stream >>>
                         long cnt = stream
-                                .map(triple -> (triple.getRight()) ?
+                                .map(triple -> (triple.getRight()) ? // re-orient our edges before processing them
                                         Pair.of(triple.getLeft(), triple.getMiddle()) : Pair.of(triple.getMiddle(), triple.getLeft()))
                                 .filter(edge -> relHistory.add(index(edge)))
                                 .map(edge -> {
-                                    final SubGraphRecord row = SubGraphRecord.of(startNodeId,
+                                    final SubGraphRecord row = SubGraphRecord.of(
+                                            startNodeId,
                                             edge.getLeft(), graph.nodeLabels(edge.getLeft()),
-                                            "UNKNOWN_TYPE",
+                                            "REL",
                                             edge.getRight(), graph.nodeLabels(edge.getRight())
                                     );
                                     consume.accept(row);
-                                    return row;
+                                    return 1;
                                 })
                                 .count();
 
