@@ -11,6 +11,7 @@ _JOB_CYPHER = "cypherRead"
 _JOB_GDS_READ = "gds.read"      # TODO: rename
 _JOB_GDS_WRITE_NODES = "gds.write.nodes"
 _JOB_GDS_WRITE_RELS = "gds.write.relationships"
+_JOB_KHOP = "khop"
 _JOB_STATUS = "jobStatus"
 
 _DEFAULT_HOST = env.get('NEO4J_ARROW_HOST', 'localhost')
@@ -137,6 +138,36 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
+    def khop(self, graph, database='neo4j', filters=[]):
+        """ Experimental K-Hop Job support """
+        params = {
+            'db': database,
+            'graph': graph,
+            'type': 'khop',
+            'properties': [],
+            'filters': [],
+        }
+        params_bytes = json.dumps(params).encode('utf8')
+        results = self._client.do_action(
+                (_JOB_GDS_READ, params_bytes),
+                options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
+    def khop_tx(self, database='neo4j', k=2):
+        """ Experimental K-Hop Job support """
+        if k < 1 or k > 4:
+            raise ValueError("k out of valid range")
+        params = {
+            'db': database,
+            'k': 2,
+        }
+        params_bytes = json.dumps(params).encode('utf8')
+        results = self._client.do_action(
+                (_JOB_KHOP, params_bytes),
+                options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
+
     def status(self, ticket):
         """Check job status for a ticket."""
         if type(ticket) == pa.flight.Ticket:
@@ -176,20 +207,21 @@ class Neo4jArrow:
             writer.write_table(table, max_chunksize=8192)
             writer.close()
             # TODO: server should be telling us what the results were...shouldn't assume!
-            return (table.num_rows, table.nbytes)
+            return table.num_rows, table.nbytes
         except Exception as e:
             printf("error during put_stream: {e}")
-            return (0, 0)
+            return 0, 0
 
     def put_stream_batches(self, ticket, results):
         """Write a stream using a batch producer"""
         descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
-        num_rows, nbytes = 0, 0
+        nbytes, num = 0, 0
         writer, _ = self._client.do_put(descriptor, results.schema, options=self._options)
         for (batch, _) in results:
             nbytes = nbytes + batch.nbytes
             writer.write_batch(batch)
-            num_rows = num_rows + batch.num_rows
+            num = num + 1
         writer.close()
-        return (num_rows, nbytes)
+        print(f"wrote {num:,} batches, {nbytes:,} bytes")
+        return (num, nbytes)
 
