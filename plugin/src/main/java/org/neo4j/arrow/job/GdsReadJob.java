@@ -216,7 +216,7 @@ public class GdsReadJob extends ReadJob {
                         });
                 supernodeCache.put(superNodeId, targets);
             });
-            logger.info(String.format("preprocessed %,d supernodes", superNodes.size()));
+            logger.info(String.format("pre-processed %,d supernodes", superNodes.size()));
 
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
@@ -231,12 +231,12 @@ public class GdsReadJob extends ReadJob {
                 nodeStream = LongStream.range(0, nodeCount);
             }
 
-            final AtomicLong numCompleted = new AtomicLong(0);
             final long rows = nodeStream
+                    .boxed()
                     .parallel()
-                    .map(startNodeId -> {
+                    .flatMap(origin -> {
                         final Set<Long> relHistory = new ConcurrentSkipListSet<>();
-                        Stream<Triple<Long, Long, Boolean>> stream = hop(startNodeId, graph, supernodeCache, cacheHits);
+                        Stream<Triple<Long, Long, Boolean>> stream = hop(origin, graph, supernodeCache, cacheHits);
 
                         // k-hop
                         for (int i = 1; i < k; i++) {
@@ -247,31 +247,21 @@ public class GdsReadJob extends ReadJob {
                         }
 
                         // Consume the stream >>>
-                        long cnt = stream
+                        return stream
                                 .map(triple -> (triple.getRight()) ? // re-orient our edges before processing them
                                         Pair.of(triple.getLeft(), triple.getMiddle()) : Pair.of(triple.getMiddle(), triple.getLeft()))
                                 .filter(edge -> relHistory.add(index(edge)))
-                                .map(edge -> {
-                                    final SubGraphRecord row = SubGraphRecord.of(
-                                            startNodeId,
-                                            edge.getLeft(), graph.nodeLabels(edge.getLeft()),
-                                            "REL",
-                                            edge.getRight(), graph.nodeLabels(edge.getRight())
-                                    );
-                                    consume.accept(row);
-                                    return 1;
-                                })
-                                .count();
-
-                        // Simple progress monitoring
-                        long completed = numCompleted.incrementAndGet();
-                        if (completed % 100_000 == 0) {
-                            logger.info(String.format("...%,d of %,d", completed, nodeCount));
-                        }
-
-                        return cnt;
+                                .map(edge -> Pair.of(origin, edge));
                     })
-                    .sum();
+                    .peek(result -> {
+                        final long origin = result.getLeft();
+                        final Pair<Long, Long> edge = result.getRight();
+                        consume.accept(SubGraphRecord.of(origin,
+                                edge.getLeft(), graph.nodeLabels(edge.getLeft()),
+                                "REL",
+                                edge.getRight(), graph.nodeLabels(edge.getRight())));
+                    })
+                    .count();
 
             logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rows));
             logger.info(String.format("cache hits: %,d", cacheHits.get()));
