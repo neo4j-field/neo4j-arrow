@@ -92,6 +92,18 @@ public class SubGraphRecord implements RowBasedRecord {
     }
 
     @Override
+    public String toString() {
+        return "SubGraphRecord{" +
+                "origin=" + origin +
+                ", source=" + source +
+                ", sourceLabels=" + sourceLabels +
+                ", relType='" + relType + '\'' +
+                ", target=" + target +
+                ", targetLabels=" + targetLabels +
+                '}';
+    }
+
+    @Override
     public List<String> keys() {
         return Arrays.stream(keys).collect(Collectors.toList());
     }

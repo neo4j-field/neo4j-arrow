@@ -1,12 +1,11 @@
 package org.neo4j.arrow.job;
 
-import com.google.common.hash.BloomFilter;
-import com.google.common.hash.Funnels;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.neo4j.arrow.*;
 import org.neo4j.arrow.action.GdsMessage;
+import org.neo4j.arrow.action.KHopMessage;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.RelationshipType;
 import org.neo4j.gds.api.Graph;
@@ -18,20 +17,22 @@ import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
-import org.neo4j.gds.core.utils.paged.HugeAtomicLongArray;
-import org.neo4j.gds.core.utils.paged.HugeCursor;
 import org.neo4j.gds.core.utils.paged.HugeObjectArray;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.stream.*;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -68,7 +69,8 @@ public class GdsReadJob extends ReadJob {
                 job = handleRelationshipsJob(msg, store);
                 break;
             case khop:
-                job = handleKHopJob(msg, store);
+                final KHopMessage kmsg = new KHopMessage(msg.getDbName(), msg.getGraphName(), 2);
+                job = handleKHopJob(kmsg, store);
                 break;
 
             default:
@@ -101,25 +103,20 @@ public class GdsReadJob extends ReadJob {
     }
 
 
-    private CompletableFuture<Boolean> handleKHopJob(GdsMessage msg, GraphStore store) {
-        final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
+    private static long index(Triple<Long, Long, Boolean> edge) {
+        // XXX dragons
+        final long left = (edge.getLeft() & 0x00000000FFFFFFFF) << 32;
+        final long right = edge.getMiddle();
+        return left | right;
+    }
+
+    private CompletableFuture<Boolean> handleKHopJob(KHopMessage msg, GraphStore store) {
+        final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.of("cnt"));
         final long nodeCount = graph.nodeCount();
+        final long relCount = graph.relationshipCount();
+        final AtomicLong cacheHits = new AtomicLong(0);
 
-        // XXX get from msg
-        final int k = 2;
-
-        // XXX what's the max degree?
-        final OptionalInt maxDegree = LongStream.range(0, graph.nodeCount())
-                .mapToInt(graph::degree)
-                .max();
-        logger.info("max degree for graph '{}': {}", msg.getGraphName(), maxDegree.orElse(0));
-
-        // XXX faux record
-        onFirstRecord(SubGraphRecord.of(0L, 0L, store.nodeLabels(), "TYPE", 1L, store.nodeLabels()));
-
-        // See if saving pre-generated adjacency lists helps.
-        final HugeObjectArray<List> cache = HugeObjectArray
-                .newArray(List.class, graph.nodeCount(), AllocationTracker.empty());
+        final int k = msg.getK();
 
         // TODO: pull out as static methods once we move into a dedicated class
         final Function<Triple<Long, Pair<Long, Long>, Long>, SubGraphRecord> convert =
@@ -143,9 +140,10 @@ public class GdsReadJob extends ReadJob {
 
         // XXX analyze degrees
         final Map<Integer, Long> histogram = new ConcurrentHashMap<>();
-        final Queue<Long> superNodes = new ConcurrentLinkedQueue<Long>();
+        final Queue<Long> superNodes = new ConcurrentLinkedQueue<>();
 
         LongStream.range(0, nodeCount)
+                .parallel()
                 .mapToObj(id -> Pair.of(id, 0))
                 .map(pair -> Pair.of(pair.getLeft(), graph.degree(pair.getLeft())))
                 .map(pair -> (pair.getRight() == 0) ? Pair.of(pair.getLeft(), Double.NaN)
@@ -155,69 +153,87 @@ public class GdsReadJob extends ReadJob {
                 .forEach(pair -> {
                     int magnitude = pair.getRight();
                     histogram.compute(magnitude, (key, val) -> (val == null) ? 1L : val + 1L);
-                    if (magnitude > 3) // XXX cutoff?
+                    if (magnitude > 2) // XXX cutoff?
                         superNodes.add(pair.getLeft());
                 });
 
         histogram.keySet().stream()
                 .sorted()
                 .forEach(key ->
-                        logger.info(String.format("\t[ %d x 10]\t- %,d nodes", key, histogram.get(key))));
+                        logger.info(String.format("\t[ 10 * %d ]\t- %,d nodes", key, histogram.get(key))));
         histogram.clear();
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
-        return CompletableFuture.supplyAsync(() -> {
-            logger.info(String.format("starting node stream for gds khop job %s (%,d nodes)", jobId, nodeCount));
+        // XXX faux record
+        onFirstRecord(SubGraphRecord.of(0L, 0L, store.nodeLabels(), "TYPE", 1L, store.nodeLabels()));
 
-            // XXX precompute supernode pairs
+        return CompletableFuture.supplyAsync(() -> {
+            logger.info(String.format("starting node stream for gds khop job %s (%,d nodes, %,d rels)",
+                    jobId, nodeCount, relCount));
+            final Map<Long, List<Triple<Long, Long, Boolean>>> supernodeCache = new ConcurrentHashMap<>();
+
+            // Pre-cache supernodes adjacency lists
             logger.info("optimizing supernodes...");
             superNodes.parallelStream().forEach(superNodeId -> {
-                final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(superNodeId));
+                final List<Triple<Long, Long, Boolean>> targets = new ArrayList<>(graph.degree(superNodeId));
                 graph.concurrentCopy()
                         .streamRelationships(superNodeId, Double.NaN)
                         .forEach(cursor -> {
                             final long source = cursor.sourceId();
                             final long target = cursor.targetId();
-                            final Pair<Long, Long> edge = Pair.of(source, target);
+                            final boolean isNatural = Double.isNaN(cursor.property());
+                            final Triple<Long, Long, Boolean> edge = isNatural
+                                    ? Triple.of(source, target, true) : Triple.of(target, source, false);
                             targets.add(edge);
                         });
-                cache.set(superNodeId, targets);
+                supernodeCache.put(superNodeId, targets);
             });
             logger.info(String.format("preprocessed %,d supernodes", superNodes.size()));
 
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
-            // TODO: only randomize if supernodes?
-            var nodes = LongStream.range(0, nodeCount).boxed().collect(Collectors.toList());
-            Collections.shuffle(nodes); // XXX
+            // Only randomize if supernodes
+            final Stream<Long> nodeStream;
+            if (superNodes.size() > 0) {
+                final List<Long> nodeList = LongStream.range(0, nodeCount).boxed().collect(Collectors.toList());
+                Collections.shuffle(nodeList); // XXX
+                nodeStream = nodeList.stream();
+            } else {
+                nodeStream = LongStream.range(0, nodeCount).boxed();
+            }
 
-            final AtomicLong cacheHits = new AtomicLong(0);
-
-            Pair<Long, Long> result = nodes.parallelStream()
+            final Pair<Long, Long> result = nodeStream
+                    .parallel()
                     .map(startNodeId -> {
-                        Stream<Triple<Long, Pair<Long, Long>, Long>> stream;
+                        final List<Triple<Long, Long, Boolean>> cachedList = supernodeCache.get(startNodeId); // XXX unchecked
+                        final Set<Long> relHistory = new ConcurrentSkipListSet<>();
+                        Stream<Pair<Triple<Long, Long, Boolean>, Long>> stream; // pair of (edge, isNatural?)
 
-                        List<Pair<Long, Long>> cachedList = cache.get(startNodeId); // XXX unchecked
+                        // "Triples makes it safe. Triples is best."
+                        // (result, edge, next node id)
 
                         if (cachedList == null) {
-                            final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(startNodeId));
                             stream = graph.concurrentCopy()
                                     .streamRelationships(startNodeId, Double.NaN)
                                     .map(cursor -> {
                                         final long source = cursor.sourceId();
                                         final long target = cursor.targetId();
-                                        final Pair<Long, Long> edge = Pair.of(source, target);
-                                        targets.add(edge);
-                                        return Triple.of(startNodeId, edge, (source == startNodeId) ? target : source);
-                                    })
-                                    .onClose(() -> cache.set(startNodeId, targets));
+                                        final boolean isNatural = Double.isNaN(cursor.property());
+                                        logger.trace("xxx origin={}, source={}, target={}, isNat?={}", startNodeId, source, target, isNatural);
+
+                                        final Triple<Long, Long, Boolean> edge =
+                                                isNatural ? Triple.of(source, target, true) : Triple.of(target, source, false);
+                                        return Pair.of(edge, isNatural ? target : source);
+                                    });
                         } else {
                             cacheHits.incrementAndGet();
-                            stream = cachedList.stream()
-                                    .map(pair -> {
-                                        final long source = pair.getLeft();
-                                        final long target = pair.getRight();
-                                        return Triple.of(startNodeId, pair, (source == startNodeId) ? target : source);
+                            stream = cachedList.parallelStream()
+                                    .map(edge -> {
+                                        final long source = edge.getLeft();
+                                        final long target = edge.getMiddle();
+
+                                        final long next = edge.getRight() ? target : source;
+                                        return Pair.of(edge, next);
                                     });
                         }
 
@@ -225,37 +241,55 @@ public class GdsReadJob extends ReadJob {
                         for (int i = 1; i < k; i++) {
                             stream = stream.flatMap(triple -> {
                                 final long next = triple.getRight();
+                                final List<Triple<Long, Long, Boolean>> cachedList2 = supernodeCache.get(next); // XXX unchecked
+                                Stream<Pair<Triple<Long, Long, Boolean>, Long>> newStream; // pair of (edge, isNatural?)
 
-                                List<Pair<Long, Long>> cachedList2 = cache.get(startNodeId); // XXX unchecked
                                 if (cachedList2 == null) {
-                                    final List<Pair<Long, Long>> targets = new ArrayList<>(graph.degree(next));
-
-                                    return graph.concurrentCopy() // XXX do we need another copy?
+                                    newStream = graph.concurrentCopy() // XXX do we need another copy?
                                             .streamRelationships(next, Double.NaN)
-                                            .map(relCursor -> {
-                                                final long source = relCursor.sourceId();
-                                                final long target = relCursor.targetId();
-                                                final Pair<Long, Long> edge = Pair.of(source, target);
-                                                targets.add(edge);
-                                                return Triple.of(startNodeId, edge, (source == next) ? target : source);
-                                            })
-                                            .onClose(() -> cache.set(next, targets));
+                                            .map(cursor -> {
+                                                final long source = cursor.sourceId();
+                                                final long target = cursor.targetId();
+                                                final boolean isNatural = Double.isNaN(cursor.property());
+
+                                                final long nextNext = (source == next) ? target : source;
+                                                logger.trace("xxx origin={}, source={}, target={}, isNat?={}", startNodeId, source, target, isNatural);
+
+                                                final Triple<Long, Long, Boolean> edge =
+                                                        isNatural ? Triple.of(source, target, true) : Triple.of(target, source, false);
+                                                return Pair.of(edge, nextNext);
+                                            });
                                 } else {
                                     cacheHits.incrementAndGet();
-                                    return cachedList2.stream()
-                                            .map(pair -> {
-                                                final long source = pair.getLeft();
-                                                final long target = pair.getRight();
-                                                return Triple.of(startNodeId, pair, (source == next) ? target : source);
+                                    newStream = cachedList2.parallelStream()
+                                            .map(edge ->{
+                                                final long source = edge.getLeft();
+                                                final long target = edge.getMiddle();
+                                                final boolean isNatural = edge.getRight();
+
+                                                final long nextNext = (source == next) ? target : source;
+                                                logger.trace("xxx origin={}, source={}, target={}, isNat?={}", startNodeId, source, target, isNatural);
+                                                return Pair.of(edge, nextNext);
                                             });
                                 }
+                                return Stream.concat(Stream.of(triple), newStream);
                             });
                         }
 
-                        // Consume the stream
+                        // Consume the stream >>>
                         long cnt = stream
-                                .map(convert)
-                                .peek(consume)
+                                .map(Pair::getLeft)
+                                .filter(edge -> !relHistory.add(index(edge)))
+                                .map(edge -> {
+                                    final SubGraphRecord row = SubGraphRecord.of(startNodeId,
+                                            edge.getLeft(), graph.nodeLabels(edge.getLeft()),
+                                            "UNKNOWN_TYPE",
+                                            edge.getMiddle(), graph.nodeLabels(edge.getMiddle())
+                                    );
+                                    consume.accept(row);
+                                    return row;
+                                })
+                                .peek(row -> logger.trace("{}", row))
                                 .count();
 
                         logger.trace("finished k-hop for {} ({} rows)", startNodeId, cnt);

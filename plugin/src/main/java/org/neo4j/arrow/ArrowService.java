@@ -106,7 +106,7 @@ public class ArrowService extends LifecycleAdapter {
                         (mode == Job.Mode.READ) ? new GdsReadJob((GdsMessage) msg, username)
                                 : new GdsWriteJob(msg, username, dbms), log));
         app.registerHandler(new KHopActionHandler(
-                (msg, mode, username) -> new KHopJob((CypherMessage) msg, username, dbms)
+                (msg, mode, username) -> new KHopJob((KHopMessage) msg, username, dbms)
         ));
     }
 

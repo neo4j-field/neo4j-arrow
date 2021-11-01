@@ -13,6 +13,7 @@ import org.neo4j.arrow.job.JobCreator;
 import org.neo4j.arrow.job.KHopJob;
 import org.neo4j.arrow.job.ReadJob;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
@@ -22,9 +23,9 @@ public class KHopActionHandler implements ActionHandler {
     protected static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(KHopActionHandler.class);
 
     public final static String KHOP_ACTION = "khop";
-    private final JobCreator<?, KHopJob> jobCreator;
+    private final JobCreator<KHopMessage, KHopJob> jobCreator;
 
-    public KHopActionHandler(JobCreator<?, KHopJob> jobCreator) {
+    public KHopActionHandler(JobCreator<KHopMessage, KHopJob> jobCreator) {
         this.jobCreator = jobCreator;
     }
 
@@ -46,7 +47,8 @@ public class KHopActionHandler implements ActionHandler {
             final String username = context.peerIdentity();
             logger.info("user '{}' attempting a Khop action: {}", username, action.getType());
 
-            final ReadJob job = jobCreator.newJob(null, Job.Mode.READ, username);
+            final KHopMessage msg = KHopMessage.deserialize(action.getBody());
+            final ReadJob job = jobCreator.newJob(msg, Job.Mode.READ, username);
             final Ticket ticket = producer.ticketJob(job);
 
             final Future<RowBasedRecord> futureRecord = job.getFirstRecord();
@@ -77,7 +79,9 @@ public class KHopActionHandler implements ActionHandler {
             });
 
             return Outcome.success(new Result(ticket.serialize().array()));
-
+        } catch (IOException e) {
+            logger.error(e.getMessage(), e);
+            return Outcome.failure(CallStatus.INVALID_ARGUMENT.withDescription(e.getMessage()));
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return Outcome.failure(CallStatus.UNKNOWN.withDescription(e.getMessage()));
