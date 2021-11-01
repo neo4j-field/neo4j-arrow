@@ -148,6 +148,7 @@ public class GdsReadJob extends ReadJob {
         final Map<Integer, Long> histogram = new ConcurrentHashMap<>();
         final Queue<Long> superNodes = new ConcurrentLinkedQueue<>();
 
+        logger.info("checking for super nodes...");
         LongStream.range(0, nodeCount)
                 .parallel()
                 .mapToObj(id -> Pair.of(id, 0))
@@ -217,9 +218,10 @@ public class GdsReadJob extends ReadJob {
                 nodeStream = LongStream.range(0, nodeCount);
             }
 
-            final Pair<Long, Long> result = nodeStream
+            final AtomicLong numCompleted = new AtomicLong(0);
+            final long rows = nodeStream
                     .parallel()
-                    .mapToObj(startNodeId -> {
+                    .map(startNodeId -> {
                         final List<Triple<Long, Long, Boolean>> cachedList = supernodeCache.get(startNodeId); // XXX unchecked
                         final Set<Long> relHistory = new ConcurrentSkipListSet<>();
                         Stream<Triple<Long, Long, Boolean>> stream;
@@ -279,13 +281,18 @@ public class GdsReadJob extends ReadJob {
                                     return row;
                                 })
                                 .count();
-                        return Pair.of(1L, cnt);
-                    })
-                    .reduce(Pair.of(0L, 0L),
-                            (p1, p2) -> Pair.of(p1.getLeft() + p2.getLeft(), p1.getRight() + p2.getRight()));
 
-            logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows",
-                    result.getLeft(), result.getRight()));
+                        // Simple progress monitoring
+                        long completed = numCompleted.incrementAndGet();
+                        if (completed % 100_000 == 0) {
+                            logger.info(String.format("...%,d of %,d", completed, nodeCount));
+                        }
+
+                        return cnt;
+                    })
+                    .sum();
+
+            logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rows));
             logger.info(String.format("cache hits: %,d", cacheHits.get()));
             return true;
         }).handleAsync((isOk, err) -> {

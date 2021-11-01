@@ -124,7 +124,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
-            logger.info("using schema: {}", info.getSchema().toJson());
+            logger.debug("using schema: {}", info.getSchema().toJson());
 
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
