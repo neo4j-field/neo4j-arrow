@@ -199,28 +199,26 @@ public class GdsReadJob extends ReadJob {
              * know for traversal vs. result purposes.)
              */
 
-            final Map<Long, List<Triple<Long, Long, Boolean>>> supernodeCache = new ConcurrentHashMap<>();
-
             // Pre-cache supernodes adjacency lists
-            logger.info("optimizing supernodes...");
-            superNodes.parallelStream().forEach(superNodeId -> {
-                final List<Triple<Long, Long, Boolean>> targets = new ArrayList<>(graph.degree(superNodeId));
-                graph.concurrentCopy()
-                        .streamRelationships(superNodeId, Double.NaN)
-                        .forEach(cursor -> {
-                            final long source = cursor.sourceId();
-                            final long target = cursor.targetId();
-                            final boolean isNatural = Double.isNaN(cursor.property());
-                            final Triple<Long, Long, Boolean> edge = Triple.of(source, target, isNatural);
-                            targets.add(edge);
-                        });
-                supernodeCache.put(superNodeId, targets);
-            });
-            logger.info(String.format("pre-processed %,d supernodes", superNodes.size()));
+            logger.info("caching supernodes...");
+            final Map<Long, List<Triple<Long, Long, Boolean>>> supernodeCache = new ConcurrentHashMap<>();
+            superNodes.parallelStream()
+                    .forEach(superNodeId ->
+                            supernodeCache.put(superNodeId,
+                                    graph.concurrentCopy()
+                                            .streamRelationships(superNodeId, Double.NaN)
+                                            .map(cursor -> {
+                                                final boolean isNatural = Double.isNaN(cursor.property());
+                                                return Triple.of(cursor.sourceId(), cursor.targetId(), isNatural);
+                                            })
+                                            .collect(Collectors.toUnmodifiableList())));
+            logger.info(String.format("cached %,d supernodes (%,d edges)",
+                    superNodes.size(), supernodeCache.values().stream().mapToInt(List::size).sum()));
 
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
-            // Only randomize if supernodes
+            // If we know we have supernodes, it might benefit us to randomly process the nodes instead of in a
+            // sequential order.
             final LongStream nodeStream;
             if (superNodes.size() > 0) {
                 var i = new RandomLongIterator(0, nodeCount);
