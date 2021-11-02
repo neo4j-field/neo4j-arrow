@@ -5,10 +5,10 @@ import os, sys
 
 graph = sys.argv[-1]
 db = sys.argv[-2]
-host = os.environ.get('HOST', 'localhost')
+HOST = os.environ.get('HOST', 'localhost')
 print(f"using graph {graph} in db {db} on host {HOST}")
 
-client = na.Neo4jArrow('neo4j', 'password', (HOST, 9999), tls=True, verifyTls=False)
+client = na.Neo4jArrow('neo4j', 'password', (HOST, 9999))
 
 t = client.khop(graph, database=db)
 rows, nbytes, log_cnt, log_nbytes = 0, 0, 0, 0

@@ -16,15 +16,18 @@ public class KHopMessage implements Message {
     public static final String JSON_KEY_DATABASE_NAME = "db";
     public static final String JSON_KEY_GRAPH_NAME = "graph";
     public static final String JSON_KEY_K = "k";
+    public static final String JSON_KEY_REL_PROPERTY = "relProperty";
 
     private final String dbName;
     private final String graph;
+    private final String relProperty;
     private final int k;
 
-    public KHopMessage(String dbName, String graph, int k) {
+    public KHopMessage(String dbName, String graph, int k, String relProperty) {
         this.dbName = dbName;
         this.graph = graph;
         this.k = k;
+        this.relProperty = relProperty;
     }
 
     public String getDbName() {
@@ -39,6 +42,10 @@ public class KHopMessage implements Message {
         return k;
     }
 
+    public String getRelProperty() {
+        return relProperty;
+    }
+
     private static class MapTypeReference extends TypeReference<Map<String, Object>> { }
 
     @Override
@@ -47,6 +54,7 @@ public class KHopMessage implements Message {
             return mapper.writeValueAsString(
                             Map.of(JSON_KEY_DATABASE_NAME, dbName,
                                     JSON_KEY_GRAPH_NAME, graph,
+                                    JSON_KEY_REL_PROPERTY, relProperty,
                                     JSON_KEY_K, k))
                     .getBytes(StandardCharsets.UTF_8);
         } catch (JsonProcessingException e) {
@@ -61,9 +69,10 @@ public class KHopMessage implements Message {
 
         final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "neo4j").toString();
         final String graph = params.getOrDefault(JSON_KEY_GRAPH_NAME, "random").toString();
+        final String relProperty = params.getOrDefault(JSON_KEY_REL_PROPERTY, "_type_").toString();
         final Integer k = (Integer) params.getOrDefault(JSON_KEY_K, 2);
 
-        return new KHopMessage(dbName, graph, k);
+        return new KHopMessage(dbName, graph, k, relProperty);
     }
 
     @Override
@@ -71,6 +80,7 @@ public class KHopMessage implements Message {
         return "KHopMessage{" +
                 "dbName='" + dbName + '\'' +
                 "graph='" + graph + '\'' +
+                "relProperty='" + relProperty + '\'' +
                 ", k=" + k +
                 '}';
     }

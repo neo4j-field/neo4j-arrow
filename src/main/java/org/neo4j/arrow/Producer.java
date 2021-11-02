@@ -25,9 +25,10 @@ import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.ReadJob;
 import org.neo4j.arrow.job.WriteJob;
 
-import java.io.IOException;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -115,6 +116,10 @@ public class Producer implements FlightProducer, AutoCloseable {
             return;
         }
 
+        // Our work queue for multiple producers, but a single consumer
+        final BlockingDeque<FlushWork> workQueue = new LinkedBlockingDeque<>();
+        final AtomicBoolean isFeeding = new AtomicBoolean(true);
+
         try (BufferAllocator baseAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
                 0, Config.maxStreamMemory);
@@ -156,13 +161,11 @@ public class Producer implements FlightProducer, AutoCloseable {
             final Semaphore[] partitionedSemaphores = new Semaphore[maxPartitions];
             final Semaphore transferMutex = new Semaphore(1);
 
-            // Our work queue for multiple producers, but a single consumer
-            final BlockingDeque<FlushWork> workQueue = new LinkedBlockingDeque<>();
-            final AtomicBoolean isFeeding = new AtomicBoolean(true);
+            // Our work queue consumer
             final CompletableFuture<Void> flushJob = CompletableFuture.runAsync(() -> {
                while (isFeeding.get() || !workQueue.isEmpty()) {
                    try {
-                       final FlushWork work = workQueue.pollFirst(1, TimeUnit.SECONDS);
+                       final FlushWork work = workQueue.pollFirst(100, TimeUnit.MILLISECONDS);
                        if (work != null) {
                            transferMutex.acquire();
                            flush(listener, loader, work.vectors, work.vectorDimension);
@@ -190,7 +193,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             // Core job logic
             job.consume((record, partitionKey) -> {
                 // Trivial partitioning scheme...
-                final int partition = partitionKey % maxPartitions;
+                final int partition = Math.abs(partitionKey % maxPartitions);
                 try {
                     partitionedSemaphores[partition].acquire();
                     final BufferAllocator streamAllocator = bufferAllocators[partition];
@@ -438,6 +441,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 allocator.close();
 
         } catch (Exception e) {
+            isFeeding.set(false);
+            workQueue.clear();
             logger.error("ruh row", e);
             listener.error(CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException());
         } finally {
@@ -459,7 +464,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      * @param vectors list of {@link ValueVector}s corresponding to the columns of data to flush
      * @param dimension dimension of the vectors
      */
-    private void flush(ServerStreamListener listener, VectorLoader loader, List<ValueVector> vectors, int dimension) {
+    private static void flush(ServerStreamListener listener, VectorLoader loader, List<ValueVector> vectors, int dimension) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 

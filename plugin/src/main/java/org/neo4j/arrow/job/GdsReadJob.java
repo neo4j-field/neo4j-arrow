@@ -70,7 +70,7 @@ public class GdsReadJob extends ReadJob {
                 job = handleRelationshipsJob(msg, store);
                 break;
             case khop:
-                final KHopMessage kmsg = new KHopMessage(msg.getDbName(), msg.getGraphName(), 2);
+                final KHopMessage kmsg = new KHopMessage(msg.getDbName(), msg.getGraphName(), 2, msg.getProperties().get(0));
                 job = handleKHopJob(kmsg, store);
                 break;
 
@@ -130,7 +130,8 @@ public class GdsReadJob extends ReadJob {
     }
 
     private CompletableFuture<Boolean> handleKHopJob(KHopMessage msg, GraphStore store) {
-        final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.of("cnt"));
+        final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(),
+                Optional.of(msg.getRelProperty()));
         final long nodeCount = graph.nodeCount();
         final long relCount = graph.relationshipCount();
         final AtomicLong cacheHits = new AtomicLong(0);
@@ -153,9 +154,10 @@ public class GdsReadJob extends ReadJob {
                             graph.toOriginalNodeId(target), graph.nodeLabels(target));
                 };
 
+        final AtomicInteger x = new AtomicInteger(0);
         final Function<BiConsumer<RowBasedRecord, Integer>, Consumer<RowBasedRecord>> wrapConsumer =
                 (consumer) ->
-                        (row) -> consumer.accept(row, (int) row.get(1).asLong());
+                        (row) -> consumer.accept(row, Math.abs(x.getAndIncrement()));
 
         // XXX analyze degrees
         final Map<Integer, Long> histogram = new ConcurrentHashMap<>();
@@ -193,10 +195,11 @@ public class GdsReadJob extends ReadJob {
 
             /*
              * "Triples makes it safe. Triples is best."
+             *   -- Your dad's old friend (https://www.youtube.com/watch?v=8Inf1Yz_fgk)
              *
-             * We'll use a Triple that contains the start (L) and end (M) node ids, as well
+             * We'll use a Triple<> that contains the start (L) and end (M) node ids, as well
              * as the detail of if the resulting edge is "natural" (R) or not. (We need to
-             * know for traversal vs. result purposes.)
+             * know the type for traversal vs. result purposes.)
              */
 
             // Pre-cache supernodes adjacency lists
@@ -233,7 +236,8 @@ public class GdsReadJob extends ReadJob {
                     .boxed()
                     .parallel()
                     .flatMap(origin -> {
-                        final Set<Long> relHistory = new ConcurrentSkipListSet<>();
+                        final Set<Long>
+                                relHistory = new ConcurrentSkipListSet<>();
                         Stream<Triple<Long, Long, Boolean>> stream = hop(origin, graph, supernodeCache, cacheHits);
 
                         // k-hop
