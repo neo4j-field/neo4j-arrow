@@ -18,6 +18,8 @@ import org.neo4j.gds.core.utils.RandomLongIterator;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
+import org.neo4j.gds.core.utils.paged.HugeLongArray;
+import org.neo4j.gds.core.utils.paged.HugeLongLongMap;
 import org.neo4j.gds.core.utils.paged.HugeObjectArray;
 
 import java.util.*;
@@ -30,10 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.stream.Collectors;
-import java.util.stream.LongStream;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
+import java.util.stream.*;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -103,29 +102,39 @@ public class GdsReadJob extends ReadJob {
         }, nodeCount, Spliterator.SIZED | Spliterator.DISTINCT | Spliterator.ORDERED | Spliterator.NONNULL);
     }
 
+    protected static final long ZERO = 0x0L;
+    protected static final long FLAG_BITS = 0xF000000000000000L;
+    protected static final long FLAG_MASK = 0x0FFFFFFFFFFFFFFFL;
+    protected static final long TARGET_BITS = 0x000000003FFFFFFFL;
 
-    /**
-     * Attempt to make a unique index from 2 node ids using bit masks and shifting
-     * @param edge a {@Pair} representing out edge
-     * @return index to use in a bit set
-     */
-    private static long index(Pair<Long, Long> edge) {
-        // XXX assumption is our node Ids are really never larger than 32 bits
-        final long left = edge.getLeft() << 33;
-        final long right = (edge.getRight() & 0x00000000FFFFFFFF);
-        return left | right;
+    protected static long edge(long source, long target, boolean flag) {
+        // assumption: source and target are both < 30 bits in length
+        return ((source << 30) | target) | (flag ? FLAG_BITS : ZERO);
     }
 
-    private Stream<Triple<Long, Long, Boolean>> hop(long next, Graph graph, Map<Long, List<Triple<Long, Long, Boolean>>> cache, AtomicLong cacheHits) {
-        final List<Triple<Long, Long, Boolean>> cachedList = cache.get(next); // XXX unchecked
+    protected static long source(long edge) {
+        return (edge >> 30) & TARGET_BITS;
+    }
+
+    protected static long target(long edge) {
+        return (edge & TARGET_BITS);
+    }
+
+    protected static boolean flag(long edge) {
+        // TODO: use all 4 bits
+        return (edge >> 60) != 0;
+    }
+
+    private LongStream hop(long next, Graph graph, long[][] cache, AtomicLong cacheHits) {
+        final long[] cachedList = cache[(int) next]; // XXX cast
 
         if (cachedList == null) {
             return graph.concurrentCopy()
                     .streamRelationships(next, Double.NaN)
-                    .map(cursor -> Triple.of(cursor.sourceId(), cursor.targetId(), Double.isNaN(cursor.property())));
+                    .mapToLong(cursor -> edge(cursor.sourceId(), cursor.targetId(), (Double.isNaN(cursor.property()))));
         } else {
             cacheHits.incrementAndGet();
-            return cachedList.parallelStream();
+            return Arrays.stream(cachedList);
         }
     }
 
@@ -204,20 +213,21 @@ public class GdsReadJob extends ReadJob {
 
             // Pre-cache supernodes adjacency lists
             logger.info("caching supernodes...");
-            final Map<Long, List<Triple<Long, Long, Boolean>>> supernodeCache = new ConcurrentHashMap<>();
+
+            final long[][] supernodeCache = new long[(int) nodeCount][]; // XXX cast
             superNodes.parallelStream()
                     .forEach(superNodeId ->
-                            supernodeCache.put(superNodeId,
+                            supernodeCache[superNodeId.intValue()] =
                                     graph.concurrentCopy()
                                             .streamRelationships(superNodeId, Double.NaN)
-                                            .map(cursor -> {
+                                            .mapToLong(cursor -> {
                                                 final boolean isNatural = Double.isNaN(cursor.property());
-                                                return Triple.of(cursor.sourceId(), cursor.targetId(), isNatural);
-                                            })
-                                            .collect(Collectors.toUnmodifiableList())));
-            logger.info(String.format("cached %,d supernodes (%,d edges)",
-                    superNodes.size(), supernodeCache.values().stream().mapToInt(List::size).sum()));
+                                                return edge(cursor.sourceId(), cursor.targetId(), isNatural);
+                                            }).toArray());
 
+            logger.info(String.format("cached %,d supernodes (%,d edges)",
+                    superNodes.size(), Arrays.stream(supernodeCache)
+                            .mapToLong(array -> array == null ? 0 : array.length).sum()));
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
             // If we know we have supernodes, it might benefit us to randomly process the nodes instead of in a
@@ -233,37 +243,31 @@ public class GdsReadJob extends ReadJob {
             }
 
             final long rows = nodeStream
-                    .boxed()
                     .parallel()
-                    .flatMap(origin -> {
-                        final Set<Long>
-                                relHistory = new ConcurrentSkipListSet<>();
-                        Stream<Triple<Long, Long, Boolean>> stream = hop(origin, graph, supernodeCache, cacheHits);
+                    .map(origin -> {
+                        final Set<Long> relHistory = new ConcurrentSkipListSet<>();
+                        LongStream stream = hop(origin, graph, supernodeCache, cacheHits);
 
                         // k-hop
                         for (int i = 1; i < k; i++) {
-                            stream = stream.flatMap(edge -> {
-                                final long next = edge.getMiddle();
-                                return Stream.concat(Stream.of(edge), hop(next, graph, supernodeCache, cacheHits));
-                            });
+                            stream = stream
+                                .flatMap(edge -> LongStream.concat(
+                                        LongStream.of(edge),
+                                        hop(target(edge), graph, supernodeCache, cacheHits)))
+                                .filter(edge -> relHistory.add(edge & FLAG_MASK));
                         }
-
-                        // Consume the stream >>>
                         return stream
-                                .map(triple -> (triple.getRight()) ? // re-orient our edges before processing them
-                                        Pair.of(triple.getLeft(), triple.getMiddle()) : Pair.of(triple.getMiddle(), triple.getLeft()))
-                                .filter(edge -> relHistory.add(index(edge)))
-                                .map(edge -> Pair.of(origin, edge));
+                                .peek(edge -> {
+                                    final SubGraphRecord row = SubGraphRecord.of(origin,
+                                            source(edge), Set.of(),
+                                            "REL",
+                                            target(edge), Set.of()
+                                    );
+                                    consume.accept(row);
+                                })
+                                .count();
                     })
-                    .peek(result -> {
-                        final long origin = result.getLeft();
-                        final Pair<Long, Long> edge = result.getRight();
-                        consume.accept(SubGraphRecord.of(origin,
-                                edge.getLeft(), graph.nodeLabels(edge.getLeft()),
-                                "REL",
-                                edge.getRight(), graph.nodeLabels(edge.getRight())));
-                    })
-                    .count();
+                    .sum();
 
             logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rows));
             logger.info(String.format("cache hits: %,d", cacheHits.get()));
