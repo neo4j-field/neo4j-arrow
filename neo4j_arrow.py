@@ -138,13 +138,13 @@ class Neo4jArrow:
         results = self._client.do_action(action, options=self._options)
         return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
-    def khop(self, graph, database='neo4j', filters=[]):
+    def khop(self, graph, database='neo4j', rel_property='_type_'):
         """ Experimental K-Hop Job support """
         params = {
             'db': database,
             'graph': graph,
             'type': 'khop',
-            'properties': [],
+            'properties': [rel_property],
             'filters': [],
         }
         params_bytes = json.dumps(params).encode('utf8')
