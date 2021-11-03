@@ -4,6 +4,7 @@ import org.neo4j.gds.api.nodeproperties.ValueType;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -16,6 +17,45 @@ public abstract class GdsRecord implements RowBasedRecord {
     protected GdsRecord(String[] keyArray, Value[] valueArray) {
         this.keyArray = keyArray;
         this.valueArray = valueArray;
+    }
+
+    public static Value wrapLongs(List<Long> longs) {
+        return new Value() {
+            @Override
+            public int size() {
+                return longs.size();
+            }
+
+            @Override
+            public List<Object> asList() {
+                return longs.stream().collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return longs.stream().map(Long::intValue).collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return longs;
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return longs.stream().map(Long::floatValue).collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return longs.stream().map(Long::doubleValue).collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public Type type() {
+                return Type.LONG_LIST;
+            }
+        };
     }
 
     public static Value wrapLongArray(long[] longs) {

@@ -116,20 +116,20 @@ public class GdsReadJob extends ReadJob {
         return ((source << 30) | target) | (flag ? FLAG_BITS : ZERO);
     }
 
-    protected static long source(long edge) {
+    public static long source(long edge) {
         return (edge >> 30) & TARGET_BITS;
     }
 
-    protected static long target(long edge) {
+    public static long target(long edge) {
         return (edge & TARGET_BITS);
     }
 
-    protected static long uniquify(long edge) {
+    public static long uniquify(long edge) {
         // convert an edge to a "unique" form...which for now just means flipping direction if it's reversed
         return flag(edge) ? (edge & FLAG_MASK) : edge(target(edge), source(edge));
     }
 
-    protected static boolean flag(long edge) {
+    public static boolean flag(long edge) {
         // TODO: use all 4 bits
         return (edge >> 60) != 0;
     }
@@ -155,22 +155,6 @@ public class GdsReadJob extends ReadJob {
         final AtomicLong cacheHits = new AtomicLong(0);
 
         final int k = msg.getK();
-
-        // TODO: pull out as static methods once we move into a dedicated class
-        final Function<Triple<Long, Pair<Long, Long>, Long>, SubGraphRecord> convert =
-                (triple)-> {
-                    final long origin = triple.getLeft();
-                    final Pair<Long, Long> edge = triple.getMiddle();
-
-                    final long source = edge.getLeft();
-                    final long target = edge.getRight();
-                    // discard the Right...it's the terminus
-
-                    return SubGraphRecord.of(graph.toOriginalNodeId(origin),
-                            graph.toOriginalNodeId(source), graph.nodeLabels(source),
-                            "UNKNOWN", // XXX lame
-                            graph.toOriginalNodeId(target), graph.nodeLabels(target));
-                };
 
         final AtomicInteger x = new AtomicInteger(0);
         final Function<BiConsumer<RowBasedRecord, Integer>, Consumer<RowBasedRecord>> wrapConsumer =
@@ -205,7 +189,7 @@ public class GdsReadJob extends ReadJob {
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         // XXX faux record
-        onFirstRecord(SubGraphRecord.of(0L, 0L, store.nodeLabels(), "TYPE", 1L, store.nodeLabels()));
+        onFirstRecord(SubGraphRecord.of(0L, List.of(0L), List.of(0L)));
 
         return CompletableFuture.supplyAsync(() -> {
             logger.info(String.format("starting node stream for gds khop job %s (%,d nodes, %,d rels)",
@@ -265,16 +249,12 @@ public class GdsReadJob extends ReadJob {
                                         hop(target(edge), graph, supernodeCache, cacheHits)))
                                 .filter(edge -> relHistory.add(uniquify(edge)));
                         }
-                        return stream
-                                .peek(edge -> {
-                                    final SubGraphRecord row = SubGraphRecord.of(origin,
-                                            source(edge), Set.of(),
-                                            "REL",
-                                            target(edge), Set.of()
-                                    );
-                                    consume.accept(row);
-                                })
-                                .count();
+                        final SubGraphRecord result = SubGraphRecord.of(
+                                origin,
+                                stream.boxed()
+                                        .collect(Collectors.toUnmodifiableList()));
+                        consume.accept(result);
+                        return result.numEdges();
                     })
                     .sum();
 

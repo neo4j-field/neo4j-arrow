@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import org.neo4j.arrow.job.GdsReadJob;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.graphdb.Node;
@@ -11,55 +12,45 @@ import java.util.stream.Collectors;
 public class SubGraphRecord implements RowBasedRecord {
 
     public final static String KEY_ORIGIN_ID = "_origin_id_";
-    public final static String KEY_SOURCE_ID = "_source_id_";
-    public final static String KEY_SOURCE_LABELS = "_source_labels_";
-    public final static String KEY_REL_TYPE = "_rel_type_";
-    public final static String KEY_TARGET_ID = "_target_id_";
-    public final static String KEY_TARGET_LABELS = "_target_labels_";
+    public final static String KEY_SOURCE_IDS = "_source_ids_";
+    public final static String KEY_TARGET_IDS = "_target_ids_";
 
     private final String[] keys = {
             KEY_ORIGIN_ID,
-            KEY_SOURCE_ID, KEY_SOURCE_LABELS,
-            KEY_REL_TYPE,
-            KEY_TARGET_ID, KEY_TARGET_LABELS };
+            KEY_SOURCE_IDS,
+            KEY_TARGET_IDS
+    };
 
     private final long origin;
-    private final long source;
-    private final Set<NodeLabel> sourceLabels;
-    private final String relType;
-    private final long target;
-    private final Set<NodeLabel> targetLabels;
+    private final List<Long> sourceIds;
+    private final List<Long> targetIds;
 
 
-    public SubGraphRecord(long origin, long source, Set<NodeLabel> sourceLabels, String type, long target, Set<NodeLabel> targetLabels) {
+    protected SubGraphRecord(long origin, List<Long> sourceIds, List<Long> targetIds) {
         this.origin = origin;
-        this.source = source;
-        this.sourceLabels = sourceLabels;
-        this.relType = type;
-        this.target = target;
-        this.targetLabels = targetLabels;
+        this.sourceIds = sourceIds;
+        this.targetIds = targetIds;
     }
 
-    public static SubGraphRecord of(long origin,
-                                    long source, Set<NodeLabel> sourceLabels,
-                                    String relType,
-                                    long target, Set<NodeLabel> targetLabels) {
-        return new SubGraphRecord(origin, source, sourceLabels, relType, target, targetLabels);
+    public static SubGraphRecord of(long origin, List<Long> sourceIds, List<Long> targetIds) {
+        if (sourceIds.size() != targetIds.size()) {
+            throw new IllegalArgumentException("length of both source and target ids must be the same");
+        }
+        return new SubGraphRecord(origin, sourceIds, targetIds);
+    }
+
+    public static SubGraphRecord of(long origin, Iterable<Long> edges) {
+        final List<Long> sources = new ArrayList<>();
+        final List<Long> targets = new ArrayList<>();
+
+        edges.forEach(edge -> {
+            sources.add(GdsReadJob.source(edge));
+            targets.add(GdsReadJob.target(edge));
+        });
+        return new SubGraphRecord(origin, sources, targets);
     }
 
     public static SubGraphRecord of(Node source, Relationship rel, Node target) {
-        final Set<NodeLabel> sourceLabels = new HashSet<>();
-        source.getLabels().forEach(lbl -> sourceLabels.add(NodeLabel.of(lbl.name())));
-
-        final Set<NodeLabel> targetLabels = new HashSet<>();
-        target.getLabels().forEach(lbl -> targetLabels.add(NodeLabel.of(lbl.name())));
-
-        /*
-        return new SubGraphRecord(source.getId(), sourceLabels,
-                rel.getId(), rel.getType().toString(),
-                target.getId(), targetLabels);
-
-         */
         return null;
     }
 
@@ -67,11 +58,8 @@ public class SubGraphRecord implements RowBasedRecord {
     public Value get(int index) {
         switch (index) {
             case 0: return GdsRecord.wrapScalar(origin, ValueType.LONG);
-            case 1: return GdsRecord.wrapScalar(source, ValueType.LONG);
-            case 2: return GdsNodeRecord.wrapNodeLabels(sourceLabels);
-            case 3: return GdsRecord.wrapString(relType);
-            case 4: return GdsRecord.wrapScalar(target, ValueType.LONG);
-            case 5: return GdsNodeRecord.wrapNodeLabels(targetLabels);
+            case 1: return GdsRecord.wrapLongs(sourceIds);
+            case 2: return GdsRecord.wrapLongs(targetIds);
             default:
                 throw new RuntimeException("invalid index: " + index);
         }
@@ -81,25 +69,23 @@ public class SubGraphRecord implements RowBasedRecord {
     public Value get(String field) {
         switch (field.toLowerCase()) {
             case KEY_ORIGIN_ID:  return get(0);
-            case KEY_SOURCE_ID: return get(1);
-            case KEY_SOURCE_LABELS: return get(2);
-            case KEY_REL_TYPE: return get(3);
-            case KEY_TARGET_ID: return get(4);
-            case KEY_TARGET_LABELS: return get(5);
+            case KEY_SOURCE_IDS: return get(1);
+            case KEY_TARGET_IDS: return get(2);
             default:
                 throw new RuntimeException("invalid field: " + field);
         }
+    }
+
+    public int numEdges() {
+        return sourceIds.size();
     }
 
     @Override
     public String toString() {
         return "SubGraphRecord{" +
                 "origin=" + origin +
-                ", source=" + source +
-                ", sourceLabels=" + sourceLabels +
-                ", relType='" + relType + '\'' +
-                ", target=" + target +
-                ", targetLabels=" + targetLabels +
+                ", sourceIds=" + sourceIds +
+                ", targetIds=" + targetIds +
                 '}';
     }
 

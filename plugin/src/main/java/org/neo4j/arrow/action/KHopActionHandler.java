@@ -66,15 +66,12 @@ public class KHopActionHandler implements ActionHandler {
                 // XXX 64 bit signed vs 64 bit unsigned issue here
                 fields.add(new Field(SubGraphRecord.KEY_ORIGIN_ID, FieldType.nullable(new ArrowType.Int(64, true)), null));
 
-                fields.add(new Field(SubGraphRecord.KEY_SOURCE_ID, FieldType.nullable(new ArrowType.Int(64, true)), null));
-                fields.add(new Field(SubGraphRecord.KEY_SOURCE_LABELS, FieldType.nullable(new ArrowType.List()),
-                        List.of(new Field(SubGraphRecord.KEY_SOURCE_LABELS, FieldType.nullable(new ArrowType.Utf8()), null))));
+                fields.add(new Field(SubGraphRecord.KEY_SOURCE_IDS, FieldType.nullable(new ArrowType.List()),
+                        List.of(new Field(SubGraphRecord.KEY_SOURCE_IDS, FieldType.nullable(new ArrowType.Int(64, true)), null))));
 
-                fields.add(new Field(SubGraphRecord.KEY_REL_TYPE, FieldType.nullable(new ArrowType.Utf8()), null));
+                fields.add(new Field(SubGraphRecord.KEY_TARGET_IDS, FieldType.nullable(new ArrowType.List()),
+                        List.of(new Field(SubGraphRecord.KEY_TARGET_IDS, FieldType.nullable(new ArrowType.Int(64, true)), null))));
 
-                fields.add(new Field(SubGraphRecord.KEY_TARGET_ID, FieldType.nullable(new ArrowType.Int(64, true)), null));
-                fields.add(new Field(SubGraphRecord.KEY_TARGET_LABELS, FieldType.nullable(new ArrowType.List()),
-                        List.of(new Field(SubGraphRecord.KEY_TARGET_LABELS, FieldType.nullable(new ArrowType.Utf8()), null))));
                 producer.setFlightInfo(ticket, new Schema(fields));
             });
 

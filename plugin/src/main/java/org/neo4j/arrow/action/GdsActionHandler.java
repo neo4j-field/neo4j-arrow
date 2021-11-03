@@ -220,6 +220,12 @@ public class GdsActionHandler implements ActionHandler {
                                     FieldType.nullable(new ArrowType.Utf8()),
                                     null))));
                     break;
+                case LONG_LIST:
+                    fields.add(new Field(fieldName, FieldType.nullable(new ArrowType.List()),
+                            List.of(new Field(fieldName,
+                                    FieldType.nullable(new ArrowType.Int(64, true)),
+                                    null))));
+                    break;
                 default:
                     // TODO: fallback to raw bytes?
                     log.error("unsupported value type for handler: {}", value.type());

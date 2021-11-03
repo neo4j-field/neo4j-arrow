@@ -100,13 +100,10 @@ public class KHopJob extends ReadJob {
                         while (iterator.hasNext())
                             targetLabels.add(NodeLabel.of(iterator.next().name()));
 
-                        return SubGraphRecord.of(startId,
-                                source.getId(), sourceLabels,
-                                rel.getType().name(),
-                                target.getId(), targetLabels);
+                        return null; // XXX TODO
                     })
                     .map(row -> {
-                        consumer.accept(row, (int) row.get(1).asLong()); // XXX cast
+                        consumer.accept(null, (int) 0); // XXX cast
                         return 1;
                     })
                     .count();
@@ -135,7 +132,7 @@ public class KHopJob extends ReadJob {
         final int k = msg.getK();
 
         // XXX Fake result just to get things moving
-        onFirstRecord(new SubGraphRecord(0L, 1L, Set.of(NodeLabel.ALL_NODES), "TYPE", 2, Set.of(NodeLabel.ALL_NODES)));
+        onFirstRecord(SubGraphRecord.of(0L, List.of(0L), List.of(0L)));
 
         this.future = CompletableFuture.supplyAsync(() -> {
             long maxNodeId = 1_000;

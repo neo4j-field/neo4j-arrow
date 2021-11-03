@@ -15,6 +15,7 @@ import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.TransferPair;
@@ -82,6 +83,11 @@ public class Producer implements FlightProducer, AutoCloseable {
         public static FlushWork from(List<ValueVector> vectors, int vectorDimension) {
             return new FlushWork(vectors, vectorDimension);
         }
+
+        public void release() {
+            // Pull the rip cord
+            vectors.forEach(ValueVector::close);
+        }
     }
 
     /**
@@ -129,7 +135,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                 VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
-            logger.debug("using schema: {}", info.getSchema().toJson());
+            final Schema schema = info.getSchema();
+            logger.debug("using schema: {}", schema);
 
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
@@ -168,7 +175,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                        final FlushWork work = workQueue.pollFirst(100, TimeUnit.MILLISECONDS);
                        if (work != null) {
                            transferMutex.acquire();
-                           flush(listener, loader, work.vectors, work.vectorDimension);
+                           flush(listener, loader, schema, work.vectors, work.vectorDimension);
                            transferMutex.release();
                        }
                    } catch (InterruptedException e) {
@@ -300,6 +307,11 @@ public class Producer implements FlightProducer, AutoCloseable {
                                 case DOUBLE_ARRAY:
                                     for (double d : value.asDoubleArray())
                                         writer.writeFloat8(d);
+                                    break;
+                                case LONG_LIST:
+                                    for (long l : value.asLongList()) {
+                                        writer.writeBigInt(l);
+                                    }
                                     break;
                                 case STRING_LIST:
                                     for (final String s : value.asStringList()) {
@@ -442,6 +454,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         } catch (Exception e) {
             isFeeding.set(false);
+            workQueue.forEach(FlushWork::release);
             workQueue.clear();
             logger.error("ruh row", e);
             listener.error(CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException());
@@ -464,7 +477,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      * @param vectors list of {@link ValueVector}s corresponding to the columns of data to flush
      * @param dimension dimension of the vectors
      */
-    private static void flush(ServerStreamListener listener, VectorLoader loader, List<ValueVector> vectors, int dimension) {
+    private static void flush(ServerStreamListener listener, VectorLoader loader, Schema schema, List<ValueVector> vectors, int dimension) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
@@ -490,14 +503,25 @@ public class Producer implements FlightProducer, AutoCloseable {
                         nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
                         if (vector instanceof ListVector && child instanceof UnionVector) {
                             final UnionVector uv = (UnionVector) child;
-                            for (FieldVector grandchild : uv.getChildrenFromFields()) {
-                                if (grandchild instanceof VarCharVector) {
-                                    final VarCharVector vcv = (VarCharVector) grandchild;
-                                    buffers.add(vcv.getValidityBuffer());
-                                    buffers.add(vcv.getOffsetBuffer());
-                                    buffers.add(vcv.getDataBuffer());
-                                }
+                            final ArrowType.ArrowTypeID id = schema.findField(vector.getName())
+                                    .getChildren().get(0).getType().getTypeID();
+
+                            final FieldVector innerVector;
+                            switch (id) {
+                                // XXX assume homogeneity
+                                case Int:
+                                    // XXX assume bigint for now
+                                    innerVector = uv.getBigIntVector();
+                                    break;
+                                case Utf8:
+                                    innerVector = uv.getVarCharVector();
+                                    break;
+                                default:
+                                    logger.warn("unhandled vector type: {}", id);
+                                    innerVector = uv.getStruct();
+                                    break;
                             }
+                            buffers.addAll(List.of(innerVector.getBuffers(false)));
                         } else {
                             buffers.addAll(List.of(child.getBuffers(false)));
                         }

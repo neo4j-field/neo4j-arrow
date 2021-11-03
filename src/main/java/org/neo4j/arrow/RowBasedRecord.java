@@ -34,8 +34,10 @@ public interface RowBasedRecord {
         STRING_LIST,
         /** Heterogeneous array of supported {@link Type}s */
         LIST,
+        LONG_LIST,
+        INT_LIST,
         /** Catch-all...TBD */
-        OBJECT
+        OBJECT;
     }
 
     /** Retrieve a {@link Value} from the record by positional index */
