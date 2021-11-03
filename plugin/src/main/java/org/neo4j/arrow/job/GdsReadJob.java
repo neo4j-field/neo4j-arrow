@@ -107,6 +107,10 @@ public class GdsReadJob extends ReadJob {
     protected static final long FLAG_MASK = 0x0FFFFFFFFFFFFFFFL;
     protected static final long TARGET_BITS = 0x000000003FFFFFFFL;
 
+    protected static long edge(long source, long target) {
+        return (source << 30) | target;
+    }
+
     protected static long edge(long source, long target, boolean flag) {
         // assumption: source and target are both < 30 bits in length
         return ((source << 30) | target) | (flag ? FLAG_BITS : ZERO);
@@ -118,6 +122,11 @@ public class GdsReadJob extends ReadJob {
 
     protected static long target(long edge) {
         return (edge & TARGET_BITS);
+    }
+
+    protected static long uniquify(long edge) {
+        // convert an edge to a "unique" form...which for now just means flipping direction if it's reversed
+        return flag(edge) ? (edge & FLAG_MASK) : edge(target(edge), source(edge));
     }
 
     protected static boolean flag(long edge) {
@@ -254,7 +263,7 @@ public class GdsReadJob extends ReadJob {
                                 .flatMap(edge -> LongStream.concat(
                                         LongStream.of(edge),
                                         hop(target(edge), graph, supernodeCache, cacheHits)))
-                                .filter(edge -> relHistory.add(edge & FLAG_MASK));
+                                .filter(edge -> relHistory.add(uniquify(edge)));
                         }
                         return stream
                                 .peek(edge -> {
