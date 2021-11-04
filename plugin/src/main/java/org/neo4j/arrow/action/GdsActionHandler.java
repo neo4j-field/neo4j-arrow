@@ -17,6 +17,7 @@ import org.neo4j.logging.Log;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -146,6 +147,9 @@ public class GdsActionHandler implements ActionHandler {
 
             // We're taking off, so hand the ticket back to our client.
             return Outcome.success(new Result(ticket.serialize().array()));
+        } catch (NoSuchElementException e) {
+            // no graph?
+            return Outcome.failure(CallStatus.NOT_FOUND.withDescription(e.getMessage()));
         } catch (Exception e) {
             log.error("handleGdsReadAction failed", e);
             return Outcome.failure(CallStatus.INTERNAL.withDescription(e.getMessage()));

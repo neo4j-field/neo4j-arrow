@@ -6,6 +6,8 @@ import org.apache.commons.lang3.tuple.Triple;
 import org.neo4j.arrow.*;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.KHopMessage;
+import org.neo4j.arrow.gds.Edge;
+import org.neo4j.arrow.gds.SuperNodeCache;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.RelationshipType;
 import org.neo4j.gds.api.Graph;
@@ -15,16 +17,11 @@ import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.RandomLongIterator;
+import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterable;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
-import org.neo4j.gds.core.utils.mem.AllocationTracker;
-import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
-import org.neo4j.gds.core.utils.paged.HugeLongArray;
-import org.neo4j.gds.core.utils.paged.HugeLongLongMap;
-import org.neo4j.gds.core.utils.paged.HugeObjectArray;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +30,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.*;
+
+import static org.neo4j.arrow.gds.Edge.target;
+import static org.neo4j.arrow.gds.Edge.uniquify;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -102,45 +102,13 @@ public class GdsReadJob extends ReadJob {
         }, nodeCount, Spliterator.SIZED | Spliterator.DISTINCT | Spliterator.ORDERED | Spliterator.NONNULL);
     }
 
-    protected static final long ZERO = 0x0L;
-    protected static final long FLAG_BITS = 0xF000000000000000L;
-    protected static final long FLAG_MASK = 0x0FFFFFFFFFFFFFFFL;
-    protected static final long TARGET_BITS = 0x000000003FFFFFFFL;
-
-    protected static long edge(long source, long target) {
-        return (source << 30) | target;
-    }
-
-    protected static long edge(long source, long target, boolean flag) {
-        // assumption: source and target are both < 30 bits in length
-        return ((source << 30) | target) | (flag ? FLAG_BITS : ZERO);
-    }
-
-    public static long source(long edge) {
-        return (edge >> 30) & TARGET_BITS;
-    }
-
-    public static long target(long edge) {
-        return (edge & TARGET_BITS);
-    }
-
-    public static long uniquify(long edge) {
-        // convert an edge to a "unique" form...which for now just means flipping direction if it's reversed
-        return flag(edge) ? (edge & FLAG_MASK) : edge(target(edge), source(edge));
-    }
-
-    public static boolean flag(long edge) {
-        // TODO: use all 4 bits
-        return (edge >> 60) != 0;
-    }
-
-    private LongStream hop(long next, Graph graph, long[][] cache, AtomicLong cacheHits) {
-        final long[] cachedList = cache[(int) next]; // XXX cast
+    private LongStream hop(long start, Graph graph, SuperNodeCache cache, AtomicLong cacheHits) {
+        final long[] cachedList = cache.get((int) start); // XXX cast
 
         if (cachedList == null) {
             return graph.concurrentCopy()
-                    .streamRelationships(next, Double.NaN)
-                    .mapToLong(cursor -> edge(cursor.sourceId(), cursor.targetId(), (Double.isNaN(cursor.property()))));
+                    .streamRelationships(start, Double.NaN)
+                    .mapToLong(cursor -> Edge.edge(cursor.sourceId(), cursor.targetId(), (Double.isNaN(cursor.property()))));
         } else {
             cacheHits.incrementAndGet();
             return Arrays.stream(cachedList);
@@ -162,10 +130,13 @@ public class GdsReadJob extends ReadJob {
                         (row) -> consumer.accept(row, Math.abs(x.getAndIncrement()));
 
         // XXX analyze degrees
-        final Map<Integer, Long> histogram = new ConcurrentHashMap<>();
         final Queue<Long> superNodes = new ConcurrentLinkedQueue<>();
 
-        logger.info("checking for super nodes...");
+        logger.info(String.format("checking for super nodes in graph with %,d nodes, %,d edges...", nodeCount, relCount));
+        final AtomicInteger[] histogram = new AtomicInteger[10];
+        for (int i=0; i<histogram.length; i++)
+            histogram[i] = new AtomicInteger(0);
+
         LongStream.range(0, nodeCount)
                 .parallel()
                 .mapToObj(id -> Pair.of(id, 0))
@@ -176,16 +147,16 @@ public class GdsReadJob extends ReadJob {
                         : Pair.of(pair.getLeft(), pair.getRight().intValue() + 1))
                 .forEach(pair -> {
                     int magnitude = pair.getRight();
-                    histogram.compute(magnitude, (key, val) -> (val == null) ? 1L : val + 1L);
-                    if (magnitude > 2) // XXX cutoff?
+                    if (magnitude > 4) { // 100k's of edges
                         superNodes.add(pair.getLeft());
+                    }
+                    histogram[pair.getRight()].incrementAndGet();
                 });
 
-        histogram.keySet().stream()
-                .sorted()
-                .forEach(key ->
-                        logger.info(String.format("\t[ 10 * %d ]\t- %,d nodes", key, histogram.get(key))));
-        histogram.clear();
+        logger.info(String.format("\t[ zero ]\t- %,d nodes", histogram[0].get()));
+        for (int i=1; i<histogram.length; i++)
+            logger.info(String.format("\t[ 1e%d - 1e%d )\t- %,d nodes", i, i + 1, histogram[i].get()));
+
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         // XXX faux record
@@ -199,43 +170,36 @@ public class GdsReadJob extends ReadJob {
              * "Triples makes it safe. Triples is best."
              *   -- Your dad's old friend (https://www.youtube.com/watch?v=8Inf1Yz_fgk)
              *
-             * We'll use a Triple<> that contains the start (L) and end (M) node ids, as well
-             * as the detail of if the resulting edge is "natural" (R) or not. (We need to
-             * know the type for traversal vs. result purposes.)
+             * We'll encode a "triple" effectively in a 64-bit Java long, leaning on the
+             * assumption that we have < 1B nodes...
              */
 
+            final SuperNodeCache supernodeCache;
             // Pre-cache supernodes adjacency lists
-            logger.info("caching supernodes...");
-
-            final long[][] supernodeCache = new long[(int) nodeCount][]; // XXX cast
-            superNodes.parallelStream()
-                    .forEach(superNodeId ->
-                            supernodeCache[superNodeId.intValue()] =
-                                    graph.concurrentCopy()
-                                            .streamRelationships(superNodeId, Double.NaN)
-                                            .mapToLong(cursor -> {
-                                                final boolean isNatural = Double.isNaN(cursor.property());
-                                                return edge(cursor.sourceId(), cursor.targetId(), isNatural);
-                                            }).toArray());
-
-            logger.info(String.format("cached %,d supernodes (%,d edges)",
-                    superNodes.size(), Arrays.stream(supernodeCache)
-                            .mapToLong(array -> array == null ? 0 : array.length).sum()));
-            var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
-
-            // If we know we have supernodes, it might benefit us to randomly process the nodes instead of in a
-            // sequential order.
-            final LongStream nodeStream;
             if (superNodes.size() > 0) {
-                var i = new RandomLongIterator(0, nodeCount);
-                var s = Spliterators.spliterator(i, nodeCount,
-                        Spliterator.SIZED | Spliterator.DISTINCT | Spliterator.NONNULL | Spliterator.IMMUTABLE);
-                nodeStream = StreamSupport.longStream(s, true);
+                logger.info("caching supernodes...");
+                supernodeCache = SuperNodeCache.ofSize(superNodes.size());
+                superNodes.parallelStream()
+                        .forEach(superNodeId ->
+                                supernodeCache.set(superNodeId.intValue(),
+                                        graph.concurrentCopy()
+                                                .streamRelationships(superNodeId, Double.NaN)
+                                                .mapToLong(cursor -> {
+                                                    final boolean isNatural = Double.isNaN(cursor.property());
+                                                    return Edge.edge(cursor.sourceId(), cursor.targetId(), isNatural);
+                                                }).toArray()));
+
+                logger.info(String.format("cached %,d supernodes (%,d edges)",
+                        superNodes.size(), supernodeCache.stream()
+                                .mapToLong(array -> array == null ? 0 : array.length).sum()));
             } else {
-                nodeStream = LongStream.range(0, nodeCount);
+                supernodeCache = SuperNodeCache.empty();
             }
 
-            final long rows = nodeStream
+            var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
+
+            final long rows = LongStream.range(0, nodeCount)
+                    .unordered()
                     .parallel()
                     .map(origin -> {
                         final Set<Long> relHistory = new ConcurrentSkipListSet<>();
@@ -251,7 +215,8 @@ public class GdsReadJob extends ReadJob {
                         }
                         final SubGraphRecord result = SubGraphRecord.of(
                                 origin,
-                                stream.boxed()
+                                stream.unordered()
+                                        .boxed()
                                         .collect(Collectors.toUnmodifiableList()));
                         consume.accept(result);
                         return result.numEdges();

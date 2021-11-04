@@ -4,6 +4,7 @@ import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.AllocationListener;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
@@ -41,13 +42,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * framework and stream wrangling.
  *
  * <p>
- *     RPC {@link Action}s are made available via registration into the {@link #handlerMap} via
- *     {@link #registerHandler(ActionHandler)}.
+ * RPC {@link Action}s are made available via registration into the {@link #handlerMap} via
+ * {@link #registerHandler(ActionHandler)}.
  * </p>
  * <p>
- *     Streams, aka "Flights", are indexed by {@link Ticket}s and kept in {@link #flightMap}. As a
- *     consequence, there's currently no multi-process support. The {@link Job} backing the stream
- *     is kept in {@link #jobMap}.
+ * Streams, aka "Flights", are indexed by {@link Ticket}s and kept in {@link #flightMap}. As a
+ * consequence, there's currently no multi-process support. The {@link Job} backing the stream
+ * is kept in {@link #jobMap}.
  * </p>
  */
 public class Producer implements FlightProducer, AutoCloseable {
@@ -67,7 +68,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     public Producer(BufferAllocator parentAllocator, Location location) {
         this.location = location;
-        this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer",0, Config.maxArrowMemory);
+        this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer", 0, Config.maxArrowMemory);
 
         // Default event handlers
         handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
@@ -76,10 +77,12 @@ public class Producer implements FlightProducer, AutoCloseable {
     private static class FlushWork {
         public final List<ValueVector> vectors;
         public final int vectorDimension;
+
         private FlushWork(List<ValueVector> vectors, int vectorDimension) {
             this.vectors = vectors;
             this.vectorDimension = vectorDimension;
         }
+
         public static FlushWork from(List<ValueVector> vectors, int vectorDimension) {
             return new FlushWork(vectors, vectorDimension);
         }
@@ -93,9 +96,9 @@ public class Producer implements FlightProducer, AutoCloseable {
     /**
      * Attempt to get an Arrow stream for the given {@link Ticket}.
      *
-     * @param context the {@link org.apache.arrow.flight.FlightProducer.CallContext} that contains
-     *                details on the client (the peer) attempting to access the stream.
-     * @param ticket the {@link Ticket} for the Flight
+     * @param context  the {@link org.apache.arrow.flight.FlightProducer.CallContext} that contains
+     *                 details on the client (the peer) attempting to access the stream.
+     * @param ticket   the {@link Ticket} for the Flight
      * @param listener the {@link org.apache.arrow.flight.FlightProducer.ServerStreamListener} for
      *                 returning results in the stream back to the caller.
      */
@@ -114,7 +117,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             return;
         }
 
-        final ReadJob job = (ReadJob)rawJob;
+        final ReadJob job = (ReadJob) rawJob;
 
         final FlightInfo info = flightMap.get(ticket);
         if (info == null) {
@@ -125,6 +128,7 @@ public class Producer implements FlightProducer, AutoCloseable {
         // Our work queue for multiple producers, but a single consumer
         final BlockingDeque<FlushWork> workQueue = new LinkedBlockingDeque<>();
         final AtomicBoolean isFeeding = new AtomicBoolean(true);
+        final AtomicBoolean fatality = new AtomicBoolean(false);
 
         try (BufferAllocator baseAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
@@ -132,7 +136,7 @@ public class Producer implements FlightProducer, AutoCloseable {
              BufferAllocator transmitAllocator = allocator.newChildAllocator(
                      String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
                      0, Config.maxStreamMemory);
-                VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
+             VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
             final Schema schema = info.getSchema();
@@ -152,10 +156,6 @@ public class Producer implements FlightProducer, AutoCloseable {
             listener.setUseZeroCopy(false);
             listener.start(root);
 
-            // A bit hacky, but provide the core processing logic as a Consumer
-            // TODO: handle batches of records to decrease frequency of calls
-            final AtomicBoolean errored = new AtomicBoolean(false);
-
             // Tunable partition size...
             // TODO: figure out ideal way to set a good default based on host
             final int maxPartitions = Config.arrowMaxPartitions;
@@ -170,25 +170,31 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Our work queue consumer
             final CompletableFuture<Void> flushJob = CompletableFuture.runAsync(() -> {
-               while (isFeeding.get() || !workQueue.isEmpty()) {
-                   try {
-                       final FlushWork work = workQueue.pollFirst(100, TimeUnit.MILLISECONDS);
-                       if (work != null) {
-                           transferMutex.acquire();
-                           flush(listener, loader, schema, work.vectors, work.vectorDimension);
-                           transferMutex.release();
-                       }
-                   } catch (InterruptedException e) {
-                       logger.error("flush job interrupted!");
-                       return;
-                   }
-               }
-               logger.info("flusher for job {} finished", job);
+                while (isFeeding.get() || !workQueue.isEmpty()) {
+                    try {
+                        final FlushWork work = workQueue.pollFirst(100, TimeUnit.MILLISECONDS);
+                        if (work != null) {
+                            transferMutex.acquire();
+                            flush(listener, loader, schema, work.vectors, work.vectorDimension);
+                            transferMutex.release();
+                        }
+                    } catch (InterruptedException e) {
+                        logger.error("flush job interrupted!", e);
+                        return;
+                    } catch (Exception e) {
+                        logger.error("problem flushing :(", e);
+                        job.cancel(true);
+                        fatality.set(true);
+                        workQueue.forEach(FlushWork::release);
+                    }
+                }
+                logger.info("flusher for job {} finished", job);
             }, Executors.newSingleThreadExecutor());
 
             // Wasteful, but pre-init for now
-            for (int i=0; i<maxPartitions; i++) {
-                bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%d", i), 0, Long.MAX_VALUE);
+            for (int i = 0; i < maxPartitions; i++) {
+                bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%d", i), 0,
+                        Config.maxStreamMemory / maxPartitions);
                 partitionedSemaphores[i] = new Semaphore(1);
                 partitionedWriters[i] = new HashMap<>();
                 partitionedCounts[i] = new AtomicInteger(0);
@@ -199,6 +205,10 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Core job logic
             job.consume((record, partitionKey) -> {
+                if (fatality.get()) {
+                    // drop record
+                    return;
+                }
                 // Trivial partitioning scheme...
                 final int partition = Math.abs(partitionKey % maxPartitions);
                 try {
@@ -222,15 +232,22 @@ public class Producer implements FlightProducer, AutoCloseable {
                             int retries = 1000;
                             fieldVector.setInitialCapacity(Config.arrowBatchSize);
                             while (!fieldVector.allocateNewSafe() && --retries > 0) {
-                                logger.error("failed to allocate memory for field {}", fieldVector.getName());
-                                try { Thread.sleep(100); } catch (Exception ignored) {}
+                                // logger.error("failed to allocate memory for field {}", fieldVector.getName());
+                                try {
+                                    Thread.sleep(100);
+                                } catch (Exception ignored) {
+                                }
+                            }
+                            if (retries == 0) {
+                                fatality.set(true);
+                                throw new Exception("failed to allocate memory for vector" + fieldVector.getName());
                             }
                         }
                     }
 
                     // TODO: refactor to using fixed arrays for speed
                     // Our translation guts...CPU intensive
-                    for (int n=0; n<fieldList.size(); n++) {
+                    for (int n = 0; n < fieldList.size(); n++) {
                         final Field field = fieldList.get(n);
                         final RowBasedRecord.Value value = record.get(n);
                         final FieldVector vector = vectorList.get(n);
@@ -249,7 +266,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                             // Used for GdsJobs
                             final UnionFixedSizeListWriter writer =
                                     (UnionFixedSizeListWriter) writerMap.computeIfAbsent(field.getName(),
-                                    s -> ((FixedSizeListVector) vector).getWriter());
+                                            s -> ((FixedSizeListVector) vector).getWriter());
                             writer.startList();
                             // XXX: Assumes all values share the same type and first value is non-null
                             switch (value.type()) {
@@ -270,7 +287,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                                         writer.writeFloat8(d);
                                     break;
                                 default:
-                                    if (errored.compareAndSet(false, true)) {
+                                    if (fatality.compareAndSet(false, true)) {
                                         Exception e = CallStatus.INVALID_ARGUMENT.withDescription("invalid array type")
                                                 .toRuntimeException();
                                         listener.error(e);
@@ -309,8 +326,14 @@ public class Producer implements FlightProducer, AutoCloseable {
                                         writer.writeFloat8(d);
                                     break;
                                 case LONG_LIST:
-                                    for (long l : value.asLongList()) {
-                                        writer.writeBigInt(l);
+                                    try {
+                                        for (long l : value.asLongList()) {
+                                            writer.writeBigInt(l);
+                                        }
+                                    } catch (OutOfMemoryException oom) {
+                                        logger.error(String.format("OOM writing LONG_LIST %s (value size: %,d): %s",
+                                                vector.getName(), value.size(), oom.getMessage()));
+                                        fatality.set(true);
                                     }
                                     break;
                                 case STRING_LIST:
@@ -383,7 +406,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         writerMap.clear();
                     }
                 } catch (Exception e) {
-                    if (errored.compareAndSet(false, true)) {
+                    if (fatality.compareAndSet(false, true)) {
                         logger.error(e.getMessage(), e);
                         job.cancel(true);
                         listener.error(CallStatus.UNKNOWN.withDescription(e.getMessage()).toRuntimeException());
@@ -396,8 +419,10 @@ public class Producer implements FlightProducer, AutoCloseable {
             // This should block until all data from the Job is prepared for the stream
             job.get();
 
-            // Final flush of stragglers...
-            for (int partition=0; partition<maxPartitions; partition++) {
+            // Final conversion of stragglers...
+            for (int partition = 0; partition < maxPartitions; partition++) {
+                if (fatality.get())
+                    break;
 
                 final List<FieldVector> vectorList = partitionedVectorList[partition];
                 final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
@@ -434,6 +459,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     try {
                         writer.close();
                     } catch (Exception e) {
+                        // XXX unhandled exception
                         e.printStackTrace();
                     }
                 });
@@ -454,6 +480,8 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         } catch (Exception e) {
             isFeeding.set(false);
+            fatality.set(true);
+
             workQueue.forEach(FlushWork::release);
             workQueue.clear();
             logger.error("ruh row", e);
@@ -468,16 +496,18 @@ public class Producer implements FlightProducer, AutoCloseable {
     /**
      * Flush out our vectors into the stream. At this point, all data is Arrow-based.
      * <p>
-     *     This part is tricky and requires turning Arrow vectors into Arrow Flight messages based
-     *     on the concept of {@link ArrowFieldNode}s and {@link ArrowBuf}s. Not as simple as "here's
-     *     my vectors!"
+     * This part is tricky and requires turning Arrow vectors into Arrow Flight messages based
+     * on the concept of {@link ArrowFieldNode}s and {@link ArrowBuf}s. Not as simple as "here's
+     * my vectors!"
      * </p>
-     * @param listener reference to the {@link ServerStreamListener}
-     * @param loader reference to the {@link VectorLoader}
-     * @param vectors list of {@link ValueVector}s corresponding to the columns of data to flush
+     *
+     * @param listener  reference to the {@link ServerStreamListener}
+     * @param loader    reference to the {@link VectorLoader}
+     * @param vectors   list of {@link ValueVector}s corresponding to the columns of data to flush
      * @param dimension dimension of the vectors
      */
-    private static void flush(ServerStreamListener listener, VectorLoader loader, Schema schema, List<ValueVector> vectors, int dimension) {
+    private static void flush(ServerStreamListener listener, VectorLoader loader, Schema schema,
+                              List<ValueVector> vectors, int dimension) throws Exception {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
@@ -497,7 +527,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         buffers.add(vector.getValidityBuffer());
                     }
 
-                    for (FieldVector child : ((BaseListVector)vector).getChildrenFromFields()) {
+                    for (FieldVector child : ((BaseListVector) vector).getChildrenFromFields()) {
                         logger.trace("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
 
                         nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
@@ -535,7 +565,9 @@ public class Producer implements FlightProducer, AutoCloseable {
                 }
             }
         } catch (Exception e) {
+            vectors.forEach(ValueVector::close);
             logger.error("error preparing batch", e);
+            throw e;
         }
 
         // The actual data transmission...
@@ -543,16 +575,17 @@ public class Producer implements FlightProducer, AutoCloseable {
             loader.load(batch);
             listener.putNext();
         } catch (Exception e) {
-            logger.error(e.getMessage(), e);
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());
+            throw e;
+        } finally {
+            // We need to close our reference to the ValueVector to decrement the ref count in the underlying buffers.
+            vectors.forEach(ValueVector::close);
         }
-
-        // We need to close our reference to the ValueVector to decrement the ref count in the underlying buffers.
-        vectors.forEach(ValueVector::close);
     }
 
     /**
      * Ticket a Job and add it to the jobMap.
+     *
      * @param job instance of a Job
      * @return new Ticket
      */
@@ -571,7 +604,7 @@ public class Producer implements FlightProducer, AutoCloseable {
         final Job job = getJob(ticket);
         if (job == null)
             throw CallStatus.INTERNAL.withDescription("no job for flight???").toRuntimeException();
-        assert(job.getStatus() == Job.Status.PENDING || job.getStatus() == Job.Status.INITIALIZING);
+        assert (job.getStatus() == Job.Status.PENDING || job.getStatus() == Job.Status.INITIALIZING);
 
         final FlightInfo info = new FlightInfo(schema, FlightDescriptor.command(ticket.getBytes()),
                 List.of(new FlightEndpoint(ticket, location)), -1, -1);
@@ -714,11 +747,11 @@ public class Producer implements FlightProducer, AutoCloseable {
         try {
             final Outcome outcome = handler.handle(context, action, this);
             if (outcome.isSuccessful()) {
-                assert(outcome.getResult().isPresent());
+                assert (outcome.getResult().isPresent());
                 listener.onNext(outcome.getResult().get());
                 listener.onCompleted();
             } else {
-                assert(outcome.getCallStatus().isPresent());
+                assert (outcome.getCallStatus().isPresent());
                 final CallStatus callStatus = outcome.getCallStatus().get();
                 logger.error(callStatus.description(), callStatus.toRuntimeException());
                 listener.onError(callStatus.toRuntimeException());

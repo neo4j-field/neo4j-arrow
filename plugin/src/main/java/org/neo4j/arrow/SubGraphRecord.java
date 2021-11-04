@@ -1,7 +1,6 @@
 package org.neo4j.arrow;
 
-import org.neo4j.arrow.job.GdsReadJob;
-import org.neo4j.gds.NodeLabel;
+import org.neo4j.arrow.gds.Edge;
 import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Relationship;
@@ -44,8 +43,8 @@ public class SubGraphRecord implements RowBasedRecord {
         final List<Long> targets = new ArrayList<>();
 
         edges.forEach(edge -> {
-            sources.add(GdsReadJob.source(edge));
-            targets.add(GdsReadJob.target(edge));
+            sources.add(Edge.source(edge));
+            targets.add(Edge.target(edge));
         });
         return new SubGraphRecord(origin, sources, targets);
     }

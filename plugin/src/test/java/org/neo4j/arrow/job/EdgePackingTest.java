@@ -2,6 +2,7 @@ package org.neo4j.arrow.job;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.neo4j.arrow.gds.Edge;
 
 public class EdgePackingTest {
     @Test
@@ -10,29 +11,29 @@ public class EdgePackingTest {
         long endId = 456;
         boolean isNatural = true;
 
-        long edge = GdsReadJob.edge(startId, endId, isNatural);
+        long edge = Edge.edge(startId, endId, isNatural);
         System.out.printf("0x%X\n", edge);
-        System.out.printf("start: %d ?? %d\n", startId, GdsReadJob.source(edge));
-        Assertions.assertEquals(startId, GdsReadJob.source(edge));
+        System.out.printf("start: %d ?? %d\n", startId, Edge.source(edge));
+        Assertions.assertEquals(startId, Edge.source(edge));
 
-        System.out.printf("end: %d ?? %d\n", endId, GdsReadJob.target(edge));
-        Assertions.assertEquals(endId, GdsReadJob.target(edge));
+        System.out.printf("end: %d ?? %d\n", endId, Edge.target(edge));
+        Assertions.assertEquals(endId, Edge.target(edge));
 
-        System.out.printf("isNatural?: %s : %s\n", isNatural, GdsReadJob.flag(edge));
-        Assertions.assertEquals(isNatural, GdsReadJob.flag(edge));
+        System.out.printf("isNatural?: %s : %s\n", isNatural, Edge.flag(edge));
+        Assertions.assertEquals(isNatural, Edge.flag(edge));
 
         startId = 300_000_000;
         endId = 0;
         isNatural = false;
-        edge = GdsReadJob.edge(startId, endId, isNatural);
+        edge = Edge.edge(startId, endId, isNatural);
         System.out.printf("0x%X\n", edge);
-        System.out.printf("start: %d ?? %d\n", startId, GdsReadJob.source(edge));
-        Assertions.assertEquals(startId, GdsReadJob.source(edge));
+        System.out.printf("start: %d ?? %d\n", startId, Edge.source(edge));
+        Assertions.assertEquals(startId, Edge.source(edge));
 
-        System.out.printf("end: %d ?? %d\n", endId, GdsReadJob.target(edge));
-        Assertions.assertEquals(endId, GdsReadJob.target(edge));
+        System.out.printf("end: %d ?? %d\n", endId, Edge.target(edge));
+        Assertions.assertEquals(endId, Edge.target(edge));
 
-        System.out.printf("isNatural?: %s : %s\n", isNatural, GdsReadJob.flag(edge));
-        Assertions.assertEquals(isNatural, GdsReadJob.flag(edge));
+        System.out.printf("isNatural?: %s : %s\n", isNatural, Edge.flag(edge));
+        Assertions.assertEquals(isNatural, Edge.flag(edge));
     }
 }
