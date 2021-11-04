@@ -21,17 +21,17 @@ public class SubGraphRecord implements RowBasedRecord {
     };
 
     private final long origin;
-    private final List<Long> sourceIds;
-    private final List<Long> targetIds;
+    private final List<Integer> sourceIds;
+    private final List<Integer> targetIds;
 
 
-    protected SubGraphRecord(long origin, List<Long> sourceIds, List<Long> targetIds) {
+    protected SubGraphRecord(long origin, List<Integer> sourceIds, List<Integer> targetIds) {
         this.origin = origin;
         this.sourceIds = sourceIds;
         this.targetIds = targetIds;
     }
 
-    public static SubGraphRecord of(long origin, List<Long> sourceIds, List<Long> targetIds) {
+    public static SubGraphRecord of(long origin, List<Integer> sourceIds, List<Integer> targetIds) {
         if (sourceIds.size() != targetIds.size()) {
             throw new IllegalArgumentException("length of both source and target ids must be the same");
         }
@@ -39,12 +39,12 @@ public class SubGraphRecord implements RowBasedRecord {
     }
 
     public static SubGraphRecord of(long origin, Iterable<Long> edges) {
-        final List<Long> sources = new ArrayList<>();
-        final List<Long> targets = new ArrayList<>();
+        final List<Integer> sources = new ArrayList<>();
+        final List<Integer> targets = new ArrayList<>();
 
         edges.forEach(edge -> {
-            sources.add(Edge.source(edge));
-            targets.add(Edge.target(edge));
+            sources.add(Edge.sourceAsInt(edge));
+            targets.add(Edge.targetAsInt(edge));
         });
         return new SubGraphRecord(origin, sources, targets);
     }
@@ -57,8 +57,8 @@ public class SubGraphRecord implements RowBasedRecord {
     public Value get(int index) {
         switch (index) {
             case 0: return GdsRecord.wrapScalar(origin, ValueType.LONG);
-            case 1: return GdsRecord.wrapLongs(sourceIds);
-            case 2: return GdsRecord.wrapLongs(targetIds);
+            case 1: return GdsRecord.wrapInts(sourceIds);
+            case 2: return GdsRecord.wrapInts(targetIds);
             default:
                 throw new RuntimeException("invalid index: " + index);
         }

@@ -22,8 +22,16 @@ public class Edge {
         return (edge >> 30) & TARGET_BITS;
     }
 
+    public static int sourceAsInt(long edge) {
+        return (int) source(edge);
+    }
+
     public static long target(long edge) {
         return (edge & TARGET_BITS);
+    }
+
+    public static int targetAsInt(long edge) {
+        return (int) target(edge);
     }
 
     public static long uniquify(long edge) {

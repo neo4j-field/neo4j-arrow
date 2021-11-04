@@ -160,7 +160,7 @@ public class GdsReadJob extends ReadJob {
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         // XXX faux record
-        onFirstRecord(SubGraphRecord.of(0L, List.of(0L), List.of(0L)));
+        onFirstRecord(SubGraphRecord.of(0L, List.of(1), List.of(2)));
 
         return CompletableFuture.supplyAsync(() -> {
             logger.info(String.format("starting node stream for gds khop job %s (%,d nodes, %,d rels)",

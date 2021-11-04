@@ -19,6 +19,45 @@ public abstract class GdsRecord implements RowBasedRecord {
         this.valueArray = valueArray;
     }
 
+    public static Value wrapInts(List<Integer> ints) {
+        return new Value() {
+            @Override
+            public int size() {
+                return ints.size();
+            }
+
+            @Override
+            public List<Object> asList() {
+                return ints.stream().collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return ints;
+            }
+
+            @Override
+            public List<Long> asLongList() {
+                return ints.stream().map(Integer::longValue).collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public List<Float> asFloatList() {
+                return ints.stream().map(Integer::floatValue).collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public List<Double> asDoubleList() {
+                return ints.stream().map(Integer::doubleValue).collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public Type type() {
+                return Type.INT_LIST;
+            }
+        };
+    }
+
     public static Value wrapLongs(List<Long> longs) {
         return new Value() {
             @Override

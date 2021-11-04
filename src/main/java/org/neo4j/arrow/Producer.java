@@ -325,6 +325,17 @@ public class Producer implements FlightProducer, AutoCloseable {
                                     for (double d : value.asDoubleArray())
                                         writer.writeFloat8(d);
                                     break;
+                                case INT_LIST:
+                                    try {
+                                        for (int i : value.asIntList()) {
+                                            writer.writeInt(i);
+                                        }
+                                    } catch (OutOfMemoryException oom) {
+                                        logger.error(String.format("OOM writing LONG_LIST %s (value size: %,d): %s",
+                                                vector.getName(), value.size(), oom.getMessage()));
+                                        fatality.set(true);
+                                    }
+                                    break;
                                 case LONG_LIST:
                                     try {
                                         for (long l : value.asLongList()) {
@@ -533,21 +544,24 @@ public class Producer implements FlightProducer, AutoCloseable {
                         nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
                         if (vector instanceof ListVector && child instanceof UnionVector) {
                             final UnionVector uv = (UnionVector) child;
-                            final ArrowType.ArrowTypeID id = schema.findField(vector.getName())
-                                    .getChildren().get(0).getType().getTypeID();
+                            final String innerName = schema.findField(vector.getName())
+                                    .getChildren().get(0).getName();
 
                             final FieldVector innerVector;
-                            switch (id) {
+                            switch (innerName.toLowerCase(Locale.getDefault())) {
                                 // XXX assume homogeneity
-                                case Int:
-                                    // XXX assume bigint for now
+                                case "uint32":
+                                    innerVector = uv.getIntVector();
+                                    break;
+                                case "int64":
                                     innerVector = uv.getBigIntVector();
                                     break;
-                                case Utf8:
+                                case "utf8":
                                     innerVector = uv.getVarCharVector();
                                     break;
                                 default:
-                                    logger.warn("unhandled vector type: {}", id);
+                                    logger.warn("unhandled vector type: {}",
+                                            schema.findField(vector.getName()).getChildren().get(0).getType());
                                     innerVector = uv.getStruct();
                                     break;
                             }

@@ -220,13 +220,19 @@ public class GdsActionHandler implements ActionHandler {
                     break;
                 case STRING_LIST:
                     fields.add(new Field(fieldName, FieldType.nullable(new ArrowType.List()),
-                            List.of(new Field(fieldName,
+                            List.of(new Field("utf8",
                                     FieldType.nullable(new ArrowType.Utf8()),
+                                    null))));
+                    break;
+                case INT_LIST:
+                    fields.add(new Field(fieldName, FieldType.nullable(new ArrowType.List()),
+                            List.of(new Field("uint32",
+                                    FieldType.nullable(new ArrowType.Int(32, false)),
                                     null))));
                     break;
                 case LONG_LIST:
                     fields.add(new Field(fieldName, FieldType.nullable(new ArrowType.List()),
-                            List.of(new Field(fieldName,
+                            List.of(new Field("int64",
                                     FieldType.nullable(new ArrowType.Int(64, true)),
                                     null))));
                     break;
