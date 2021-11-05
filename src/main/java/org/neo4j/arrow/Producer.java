@@ -132,10 +132,10 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         try (BufferAllocator baseAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                0, Config.maxStreamMemory);
+                0, Config.maxStreamMemory / 2);
              BufferAllocator transmitAllocator = allocator.newChildAllocator(
                      String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                     0, Config.maxStreamMemory);
+                     0, Config.maxStreamMemory / 2);
              VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
@@ -194,7 +194,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             // Wasteful, but pre-init for now
             for (int i = 0; i < maxPartitions; i++) {
                 bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%d", i), 0,
-                        Config.maxStreamMemory / maxPartitions);
+                        baseAllocator.getLimit() / maxPartitions);
                 partitionedSemaphores[i] = new Semaphore(1);
                 partitionedWriters[i] = new HashMap<>();
                 partitionedCounts[i] = new AtomicInteger(0);
