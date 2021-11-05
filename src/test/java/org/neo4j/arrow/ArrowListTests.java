@@ -33,6 +33,23 @@ import java.util.stream.IntStream;
 public class ArrowListTests {
 
     @Test
+    public void memoryLimits() {
+        try (BufferAllocator allocator = new RootAllocator(((5 << 20)))) {
+            try (BufferAllocator child = allocator.newChildAllocator("kid", 0, (2 << 20))) {
+                System.out.println("parent: " + allocator);
+                System.out.println("child: " + child);
+                BigIntVector vector = new BigIntVector("vector", child);
+                vector.setInitialCapacity(12);
+                vector.allocateNew(12);
+
+                System.out.println("child limit: " + child.getLimit());
+                System.out.println("child headroom?: " + child.getHeadroom());
+                vector.close();
+            }
+        }
+    }
+
+    @Test
     public void longListTest() {
         try (BufferAllocator allocator = new RootAllocator(((5 << 20)))) {
             Field field = new Field("test-list", FieldType.nullable(new ArrowType.List()),

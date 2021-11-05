@@ -132,7 +132,7 @@ public class KHopJob extends ReadJob {
         final int k = msg.getK();
 
         // XXX Fake result just to get things moving
-        onFirstRecord(SubGraphRecord.of(0L, List.of(0), List.of(0)));
+        onFirstRecord(SubGraphRecord.of(0, List.of(0), List.of(0)));
 
         this.future = CompletableFuture.supplyAsync(() -> {
             long maxNodeId = 1_000;

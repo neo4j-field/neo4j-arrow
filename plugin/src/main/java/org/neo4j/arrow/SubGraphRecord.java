@@ -20,18 +20,18 @@ public class SubGraphRecord implements RowBasedRecord {
             KEY_TARGET_IDS
     };
 
-    private final long origin;
+    private final int origin;
     private final List<Integer> sourceIds;
     private final List<Integer> targetIds;
 
 
-    protected SubGraphRecord(long origin, List<Integer> sourceIds, List<Integer> targetIds) {
+    protected SubGraphRecord(int origin, List<Integer> sourceIds, List<Integer> targetIds) {
         this.origin = origin;
         this.sourceIds = sourceIds;
         this.targetIds = targetIds;
     }
 
-    public static SubGraphRecord of(long origin, List<Integer> sourceIds, List<Integer> targetIds) {
+    public static SubGraphRecord of(int origin, List<Integer> sourceIds, List<Integer> targetIds) {
         if (sourceIds.size() != targetIds.size()) {
             throw new IllegalArgumentException("length of both source and target ids must be the same");
         }
@@ -46,7 +46,7 @@ public class SubGraphRecord implements RowBasedRecord {
             sources.add(Edge.sourceAsInt(edge));
             targets.add(Edge.targetAsInt(edge));
         });
-        return new SubGraphRecord(origin, sources, targets);
+        return new SubGraphRecord((int) origin, sources, targets); // XXX cast
     }
 
     public static SubGraphRecord of(Node source, Relationship rel, Node target) {
@@ -56,7 +56,7 @@ public class SubGraphRecord implements RowBasedRecord {
     @Override
     public Value get(int index) {
         switch (index) {
-            case 0: return GdsRecord.wrapScalar(origin, ValueType.LONG);
+            case 0: return GdsRecord.wrapInt(origin);
             case 1: return GdsRecord.wrapInts(sourceIds);
             case 2: return GdsRecord.wrapInts(targetIds);
             default:

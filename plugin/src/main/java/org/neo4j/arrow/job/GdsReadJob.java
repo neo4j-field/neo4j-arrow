@@ -1,5 +1,7 @@
 package org.neo4j.arrow.job;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Streams;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
@@ -160,7 +162,7 @@ public class GdsReadJob extends ReadJob {
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         // XXX faux record
-        onFirstRecord(SubGraphRecord.of(0L, List.of(1), List.of(2)));
+        onFirstRecord(SubGraphRecord.of(0, List.of(1), List.of(2)));
 
         return CompletableFuture.supplyAsync(() -> {
             logger.info(String.format("starting node stream for gds khop job %s (%,d nodes, %,d rels)",
@@ -213,13 +215,18 @@ public class GdsReadJob extends ReadJob {
                                         hop(target(edge), graph, supernodeCache, cacheHits)))
                                 .filter(edge -> relHistory.add(uniquify(edge)));
                         }
-                        final SubGraphRecord result = SubGraphRecord.of(
-                                origin,
-                                stream.unordered()
-                                        .boxed()
-                                        .collect(Collectors.toUnmodifiableList()));
-                        consume.accept(result);
-                        return result.numEdges();
+
+                        final List<Long> edges = stream
+                                .unordered()
+                                .boxed()
+                                .collect(Collectors.toUnmodifiableList());
+
+                        Lists.partition(edges, 4096)
+                                .stream()
+                                .map(batch -> SubGraphRecord.of(origin, batch))
+                                .forEach(consume);
+
+                        return edges.size();
                     })
                     .sum();
 

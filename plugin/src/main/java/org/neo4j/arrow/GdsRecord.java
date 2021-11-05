@@ -292,6 +292,55 @@ public abstract class GdsRecord implements RowBasedRecord {
         return wrapScalar(n, ValueType.DOUBLE);
     }
 
+    public static Value wrapInt(int i) {
+        return new Value() {
+            @Override
+            public int asInt() {
+                return i;
+            }
+
+            @Override
+            public long asLong() {
+                return (long) i;
+            }
+
+            @Override
+            public float asFloat() {
+                return (float) i;
+            }
+
+            @Override
+            public double asDouble() {
+                return (double) i;
+            }
+
+            @Override
+            public String asString() {
+                return String.valueOf(i);
+            }
+
+            @Override
+            public List<Object> asList() {
+                return List.of(i);
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return List.of(i);
+            }
+
+            @Override
+            public int[] asIntArray() {
+                return new int[] { i };
+            }
+
+            @Override
+            public Type type() {
+                return Type.INT;
+            }
+        };
+    }
+
     public static Value wrapScalar(Number n, ValueType t) {
         return new Value() {
             private final Number num = n;

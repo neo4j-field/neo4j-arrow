@@ -193,8 +193,9 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Wasteful, but pre-init for now
             for (int i = 0; i < maxPartitions; i++) {
-                bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%d", i), 0,
-                        baseAllocator.getLimit() / maxPartitions);
+                final long size = Math.floorDiv(baseAllocator.getLimit(), maxPartitions);
+                logger.debug(String.format("creating partitioned allocator %d of %d: %,d bytes", i+1, maxPartitions - 1, size));
+                bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%02d", i+1), 0, size);
                 partitionedSemaphores[i] = new Semaphore(1);
                 partitionedWriters[i] = new HashMap<>();
                 partitionedCounts[i] = new AtomicInteger(0);
@@ -331,8 +332,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                                             writer.writeInt(i);
                                         }
                                     } catch (OutOfMemoryException oom) {
-                                        logger.error(String.format("OOM writing LONG_LIST %s (value size: %,d): %s",
-                                                vector.getName(), value.size(), oom.getMessage()));
+                                        logger.error(String.format("OOM writing INT_LIST %s (value size: %,d, allocator limit: %,d): %s",
+                                                vector.getName(), value.size(), streamAllocator.getLimit(), oom.getMessage()));
                                         fatality.set(true);
                                     }
                                     break;
@@ -342,8 +343,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                                             writer.writeBigInt(l);
                                         }
                                     } catch (OutOfMemoryException oom) {
-                                        logger.error(String.format("OOM writing LONG_LIST %s (value size: %,d): %s",
-                                                vector.getName(), value.size(), oom.getMessage()));
+                                        logger.error(String.format("OOM writing LONG_LIST %s (value size: %,d, allocator limit: %,d): %s",
+                                                vector.getName(), value.size(), streamAllocator.getLimit(), oom.getMessage()));
                                         fatality.set(true);
                                     }
                                     break;
@@ -374,7 +375,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
 
                     // Flush at our batch size limit and reset our batch states.
-                    if ((idx + 1) == Config.arrowBatchSize) {
+                    if ((idx + 1) == Config.arrowBatchSize ||
+                            streamAllocator.getHeadroom() < (0.10 * streamAllocator.getLimit())) { // XXX ratio guess
                         writerMap.values().forEach(writer -> {
                             if (writer instanceof UnionFixedSizeListWriter) {
                                 logger.trace("calling writer.end() on {}", writer);
