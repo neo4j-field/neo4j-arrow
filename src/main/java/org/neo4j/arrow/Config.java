@@ -50,28 +50,30 @@ public class Config {
 
     /** Maximum native memory allowed to be allocated by the global allocator and its children */
     public final static long maxArrowMemory = parseMemory(
-            System.getenv().getOrDefault("MAX_MEM_GLOBAL", Long.toString(Long.MAX_VALUE)));
+            System.getenv().getOrDefault("MAX_MEM_GLOBAL", String.valueOf(Runtime.getRuntime().maxMemory())));
 
     /** Maximum native memory allowed to be allocated by a single stream */
     public final static long maxStreamMemory = parseMemory(
-            System.getenv().getOrDefault("MAX_MEM_STREAM",  Long.toString(Long.MAX_VALUE)));
+            System.getenv().getOrDefault("MAX_MEM_STREAM", String.valueOf(Runtime.getRuntime().maxMemory())));
 
     /** Arrow Batch Size controls the size of the transmitted vectors.*/
     public final static int arrowBatchSize = Math.abs(Integer.parseInt(
-            System.getenv().getOrDefault("ARROW_BATCH_SIZE", Integer.toString(1_000))
+            System.getenv().getOrDefault("ARROW_BATCH_SIZE", Integer.toString(1024))
     ));
 
     /** Arrow parallelism */
     public final static int arrowMaxPartitions = Math.abs(Integer.parseInt(
             System.getenv().getOrDefault("ARROW_MAX_PARTITIONS",
-                    String.valueOf(Runtime.getRuntime().availableProcessors() > 2 ?
-                        Runtime.getRuntime().availableProcessors() - 2 : 1))));
+                    String.valueOf(Runtime.getRuntime().availableProcessors() * 2))));
 
     /** Arrow flush timeout in seconds */
     public final static int arrowFlushTimeout = Math.abs(Integer.parseInt(
             System.getenv().getOrDefault("ARROW_FLUSH_TIMEOUT", Integer.toString(60 * 30))
     ));
 
+    /** Arrow max List size, used by k-hop */
+    public final static int arrowMaxListSize = Math.abs(Integer.parseInt(
+            System.getenv().getOrDefault("ARROW_MAX_LIST_SIZE", String.valueOf(8192))));
 
     /** Bolt fetch size controls how many Records we PULL at a given time. Should be set lower
      * than the Arrow Batch size.

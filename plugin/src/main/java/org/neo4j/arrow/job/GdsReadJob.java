@@ -1,7 +1,7 @@
 package org.neo4j.arrow.job;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Streams;
+import com.google.common.collect.Iterators;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
@@ -9,6 +9,7 @@ import org.neo4j.arrow.*;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.KHopMessage;
 import org.neo4j.arrow.gds.Edge;
+import org.neo4j.arrow.gds.NodeHistory;
 import org.neo4j.arrow.gds.SuperNodeCache;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.RelationshipType;
@@ -18,14 +19,10 @@ import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
-import org.neo4j.gds.core.utils.RandomLongIterator;
-import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterable;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
@@ -34,7 +31,6 @@ import java.util.function.Function;
 import java.util.stream.*;
 
 import static org.neo4j.arrow.gds.Edge.target;
-import static org.neo4j.arrow.gds.Edge.uniquify;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -104,17 +100,49 @@ public class GdsReadJob extends ReadJob {
         }, nodeCount, Spliterator.SIZED | Spliterator.DISTINCT | Spliterator.ORDERED | Spliterator.NONNULL);
     }
 
-    private LongStream hop(long start, Graph graph, SuperNodeCache cache, AtomicLong cacheHits) {
+    private LongStream hop(int k, long start, Graph graph, NodeHistory history, SuperNodeCache cache, AtomicLong cacheHits) {
         final long[] cachedList = cache.get((int) start); // XXX cast
+        final Graph copy = graph.concurrentCopy();
 
+        final Set<Integer> dropSet = new ConcurrentSkipListSet<>();
+
+        final LongStream stream;
         if (cachedList == null) {
-            return graph.concurrentCopy()
+            if (k == 0) {
+                /*
+                 * If we're at the origin, we need to collect a set of the initial neighbor ids
+                 * AND find a list of targets to drop if there's a bi-directional relationship.
+                 * This prevents duplicates without having to keep a huge list of edges.
+                 */
+                copy.streamRelationships(start, Double.NaN)
+                        .parallel()
+                        .mapToInt(cursor -> (int) cursor.targetId())
+                        .forEach(id -> {
+                            if (history.getAndSet(id))
+                                dropSet.add(id);
+                        });
+            }
+            stream = copy
                     .streamRelationships(start, Double.NaN)
+                    .parallel()
                     .mapToLong(cursor -> Edge.edge(cursor.sourceId(), cursor.targetId(), (Double.isNaN(cursor.property()))));
         } else {
             cacheHits.incrementAndGet();
-            return Arrays.stream(cachedList);
+            if (k == 0) {
+                Arrays.stream(cachedList)
+                        .parallel()
+                        .mapToInt(Edge::targetAsInt)
+                        .forEach(id -> {
+                            if (history.getAndSet(id))
+                                dropSet.add(id);
+                        });
+            }
+            stream = Arrays.stream(cachedList).parallel();
         }
+        if (k == 0)
+            return stream
+                    .filter(edge -> Edge.isNatural(edge) || !dropSet.contains(Edge.targetAsInt(edge)));
+        return stream;
     }
 
     private CompletableFuture<Boolean> handleKHopJob(KHopMessage msg, GraphStore store) {
@@ -136,7 +164,7 @@ public class GdsReadJob extends ReadJob {
 
         logger.info(String.format("checking for super nodes in graph with %,d nodes, %,d edges...", nodeCount, relCount));
         final AtomicInteger[] histogram = new AtomicInteger[10];
-        for (int i=0; i<histogram.length; i++)
+        for (int i = 0; i < histogram.length; i++)
             histogram[i] = new AtomicInteger(0);
 
         LongStream.range(0, nodeCount)
@@ -156,8 +184,8 @@ public class GdsReadJob extends ReadJob {
                 });
 
         logger.info(String.format("\t[ zero ]\t- %,d nodes", histogram[0].get()));
-        for (int i=1; i<histogram.length; i++)
-            logger.info(String.format("\t[ 1e%d - 1e%d )\t- %,d nodes", i, i + 1, histogram[i].get()));
+        for (int i = 1; i < histogram.length; i++)
+            logger.info(String.format("  [ 1e%d - 1e%d )\t- %,d nodes", i - 1, i, histogram[i].get()));
 
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
@@ -200,37 +228,72 @@ public class GdsReadJob extends ReadJob {
 
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
-            final long rows = LongStream.range(0, nodeCount)
-                    .unordered()
-                    .parallel()
-                    .map(origin -> {
-                        final Set<Long> relHistory = new ConcurrentSkipListSet<>();
-                        LongStream stream = hop(origin, graph, supernodeCache, cacheHits);
+            final Function<Long, Long> processNode = (origin) -> {
+                final NodeHistory history = (graph.degree(origin)) > 1_000_000 ?
+                        NodeHistory.offHeap((int) nodeCount) : NodeHistory.given(1, 1);
 
-                        // k-hop
-                        for (int i = 1; i < k; i++) {
-                            stream = stream
-                                .flatMap(edge -> LongStream.concat(
-                                        LongStream.of(edge),
-                                        hop(target(edge), graph, supernodeCache, cacheHits)))
-                                .filter(edge -> relHistory.add(uniquify(edge)));
+                history.getAndSet(origin.intValue()); // XXX cast
+                LongStream stream = hop(0, origin, graph, history, supernodeCache, cacheHits);
+
+                // k-hop...where k == 2 for now ;)
+                for (int i = 1; i < k; i++) {
+                    final int n = i;
+                    stream = stream
+                            .flatMap(edge -> LongStream.concat(
+                                    LongStream.of(edge),
+                                    hop(n, target(edge), graph, history, supernodeCache, cacheHits)));
+                }
+
+                stream = stream
+                        .parallel()
+                        .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.sourceAsInt(edge)))
+                        .map(edge -> (Edge.isNatural(edge)) ? edge : Edge.uniquify(edge));
+
+                final AtomicLong cnt = new AtomicLong(0);
+                Iterators.partition(stream.iterator(), Config.arrowMaxListSize)
+                        .forEachRemaining(batch -> {
+                            consume.accept(SubGraphRecord.of(origin, batch));
+                            cnt.incrementAndGet();
+                        });
+
+                return cnt.get();
+            };
+            final ThreadFactory factory = (new ThreadFactoryBuilder())
+                    .setDaemon(true)
+                    .setNameFormat("khop-%d")
+                    .build();
+            final Executor khopExecutor = Executors.newCachedThreadPool(factory);
+            // Not sure if this is needed...what happens if you blast 300m Runnables into an Executor :D
+            final int tickets = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
+            final Semaphore semaphore = new Semaphore(tickets);
+            final AtomicLong rowCnt = new AtomicLong(0);
+
+            for (long id = 0; id < nodeCount; id++) {
+                try {
+                    final long nodeId = id;
+                    semaphore.acquire();
+                    khopExecutor.execute(() -> {
+                        try {
+                            rowCnt.addAndGet(processNode.apply(nodeId));
+                        } finally {
+                            semaphore.release();
                         }
+                    });
+                } catch (InterruptedException e) {
+                    logger.error("interrupted in khop", e);
+                    break;
+                }
+            }
 
-                        final List<Long> edges = stream
-                                .unordered()
-                                .boxed()
-                                .collect(Collectors.toUnmodifiableList());
+            try {
+                if (!semaphore.tryAcquire(tickets, 24, TimeUnit.HOURS)) {
+                    logger.error("timed out waiting for k-hop to complete...");
+                }
+            } catch (InterruptedException e) {
+                logger.error("interrupted waiting for k-hop to complete");
+            }
 
-                        Lists.partition(edges, 4096)
-                                .stream()
-                                .map(batch -> SubGraphRecord.of(origin, batch))
-                                .forEach(consume);
-
-                        return edges.size();
-                    })
-                    .sum();
-
-            logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rows));
+            logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rowCnt.get()));
             logger.info(String.format("cache hits: %,d", cacheHits.get()));
             return true;
         }).handleAsync((isOk, err) -> {

@@ -279,4 +279,12 @@ project(':plugin') {
             exclude(dependency('org.opencypher::'))
         }
     }
+
+    test {
+        useJUnitPlatform()
+        filter {
+            includeTestsMatching "org.neo4j.arrow.*"
+        }
+        jvmArgs '-Xmx4g'
+    }
 }

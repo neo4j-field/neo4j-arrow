@@ -3,15 +3,38 @@ package org.neo4j.arrow;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.*;
 
 public class SillyStreamsTest {
+
+    @Test
+    public void testChokingStreams() throws Exception {
+        final Semaphore semaphore = new Semaphore(3);
+
+        final AtomicInteger cnt = new AtomicInteger(0);
+
+        int i = IntStream.range(0, 100)
+                .unordered()
+                .parallel()
+                .map(n -> {
+                    try {
+                        semaphore.acquire();
+                        int c = cnt.incrementAndGet();
+                        System.out.printf("%d: c = %d\n", n, c);
+                        cnt.decrementAndGet();
+                        semaphore.release();
+                        return 1;
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        return 0;
+                    }
+                }).sum();
+        System.out.println("i = " + i + ", cnt = " + cnt.get());
+    }
+
     @Disabled
     @Test
     public void testStreams() throws ExecutionException, InterruptedException {
