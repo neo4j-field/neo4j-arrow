@@ -24,6 +24,7 @@ import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
@@ -257,6 +258,10 @@ public class GdsReadJob extends ReadJob {
 
                 return cnt.get();
             };
+
+            /*
+             * Hacky way to constrain how many streams we process simultaneously
+             */
             final ThreadFactory factory = (new ThreadFactoryBuilder())
                     .setDaemon(true)
                     .setNameFormat("khop-%d")
@@ -267,46 +272,64 @@ public class GdsReadJob extends ReadJob {
             final Semaphore semaphore = new Semaphore(tickets);
             final AtomicLong rowCnt = new AtomicLong(0);
 
+            /*
+             * Utilize a semaphore with a finite amount of permits/tickets to choke the
+             * number of concurrent threads without creating hundreds of thousands of
+             * Runnables on the heap. A countdown latch is used to wait for the final
+             * batch of workers to complete.
+             */
+            final CountDownLatch countDownLatch = new CountDownLatch((int) nodeCount); // XXX cast
             for (long id = 0; id < nodeCount && !aborted.isDone(); id++) {
-                try {
                     final long nodeId = id;
-                    semaphore.acquire();
-                    khopExecutor.execute(() -> {
-                        try {
-                            rowCnt.addAndGet(processNode.apply(nodeId));
-                        } finally {
-                            semaphore.release();
-                        }
-                    });
-                } catch (InterruptedException e) {
-                    logger.error("interrupted in khop", e);
-                    break;
-                }
+                    try {
+                        semaphore.acquire();
+                        khopExecutor.execute(() -> {
+                            try {
+                                rowCnt.addAndGet(processNode.apply(nodeId));
+                            } finally {
+                                semaphore.release();
+                                countDownLatch.countDown();
+                            }
+                        });
+                    } catch (InterruptedException e) {
+                        logger.error("interrupted in khop", e);
+                        break;
+                    }
             }
 
+            /*
+             * Wait for our last streams to finish or a cancellation to be received.
+             */
+            final AtomicBoolean result = new AtomicBoolean(false);
             try {
                 CompletableFuture.anyOf(
                         aborted,
                         CompletableFuture.supplyAsync(() -> {
-                            try { return !semaphore.tryAcquire(tickets, 24, TimeUnit.HOURS); }
+                            try {
+                                return countDownLatch.await(24, TimeUnit.HOURS);
+                            }
                             catch (Exception e) {
                                 logger.error("error acquiring all semaphore tickets", e);
                                 return false;
                             }
                         })
                 ).whenComplete((obj, throwable) -> {
-                    if (obj instanceof Boolean) {
-                        if (!((Boolean)obj) || throwable != null) { // things are ok if true
+                    if (obj instanceof Boolean && throwable == null) {
+                        if (((Boolean)obj) ) { // things are ok if true
                             logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rowCnt.get()));
                             logger.info(String.format("cache hits: %,d", cacheHits.get()));
+                            result.set(true);
+                        } else {
+                            logger.error("something failed in k-hop job");
                         }
+                    } else {
+                        logger.error("error in k-hop: " + throwable.getMessage(), throwable);
                     }
-                });
-
+                }).join();
             } catch (Exception e) {
                 logger.error("unhandled exception waiting for k-hop to complete");
             }
-            return true;
+            return result.get();
         }).handleAsync((isOk, err) -> {
             if (isOk != null && isOk) {
                 onCompletion(() -> String.format("job %s finished OK!", jobId));

@@ -376,7 +376,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                     // Flush at our batch size limit and reset our batch states.
                     if ((idx + 1) == Config.arrowBatchSize ||
-                            streamAllocator.getHeadroom() < (0.10 * streamAllocator.getLimit())) { // XXX ratio guess
+                            streamAllocator.getHeadroom() < (0.05 * streamAllocator.getLimit())) { // XXX ratio guess
                         writerMap.values().forEach(writer -> {
                             if (writer instanceof UnionFixedSizeListWriter) {
                                 logger.trace("calling writer.end() on {}", writer);
@@ -420,7 +420,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
                 } catch (Exception e) {
                     if (fatality.compareAndSet(false, true)) {
-                        logger.error(e.getMessage(), e);
+                        logger.error(String.format("exception while flushing partition %d: %s", partition, e.getMessage()), e);
                         job.cancel(true);
                         listener.error(CallStatus.UNKNOWN.withDescription(e.getMessage()).toRuntimeException());
                     }
@@ -434,6 +434,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Final conversion of stragglers...
             for (int partition = 0; partition < maxPartitions; partition++) {
+                logger.trace("checking for stragglers in partition {}", partition);
                 if (fatality.get())
                     break;
 
@@ -454,6 +455,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                 });
 
                 if (vectorSize > 0) {
+                    logger.debug("flushing remainder {} rows in partition {}", vectorSize, partition);
                     final ArrayList<ValueVector> copy = new ArrayList<>();
                     try {
                         transferMutex.acquire();
@@ -483,21 +485,21 @@ public class Producer implements FlightProducer, AutoCloseable {
                 listener.error(CallStatus.INTERNAL.withDescription("unexpected state").toRuntimeException());
                 return;
             }
-            logger.info("waiting up to {} seconds for flushing to finish...", Config.arrowFlushTimeout);
-            flushJob.get(Config.arrowFlushTimeout, TimeUnit.SECONDS);
-            logger.info("flushing complete");
 
             // Close the allocators for each partition
             for (BufferAllocator allocator : bufferAllocators)
                 allocator.close();
 
+            logger.info("waiting up to {} seconds for flushing to finish...", Config.arrowFlushTimeout);
+            flushJob.get(Config.arrowFlushTimeout, TimeUnit.SECONDS);
+            logger.info("flushing complete");
         } catch (Exception e) {
             isFeeding.set(false);
             fatality.set(true);
 
             workQueue.forEach(FlushWork::release);
             workQueue.clear();
-            logger.error("ruh row", e);
+            logger.error(String.format("ruh row: %s", e.getMessage()), e);
             listener.error(CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException());
         } finally {
             logger.info("finishing getStream for ticket {}", ticket);
