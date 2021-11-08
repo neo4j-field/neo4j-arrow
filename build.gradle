@@ -239,6 +239,7 @@ project(':plugin') {
                 project(':common'),
                 [group: 'org.slf4j', name: 'slf4j-api', version: rootProject.ext.sl4jVersion],
                 [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion],
+                [group: 'org.roaringbitmap', name: 'RoaringBitmap', version: '0.9.22'],
         )
         compileOnly (
                 [group: 'org.neo4j', name: 'neo4j-configuration', version: rootProject.ext.neo4j.serverVersion],

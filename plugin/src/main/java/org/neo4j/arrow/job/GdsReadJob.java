@@ -1,5 +1,6 @@
 package org.neo4j.arrow.job;
 
+import com.google.common.base.Predicates;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -21,6 +22,8 @@ import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
+import org.roaringbitmap.RoaringBitmap;
+import org.roaringbitmap.longlong.Roaring64Bitmap;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -103,11 +106,12 @@ public class GdsReadJob extends ReadJob {
         }, nodeCount, Spliterator.SIZED | Spliterator.DISTINCT | Spliterator.ORDERED | Spliterator.NONNULL);
     }
 
-    private LongStream hop(int k, long start, Graph graph, NodeHistory history, SuperNodeCache cache, AtomicLong cacheHits) {
+    private LongStream hop(int k, long start, Graph graph, SuperNodeCache cache, AtomicLong cacheHits) {
         final long[] cachedList = cache.get((int) start); // XXX cast
         final Graph copy = graph.concurrentCopy();
 
         final Set<Integer> dropSet = new HashSet<>();
+        final NodeHistory history = NodeHistory.given(graph.degree(start), (int) graph.nodeCount()); // XXX cast
 
         final LongStream stream;
         if (cachedList == null) {
@@ -230,11 +234,9 @@ public class GdsReadJob extends ReadJob {
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
             final Function<Long, Long> processNode = (origin) -> {
-                final NodeHistory history = (graph.degree(origin)) > 250_000 ?
-                        NodeHistory.offHeap((int) nodeCount) : NodeHistory.given(1, 1);
+                Roaring64Bitmap edgeBitmap = new Roaring64Bitmap();
 
-                history.getAndSet(origin.intValue()); // XXX cast
-                LongStream stream = hop(0, origin, graph, history, supernodeCache, cacheHits);
+                LongStream stream = hop(0, origin, graph, supernodeCache, cacheHits);
 
                 // k-hop...where k == 2 for now ;)
                 for (int i = 1; i < k; i++) {
@@ -242,12 +244,19 @@ public class GdsReadJob extends ReadJob {
                     stream = stream
                             .flatMap(edge -> Streams.concat(
                                     LongStream.of(edge),
-                                    hop(n, target(edge), graph, history, supernodeCache, cacheHits)));
+                                    hop(n, target(edge), graph, supernodeCache, cacheHits)));
                 }
 
                 stream = stream
-                        .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.sourceAsInt(edge)))
-                        .map(edge -> (Edge.isNatural(edge)) ? edge : Edge.uniquify(edge));
+                        .map(Edge::uniquify)
+                        .sequential()
+                        .filter(edge -> {
+                            if (edgeBitmap.contains(edge)) {
+                                return false;
+                            }
+                            edgeBitmap.addLong(edge);
+                            return true;
+                        });
 
                 final AtomicLong cnt = new AtomicLong(0);
                 Iterators.partition(stream.iterator(), Config.arrowMaxListSize)
