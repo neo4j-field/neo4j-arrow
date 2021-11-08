@@ -1,6 +1,7 @@
 package org.neo4j.arrow.job;
 
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Pair;
@@ -37,6 +38,7 @@ import static org.neo4j.arrow.gds.Edge.target;
  */
 public class GdsReadJob extends ReadJob {
     private final CompletableFuture<Boolean> future;
+    private final CompletableFuture<Boolean> aborted = new CompletableFuture<>();
 
     /**
      * Create a new GdsReadJob for processing the given {@link GdsMessage} that reads Node or
@@ -104,7 +106,7 @@ public class GdsReadJob extends ReadJob {
         final long[] cachedList = cache.get((int) start); // XXX cast
         final Graph copy = graph.concurrentCopy();
 
-        final Set<Integer> dropSet = new ConcurrentSkipListSet<>();
+        final Set<Integer> dropSet = new HashSet<>();
 
         final LongStream stream;
         if (cachedList == null) {
@@ -115,7 +117,6 @@ public class GdsReadJob extends ReadJob {
                  * This prevents duplicates without having to keep a huge list of edges.
                  */
                 copy.streamRelationships(start, Double.NaN)
-                        .parallel()
                         .mapToInt(cursor -> (int) cursor.targetId())
                         .forEach(id -> {
                             if (history.getAndSet(id))
@@ -124,24 +125,23 @@ public class GdsReadJob extends ReadJob {
             }
             stream = copy
                     .streamRelationships(start, Double.NaN)
-                    .parallel()
                     .mapToLong(cursor -> Edge.edge(cursor.sourceId(), cursor.targetId(), (Double.isNaN(cursor.property()))));
         } else {
             cacheHits.incrementAndGet();
             if (k == 0) {
                 Arrays.stream(cachedList)
-                        .parallel()
                         .mapToInt(Edge::targetAsInt)
                         .forEach(id -> {
                             if (history.getAndSet(id))
                                 dropSet.add(id);
                         });
             }
-            stream = Arrays.stream(cachedList).parallel();
+            stream = Arrays.stream(cachedList);
         }
-        if (k == 0)
+        if (k == 0) {
             return stream
                     .filter(edge -> Edge.isNatural(edge) || !dropSet.contains(Edge.targetAsInt(edge)));
+        }
         return stream;
     }
 
@@ -229,7 +229,7 @@ public class GdsReadJob extends ReadJob {
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
             final Function<Long, Long> processNode = (origin) -> {
-                final NodeHistory history = (graph.degree(origin)) > 1_000_000 ?
+                final NodeHistory history = (graph.degree(origin)) > 250_000 ?
                         NodeHistory.offHeap((int) nodeCount) : NodeHistory.given(1, 1);
 
                 history.getAndSet(origin.intValue()); // XXX cast
@@ -239,13 +239,12 @@ public class GdsReadJob extends ReadJob {
                 for (int i = 1; i < k; i++) {
                     final int n = i;
                     stream = stream
-                            .flatMap(edge -> LongStream.concat(
+                            .flatMap(edge -> Streams.concat(
                                     LongStream.of(edge),
                                     hop(n, target(edge), graph, history, supernodeCache, cacheHits)));
                 }
 
                 stream = stream
-                        .parallel()
                         .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.sourceAsInt(edge)))
                         .map(edge -> (Edge.isNatural(edge)) ? edge : Edge.uniquify(edge));
 
@@ -268,7 +267,7 @@ public class GdsReadJob extends ReadJob {
             final Semaphore semaphore = new Semaphore(tickets);
             final AtomicLong rowCnt = new AtomicLong(0);
 
-            for (long id = 0; id < nodeCount; id++) {
+            for (long id = 0; id < nodeCount && !aborted.isDone(); id++) {
                 try {
                     final long nodeId = id;
                     semaphore.acquire();
@@ -286,15 +285,27 @@ public class GdsReadJob extends ReadJob {
             }
 
             try {
-                if (!semaphore.tryAcquire(tickets, 24, TimeUnit.HOURS)) {
-                    logger.error("timed out waiting for k-hop to complete...");
-                }
-            } catch (InterruptedException e) {
-                logger.error("interrupted waiting for k-hop to complete");
-            }
+                CompletableFuture.anyOf(
+                        aborted,
+                        CompletableFuture.supplyAsync(() -> {
+                            try { return !semaphore.tryAcquire(tickets, 24, TimeUnit.HOURS); }
+                            catch (Exception e) {
+                                logger.error("error acquiring all semaphore tickets", e);
+                                return false;
+                            }
+                        })
+                ).whenComplete((obj, throwable) -> {
+                    if (obj instanceof Boolean) {
+                        if (!((Boolean)obj) || throwable != null) { // things are ok if true
+                            logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rowCnt.get()));
+                            logger.info(String.format("cache hits: %,d", cacheHits.get()));
+                        }
+                    }
+                });
 
-            logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rowCnt.get()));
-            logger.info(String.format("cache hits: %,d", cacheHits.get()));
+            } catch (Exception e) {
+                logger.error("unhandled exception waiting for k-hop to complete");
+            }
             return true;
         }).handleAsync((isOk, err) -> {
             if (isOk != null && isOk) {
@@ -493,11 +504,13 @@ public class GdsReadJob extends ReadJob {
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
+        aborted.complete(true);
         return future.cancel(mayInterruptIfRunning);
     }
 
     @Override
     public void close() {
+        aborted.complete(true);
         future.cancel(true);
     }
 }
