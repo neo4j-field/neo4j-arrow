@@ -73,7 +73,7 @@ public class Config {
 
     /** Arrow max List size, used by k-hop */
     public final static int arrowMaxListSize = Math.abs(Integer.parseInt(
-            System.getenv().getOrDefault("ARROW_MAX_LIST_SIZE", String.valueOf(8192))));
+            System.getenv().getOrDefault("ARROW_MAX_LIST_SIZE", String.valueOf(2048))));
 
     /** Bolt fetch size controls how many Records we PULL at a given time. Should be set lower
      * than the Arrow Batch size.
