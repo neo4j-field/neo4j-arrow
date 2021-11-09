@@ -21,31 +21,33 @@ public class SubGraphRecord implements RowBasedRecord {
     };
 
     private final int origin;
-    private final List<Integer> sourceIds;
-    private final List<Integer> targetIds;
+    private final int[] sourceIds;
+    private final int[] targetIds;
 
 
-    protected SubGraphRecord(int origin, List<Integer> sourceIds, List<Integer> targetIds) {
+    protected SubGraphRecord(int origin, int[] sourceIds, int[] targetIds) {
         this.origin = origin;
         this.sourceIds = sourceIds;
         this.targetIds = targetIds;
     }
 
-    public static SubGraphRecord of(int origin, List<Integer> sourceIds, List<Integer> targetIds) {
-        if (sourceIds.size() != targetIds.size()) {
-            throw new IllegalArgumentException("length of both source and target ids must be the same");
+    public static SubGraphRecord of(int origin, int[] sourceIds, int[] targetIds) {
+        if (sourceIds.length != targetIds.length) {
+            throw new IllegalArgumentException("length of both source and target id arrays must be the same");
         }
         return new SubGraphRecord(origin, sourceIds, targetIds);
     }
 
-    public static SubGraphRecord of(long origin, Iterable<Long> edges) {
-        final List<Integer> sources = new ArrayList<>();
-        final List<Integer> targets = new ArrayList<>();
+    public static SubGraphRecord of(long origin, Iterable<Long> edges, int size) {
+        final int[] sources = new int[size];
+        final int[] targets = new int[size];
 
-        edges.forEach(edge -> {
-            sources.add(Edge.sourceAsInt(edge));
-            targets.add(Edge.targetAsInt(edge));
-        });
+        int pos = 0;
+        for (long edge : edges) {
+            sources[pos] = Edge.sourceAsInt(edge);
+            targets[pos] = Edge.targetAsInt(edge);
+            pos++;
+        }
         return new SubGraphRecord((int) origin, sources, targets); // XXX cast
     }
 
@@ -76,7 +78,7 @@ public class SubGraphRecord implements RowBasedRecord {
     }
 
     public int numEdges() {
-        return sourceIds.size();
+        return sourceIds.length;
     }
 
     @Override

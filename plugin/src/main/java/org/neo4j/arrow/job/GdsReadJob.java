@@ -193,7 +193,7 @@ public class GdsReadJob extends ReadJob {
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         // XXX faux record
-        onFirstRecord(SubGraphRecord.of(0, List.of(1), List.of(2)));
+        onFirstRecord(SubGraphRecord.of(0, new int[]{1}, new int[]{2}));
 
         return CompletableFuture.supplyAsync(() -> {
             logger.info(String.format("starting node stream for gds khop job %s (%,d nodes, %,d rels)",
@@ -254,7 +254,7 @@ public class GdsReadJob extends ReadJob {
                 final AtomicLong cnt = new AtomicLong(0);
                 Iterators.partition(stream.iterator(), Config.arrowMaxListSize)
                         .forEachRemaining(batch -> {
-                            consume.accept(SubGraphRecord.of(origin, batch));
+                            consume.accept(SubGraphRecord.of(origin, batch, batch.size()));
                             cnt.incrementAndGet();
                         });
 

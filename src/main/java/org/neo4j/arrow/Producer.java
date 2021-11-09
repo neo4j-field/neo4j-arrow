@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.AllocationListener;
 import org.apache.arrow.memory.ArrowBuf;
@@ -189,7 +190,8 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
                 }
                 logger.info("flusher for job {} finished", job);
-            }, Executors.newSingleThreadExecutor());
+            }, Executors.newSingleThreadExecutor((new ThreadFactoryBuilder())
+                    .setNameFormat("arrow-flusher").setDaemon(true).build()));
 
             // Wasteful, but pre-init for now
             for (int i = 0; i < maxPartitions; i++) {
@@ -327,8 +329,9 @@ public class Producer implements FlightProducer, AutoCloseable {
                                         writer.writeFloat8(d);
                                     break;
                                 case INT_LIST:
+                                    /* XXX: for now we'll try using an int array instead of a List<Integer> for the value */
                                     try {
-                                        for (int i : value.asIntList()) {
+                                        for (int i : value.asIntArray()) {
                                             writer.writeInt(i);
                                         }
                                     } catch (OutOfMemoryException oom) {

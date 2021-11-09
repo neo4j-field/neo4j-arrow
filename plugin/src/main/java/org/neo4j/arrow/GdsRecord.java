@@ -1,5 +1,6 @@
 package org.neo4j.arrow;
 
+import com.google.common.collect.Lists;
 import org.neo4j.gds.api.nodeproperties.ValueType;
 
 import java.util.ArrayList;
@@ -17,6 +18,35 @@ public abstract class GdsRecord implements RowBasedRecord {
     protected GdsRecord(String[] keyArray, Value[] valueArray) {
         this.keyArray = keyArray;
         this.valueArray = valueArray;
+    }
+
+    public static Value wrapInts(int[] ints) {
+        return new Value() {
+            @Override
+            public int size() {
+                return ints.length;
+            }
+
+            @Override
+            public List<Object> asList() {
+                return Arrays.stream(ints).boxed().collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public List<Integer> asIntList() {
+                return Arrays.stream(ints).boxed().collect(Collectors.toUnmodifiableList());
+            }
+
+            @Override
+            public int[] asIntArray() {
+                return ints;
+            }
+
+            @Override
+            public Type type() {
+                return Type.INT_LIST;
+            }
+        };
     }
 
     public static Value wrapInts(List<Integer> ints) {

@@ -8,12 +8,12 @@ import java.util.HashSet;
 import java.util.Set;
 
 public abstract class NodeHistory {
-    public static final int CUTOFF = 1_000_000;
+    public static final int CUTOFF = 100_000;
 
-    public static NodeHistory given(int numNodes) {
+    public static NodeHistory given(long numNodes) {
         assert(numNodes < (1 << 30));
         if (numNodes < CUTOFF) {
-            return new SmolNodeHistory();
+            return new SmolNodeHistory((int) numNodes);
         }
         return new LorgeNodeHistory();
     }
@@ -22,16 +22,29 @@ public abstract class NodeHistory {
         return new OffHeapNodeHistory(numNodes);
     }
 
+    /** Retrieve the current value for the given bit and set to 1 */
     public abstract boolean getAndSet(int node);
+
+    /** Clear the bitmap, resetting all values to 0 */
+    public abstract void clear();
 
     protected static class SmolNodeHistory extends NodeHistory {
         // XXX not threadsafe
 
-        private final Set<Integer> set = new HashSet<>();
+        private final Set<Integer> set;
+
+        protected SmolNodeHistory(int numNodes) {
+            set = new HashSet<>(numNodes);
+        }
 
         @Override
         public boolean getAndSet(int node) {
             return !set.add(node);
+        }
+
+        @Override
+        public void clear() {
+            set.clear();
         }
     }
 
@@ -59,11 +72,20 @@ public abstract class NodeHistory {
             }
             return result;
         }
+
+        @Override
+        public void clear() {
+            buffer.clear(); // XXX not sure if this works
+        }
     }
 
     protected static class LorgeNodeHistory extends NodeHistory {
 
-        private final RoaringBitmap bitmap = new RoaringBitmap();
+        private final RoaringBitmap bitmap;
+
+        protected LorgeNodeHistory() {
+             bitmap = new RoaringBitmap();
+        }
 
         @Override
         public boolean getAndSet(int node) {
@@ -71,6 +93,11 @@ public abstract class NodeHistory {
             final boolean result = bitmap.contains(node);
             bitmap.add(node);
             return result;
+        }
+
+        @Override
+        public void clear() {
+            bitmap.clear();
         }
     }
 }
