@@ -107,103 +107,25 @@ public class GdsReadJob extends ReadJob {
         }, nodeCount, Spliterator.SIZED | Spliterator.DISTINCT | Spliterator.ORDERED | Spliterator.NONNULL);
     }
 
-    private LongStream hop(int k, long start, Graph graph, NodeHistory history, SuperNodeCache cache, AtomicLong cacheHits) {
-        final long[] cachedList = cache.get((int) start); // XXX cast
-        final Graph copy = graph.concurrentCopy();
-
-        final Set<Integer> dropSet = new HashSet<>();
-
-        final LongStream stream;
-        if (cachedList == null) {
-            if (k == 0) {
-                /*
-                 * If we're at the origin, we need to collect a set of the initial neighbor ids
-                 * AND find a list of targets to drop if there's a bi-directional relationship.
-                 * This prevents duplicates without having to keep a huge list of edges.
-                 */
-                copy.streamRelationships(start, Double.NaN)
-                        .sequential()
-                        .mapToInt(cursor -> (int) cursor.targetId())
-                        .forEach(id -> {
-                            if (history.getAndSet(id))
-                                dropSet.add(id);
-                        });
-            }
-            stream = copy
-                    .streamRelationships(start, Double.NaN)
-                    .mapToLong(cursor -> Edge.edge(cursor.sourceId(), cursor.targetId(), (Double.isNaN(cursor.property()))));
-        } else {
-            cacheHits.incrementAndGet();
-            if (k == 0) {
-                Arrays.stream(cachedList)
-                        .sequential()
-                        .mapToInt(Edge::targetAsInt)
-                        .forEach(id -> {
-                            if (history.getAndSet(id))
-                                dropSet.add(id);
-                        });
-            }
-            stream = Arrays.stream(cachedList);
-        }
-        if (k == 0) {
-            return stream
-                    .filter(edge -> Edge.isNatural(edge) || !dropSet.contains(Edge.targetAsInt(edge)));
-        }
-        return stream;
+    // For now until I refactor the API, just move this stuff out into a static area.
+    private static final AtomicInteger partitionCounter = new AtomicInteger(0);
+    private static Consumer<RowBasedRecord> wrapConsumer(BiConsumer<RowBasedRecord, Integer> consumer) {
+        return (row) -> consumer.accept(row, Math.abs(partitionCounter.getAndIncrement()));
     }
 
     private CompletableFuture<Boolean> handleKHopJob(KHopMessage msg, GraphStore store) {
         final Graph graph = store.getGraph(store.nodeLabels(), store.relationshipTypes(),
                 Optional.of(msg.getRelProperty()));
         final long nodeCount = graph.nodeCount();
-        final long relCount = graph.relationshipCount();
-        final AtomicLong cacheHits = new AtomicLong(0);
-
         final int k = msg.getK();
         assert(k == 2); // XXX optimizations for this condition exist for now
-
-        final AtomicInteger x = new AtomicInteger(0);
-        final Function<BiConsumer<RowBasedRecord, Integer>, Consumer<RowBasedRecord>> wrapConsumer =
-                (consumer) ->
-                        (row) -> consumer.accept(row, Math.abs(x.getAndIncrement()));
-
-        /*
-         * Analyze our graph to identify supernodes. Reports a histogram of node degrees.
-         */
-        final Queue<Long> superNodes = new ConcurrentLinkedQueue<>();
-
-        logger.info(String.format("checking for super nodes in graph with %,d nodes, %,d edges...", nodeCount, relCount));
-        final AtomicInteger[] histogram = new AtomicInteger[10];
-        for (int i = 0; i < histogram.length; i++)
-            histogram[i] = new AtomicInteger(0);
-
-        LongStream.range(0, nodeCount)
-                .parallel()
-                .mapToObj(id -> Pair.of(id, 0))
-                .map(pair -> Pair.of(pair.getLeft(), graph.degree(pair.getLeft())))
-                .map(pair -> (pair.getRight() == 0) ? Pair.of(pair.getLeft(), Double.NaN)
-                        : Pair.of(pair.getLeft(), Math.floor(Math.log10(pair.getRight()))))
-                .map(pair -> (pair.getRight().isNaN()) ? Pair.of(pair.getLeft(), 0)
-                        : Pair.of(pair.getLeft(), pair.getRight().intValue() + 1))
-                .forEach(pair -> {
-                    int magnitude = pair.getRight();
-                    if (magnitude > 4) { // 100k's of edges
-                        superNodes.add(pair.getLeft());
-                    }
-                    histogram[pair.getRight()].incrementAndGet();
-                });
-
-        logger.info(String.format("\t[ zero ]\t- %,d nodes", histogram[0].get()));
-        for (int i = 1; i < histogram.length; i++)
-            logger.info(String.format("  [ 1e%d - 1e%d )\t- %,d nodes", i - 1, i, histogram[i].get()));
-        logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         // XXX faux record...needed to progress the job status
         onFirstRecord(SubGraphRecord.of(0, new int[]{1}, new int[]{2}));
 
         return CompletableFuture.supplyAsync(() -> {
             logger.info(String.format("starting node stream for gds khop job %s (%,d nodes, %,d rels)",
-                    jobId, nodeCount, relCount));
+                    jobId, nodeCount, graph.relationshipCount()));
 
             /*
              * "Triples makes it safe. Triples is best."
@@ -212,34 +134,20 @@ public class GdsReadJob extends ReadJob {
              * We'll encode a "triple" effectively in a 64-bit Java long, leaning on the
              * assumption that we have < 1B nodes...
              */
+            final Collection<Long> superNodes = KHop.findSupernodes(graph);
             final SuperNodeCache supernodeCache = KHop.populateCache(graph, superNodes);
+            final Consumer<RowBasedRecord> consumer = wrapConsumer(futureConsumer.join()); // XXX join()
 
-            var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
-
-            final Function<Long, Long> processNode = (origin) -> {
-                final NodeHistory history = NodeHistory.given((int) nodeCount); // XXX cast
-                history.getAndSet(origin.intValue()); // XXX cast
-
-                LongStream stream = hop(0, origin, graph, history, supernodeCache, cacheHits);
-
-                // k-hop...where k == 2 for now ;) There are specific optimizations for the k=2 condition.
-                for (int i = 1; i < k; i++) {
-                    final int n = i;
-                    stream = stream
-                            .flatMap(edge -> Streams.concat(
-                                    LongStream.of(edge),
-                                    hop(n, target(edge), graph, history, supernodeCache, cacheHits)));
-                }
-
-                stream = stream
-                        .sequential() // Be safe since we use a stateful filter
-                        .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.targetAsInt(edge)))
-                        .map(edge -> (Edge.isNatural(edge)) ? edge : Edge.uniquify(edge));
-
+            /*
+             * Core k-hop work logic. Given a start node (origin), perform the k-hop.
+             * Return the total number of records created.
+             */
+            final Function<Integer, Long> processNode = (origin) -> {
+                final LongStream stream = KHop.stream(origin, k, graph, supernodeCache);
                 final AtomicLong cnt = new AtomicLong(0);
                 Iterators.partition(stream.iterator(), Config.arrowMaxListSize)
                         .forEachRemaining(batch -> {
-                            consume.accept(SubGraphRecord.of(origin, batch, batch.size()));
+                            consumer.accept(SubGraphRecord.of(origin, batch, batch.size()));
                             cnt.incrementAndGet();
                         });
 
@@ -250,12 +158,7 @@ public class GdsReadJob extends ReadJob {
              * Hacky way to constrain how many streams we process simultaneously. We'll use a thread pool
              * and semaphores. This also lets us name the threads.
              */
-            final ThreadFactory factory = (new ThreadFactoryBuilder())
-                    .setDaemon(true)
-                    .setNameFormat("khop-%d")
-                    .build();
-            final Executor khopExecutor = Executors.newCachedThreadPool(factory);
-            // Not sure if this is needed...what happens if you blast 300m Runnables into an Executor :D
+            final Executor khopExecutor = KHop.buildKhopExecutor();
             final int tickets = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
             final Semaphore semaphore = new Semaphore(tickets);
             final AtomicLong rowCnt = new AtomicLong(0);
@@ -268,7 +171,7 @@ public class GdsReadJob extends ReadJob {
              */
             final CountDownLatch countDownLatch = new CountDownLatch((int) nodeCount); // XXX cast
             for (long id = 0; id < nodeCount && !aborted.isDone(); id++) {
-                    final long nodeId = id;
+                    final int nodeId = (int) id; // XXX cast
                     try {
                         semaphore.acquire();
                         khopExecutor.execute(() -> {
@@ -305,7 +208,6 @@ public class GdsReadJob extends ReadJob {
                     if (obj instanceof Boolean && throwable == null) {
                         if (((Boolean)obj) ) { // things are ok if true
                             logger.info(String.format("completed gds k-hop job: %,d nodes, %,d total rows", nodeCount, rowCnt.get()));
-                            logger.info(String.format("cache hits: %,d", cacheHits.get()));
                             result.set(true);
                         } else {
                             logger.error("something failed in k-hop job");
