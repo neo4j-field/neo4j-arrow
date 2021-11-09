@@ -1,7 +1,6 @@
 package org.neo4j.arrow;
 
 import org.neo4j.arrow.gds.Edge;
-import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Relationship;
 

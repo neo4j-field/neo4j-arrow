@@ -1,6 +1,5 @@
 package org.neo4j.arrow.job;
 
-import com.google.common.base.Predicates;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -11,6 +10,7 @@ import org.neo4j.arrow.*;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.KHopMessage;
 import org.neo4j.arrow.gds.Edge;
+import org.neo4j.arrow.gds.KHop;
 import org.neo4j.arrow.gds.NodeHistory;
 import org.neo4j.arrow.gds.SuperNodeCache;
 import org.neo4j.gds.NodeLabel;
@@ -22,8 +22,6 @@ import org.neo4j.gds.api.nodeproperties.ValueType;
 import org.neo4j.gds.core.loading.GraphStoreCatalog;
 import org.neo4j.gds.core.loading.ImmutableCatalogRequest;
 import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
-import org.roaringbitmap.RoaringBitmap;
-import org.roaringbitmap.longlong.Roaring64Bitmap;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -33,7 +31,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.stream.*;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static org.neo4j.arrow.gds.Edge.target;
 
@@ -106,12 +107,11 @@ public class GdsReadJob extends ReadJob {
         }, nodeCount, Spliterator.SIZED | Spliterator.DISTINCT | Spliterator.ORDERED | Spliterator.NONNULL);
     }
 
-    private LongStream hop(int k, long start, Graph graph, SuperNodeCache cache, AtomicLong cacheHits) {
+    private LongStream hop(int k, long start, Graph graph, NodeHistory history, SuperNodeCache cache, AtomicLong cacheHits) {
         final long[] cachedList = cache.get((int) start); // XXX cast
         final Graph copy = graph.concurrentCopy();
 
         final Set<Integer> dropSet = new HashSet<>();
-        final NodeHistory history = NodeHistory.given((int) graph.nodeCount()); // XXX cast
 
         final LongStream stream;
         if (cachedList == null) {
@@ -160,13 +160,16 @@ public class GdsReadJob extends ReadJob {
         final AtomicLong cacheHits = new AtomicLong(0);
 
         final int k = msg.getK();
+        assert(k == 2); // XXX optimizations for this condition exist for now
 
         final AtomicInteger x = new AtomicInteger(0);
         final Function<BiConsumer<RowBasedRecord, Integer>, Consumer<RowBasedRecord>> wrapConsumer =
                 (consumer) ->
                         (row) -> consumer.accept(row, Math.abs(x.getAndIncrement()));
 
-        // XXX analyze degrees
+        /*
+         * Analyze our graph to identify supernodes. Reports a histogram of node degrees.
+         */
         final Queue<Long> superNodes = new ConcurrentLinkedQueue<>();
 
         logger.info(String.format("checking for super nodes in graph with %,d nodes, %,d edges...", nodeCount, relCount));
@@ -193,10 +196,9 @@ public class GdsReadJob extends ReadJob {
         logger.info(String.format("\t[ zero ]\t- %,d nodes", histogram[0].get()));
         for (int i = 1; i < histogram.length; i++)
             logger.info(String.format("  [ 1e%d - 1e%d )\t- %,d nodes", i - 1, i, histogram[i].get()));
-
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
-        // XXX faux record
+        // XXX faux record...needed to progress the job status
         onFirstRecord(SubGraphRecord.of(0, new int[]{1}, new int[]{2}));
 
         return CompletableFuture.supplyAsync(() -> {
@@ -210,47 +212,27 @@ public class GdsReadJob extends ReadJob {
              * We'll encode a "triple" effectively in a 64-bit Java long, leaning on the
              * assumption that we have < 1B nodes...
              */
-
-            final SuperNodeCache supernodeCache;
-            // Pre-cache supernodes adjacency lists
-            if (superNodes.size() > 0) {
-                logger.info("caching supernodes...");
-                supernodeCache = SuperNodeCache.ofSize(superNodes.size());
-                superNodes.parallelStream()
-                        .forEach(superNodeId ->
-                                supernodeCache.set(superNodeId.intValue(),
-                                        graph.concurrentCopy()
-                                                .streamRelationships(superNodeId, Double.NaN)
-                                                .mapToLong(cursor -> {
-                                                    final boolean isNatural = Double.isNaN(cursor.property());
-                                                    return Edge.edge(cursor.sourceId(), cursor.targetId(), isNatural);
-                                                }).toArray()));
-
-                logger.info(String.format("cached %,d supernodes (%,d edges)",
-                        superNodes.size(), supernodeCache.stream()
-                                .mapToLong(array -> array == null ? 0 : array.length).sum()));
-            } else {
-                supernodeCache = SuperNodeCache.empty();
-            }
+            final SuperNodeCache supernodeCache = KHop.populateCache(graph, superNodes);
 
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
             final Function<Long, Long> processNode = (origin) -> {
                 final NodeHistory history = NodeHistory.given((int) nodeCount); // XXX cast
+                history.getAndSet(origin.intValue()); // XXX cast
 
-                LongStream stream = hop(0, origin, graph, supernodeCache, cacheHits);
+                LongStream stream = hop(0, origin, graph, history, supernodeCache, cacheHits);
 
-                // k-hop...where k == 2 for now ;)
+                // k-hop...where k == 2 for now ;) There are specific optimizations for the k=2 condition.
                 for (int i = 1; i < k; i++) {
                     final int n = i;
                     stream = stream
                             .flatMap(edge -> Streams.concat(
                                     LongStream.of(edge),
-                                    hop(n, target(edge), graph, supernodeCache, cacheHits)));
+                                    hop(n, target(edge), graph, history, supernodeCache, cacheHits)));
                 }
 
                 stream = stream
-                        .sequential()
+                        .sequential() // Be safe since we use a stateful filter
                         .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.targetAsInt(edge)))
                         .map(edge -> (Edge.isNatural(edge)) ? edge : Edge.uniquify(edge));
 
@@ -265,7 +247,8 @@ public class GdsReadJob extends ReadJob {
             };
 
             /*
-             * Hacky way to constrain how many streams we process simultaneously
+             * Hacky way to constrain how many streams we process simultaneously. We'll use a thread pool
+             * and semaphores. This also lets us name the threads.
              */
             final ThreadFactory factory = (new ThreadFactoryBuilder())
                     .setDaemon(true)
