@@ -118,6 +118,7 @@ public class GdsReadJob extends ReadJob {
                  * This prevents duplicates without having to keep a huge list of edges.
                  */
                 copy.streamRelationships(start, Double.NaN)
+                        .sequential()
                         .mapToInt(cursor -> (int) cursor.targetId())
                         .forEach(id -> {
                             if (history.getAndSet(id))
@@ -131,6 +132,7 @@ public class GdsReadJob extends ReadJob {
             cacheHits.incrementAndGet();
             if (k == 0) {
                 Arrays.stream(cachedList)
+                        .sequential()
                         .mapToInt(Edge::targetAsInt)
                         .forEach(id -> {
                             if (history.getAndSet(id))
@@ -230,8 +232,7 @@ public class GdsReadJob extends ReadJob {
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
             final Function<Long, Long> processNode = (origin) -> {
-                final NodeHistory history = (graph.degree(origin)) > 250_000 ?
-                        NodeHistory.offHeap((int) nodeCount) : NodeHistory.given(1, 1);
+                final NodeHistory history = NodeHistory.given((int) nodeCount); // XXX cast
 
                 history.getAndSet(origin.intValue()); // XXX cast
                 LongStream stream = hop(0, origin, graph, history, supernodeCache, cacheHits);
@@ -246,7 +247,8 @@ public class GdsReadJob extends ReadJob {
                 }
 
                 stream = stream
-                        .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.sourceAsInt(edge)))
+                        .sequential()
+                        .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.targetAsInt(edge)))
                         .map(edge -> (Edge.isNatural(edge)) ? edge : Edge.uniquify(edge));
 
                 final AtomicLong cnt = new AtomicLong(0);
