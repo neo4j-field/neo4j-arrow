@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 public class NodeHistoryTest {
     @Test
     public void testSmallEdgeCache() {
-        NodeHistory small = NodeHistory.given(3, 4);
+        NodeHistory small = NodeHistory.given(4);
         int node1 = 1;
         int node2 = 2;
         int node3 = 2;
@@ -20,7 +20,7 @@ public class NodeHistoryTest {
 
     @Test
     public void testHugeEdgeCache() {
-        NodeHistory small = NodeHistory.given(3_000_000, 3_000_000);
+        NodeHistory small = NodeHistory.given(3_000_000);
 
         int node1 = 1;
         int node2 = 2;

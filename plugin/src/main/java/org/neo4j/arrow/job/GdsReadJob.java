@@ -111,7 +111,7 @@ public class GdsReadJob extends ReadJob {
         final Graph copy = graph.concurrentCopy();
 
         final Set<Integer> dropSet = new HashSet<>();
-        final NodeHistory history = NodeHistory.given(graph.degree(start), (int) graph.nodeCount()); // XXX cast
+        final NodeHistory history = NodeHistory.given((int) graph.nodeCount()); // XXX cast
 
         final LongStream stream;
         if (cachedList == null) {
@@ -122,6 +122,7 @@ public class GdsReadJob extends ReadJob {
                  * This prevents duplicates without having to keep a huge list of edges.
                  */
                 copy.streamRelationships(start, Double.NaN)
+                        .sequential()
                         .mapToInt(cursor -> (int) cursor.targetId())
                         .forEach(id -> {
                             if (history.getAndSet(id))
@@ -135,6 +136,7 @@ public class GdsReadJob extends ReadJob {
             cacheHits.incrementAndGet();
             if (k == 0) {
                 Arrays.stream(cachedList)
+                        .sequential()
                         .mapToInt(Edge::targetAsInt)
                         .forEach(id -> {
                             if (history.getAndSet(id))
@@ -195,7 +197,7 @@ public class GdsReadJob extends ReadJob {
         logger.info(String.format("%,d potential supernodes!", superNodes.size()));
 
         // XXX faux record
-        onFirstRecord(SubGraphRecord.of(0, List.of(1), List.of(2)));
+        onFirstRecord(SubGraphRecord.of(0, new int[]{1}, new int[]{2}));
 
         return CompletableFuture.supplyAsync(() -> {
             logger.info(String.format("starting node stream for gds khop job %s (%,d nodes, %,d rels)",
@@ -234,7 +236,7 @@ public class GdsReadJob extends ReadJob {
             var consume = wrapConsumer.apply(futureConsumer.join()); // XXX join()
 
             final Function<Long, Long> processNode = (origin) -> {
-                Roaring64Bitmap edgeBitmap = new Roaring64Bitmap();
+                final NodeHistory history = NodeHistory.given((int) nodeCount); // XXX cast
 
                 LongStream stream = hop(0, origin, graph, supernodeCache, cacheHits);
 
@@ -248,20 +250,14 @@ public class GdsReadJob extends ReadJob {
                 }
 
                 stream = stream
-                        .map(Edge::uniquify)
                         .sequential()
-                        .filter(edge -> {
-                            if (edgeBitmap.contains(edge)) {
-                                return false;
-                            }
-                            edgeBitmap.addLong(edge);
-                            return true;
-                        });
+                        .filter(edge -> Edge.isNatural(edge) || !history.getAndSet(Edge.targetAsInt(edge)))
+                        .map(edge -> (Edge.isNatural(edge)) ? edge : Edge.uniquify(edge));
 
                 final AtomicLong cnt = new AtomicLong(0);
                 Iterators.partition(stream.iterator(), Config.arrowMaxListSize)
                         .forEachRemaining(batch -> {
-                            consume.accept(SubGraphRecord.of(origin, batch));
+                            consume.accept(SubGraphRecord.of(origin, batch, batch.size()));
                             cnt.incrementAndGet();
                         });
 

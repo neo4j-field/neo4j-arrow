@@ -1,37 +1,50 @@
 package org.neo4j.arrow.gds;
 
 import org.neo4j.gds.core.utils.BitUtil;
-import org.neo4j.gds.core.utils.mem.AllocationTracker;
-import org.neo4j.gds.core.utils.paged.HugeAtomicBitSet;
+import org.roaringbitmap.RoaringBitmap;
 
 import java.nio.ByteBuffer;
+import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.ConcurrentSkipListSet;
 
 public abstract class NodeHistory {
-    public static final int CUTOFF = 1_000_000;
+    public static final int CUTOFF = 100_000;
 
-    public static NodeHistory given(int degree, int numNodes) {
-        assert (degree < 1_000_000);
+    public static NodeHistory given(long numNodes) {
+        assert(numNodes < (1 << 30));
         if (numNodes < CUTOFF) {
-            return new SmolNodeHistory();
+            return new SmolNodeHistory((int) numNodes);
         }
-        return new LorgeNodeHistory(numNodes);
+        return new LorgeNodeHistory();
     }
 
     public static NodeHistory offHeap(int numNodes) {
         return new OffHeapNodeHistory(numNodes);
     }
 
+    /** Retrieve the current value for the given bit and set to 1 */
     public abstract boolean getAndSet(int node);
 
-    protected static class SmolNodeHistory extends NodeHistory {
+    /** Clear the bitmap, resetting all values to 0 */
+    public abstract void clear();
 
-        private final Set<Integer> set = new ConcurrentSkipListSet<>();
+    protected static class SmolNodeHistory extends NodeHistory {
+        // XXX not threadsafe
+
+        private final Set<Integer> set;
+
+        protected SmolNodeHistory(int numNodes) {
+            set = new HashSet<>(numNodes);
+        }
 
         @Override
         public boolean getAndSet(int node) {
             return !set.add(node);
+        }
+
+        @Override
+        public void clear() {
+            set.clear();
         }
     }
 
@@ -59,19 +72,32 @@ public abstract class NodeHistory {
             }
             return result;
         }
+
+        @Override
+        public void clear() {
+            buffer.clear(); // XXX not sure if this works
+        }
     }
 
     protected static class LorgeNodeHistory extends NodeHistory {
 
-        private final HugeAtomicBitSet set;
+        private final RoaringBitmap bitmap;
 
-        protected LorgeNodeHistory(int size) {
-            set = HugeAtomicBitSet.create(size, AllocationTracker.empty());
+        protected LorgeNodeHistory() {
+             bitmap = new RoaringBitmap();
         }
 
         @Override
         public boolean getAndSet(int node) {
-            return set.getAndSet(node);
+            // XXX not threadsafe
+            final boolean result = bitmap.contains(node);
+            bitmap.add(node);
+            return result;
+        }
+
+        @Override
+        public void clear() {
+            bitmap.clear();
         }
     }
 }
