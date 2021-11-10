@@ -58,6 +58,11 @@ class Neo4jArrow:
         """List all known flights. (No filtering support yet.)"""
         return list(self._client.list_flights(options=self._options))
 
+    def _submit(self, action):
+        """Attempt to ticket the given action/job"""
+        results = self._client.do_action(action, options=self._options)
+        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+
     def cypher(self, cypher, database='neo4j', params={}):
         """Submit a Cypher job with optional parameters. Returns a ticket."""
         cypher_bytes = cypher.encode('utf8')
@@ -76,11 +81,9 @@ class Neo4jArrow:
             len(cypher_bytes), cypher_bytes, 
             len(db_bytes), db_bytes,
             len(params_bytes), params_bytes)
-        action = (_JOB_CYPHER, buffer)
-        results = self._client.do_action(action, options=self._options)
-        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+        return self._submit((_JOB_CYPHER, buffer))
 
-    def gds_nodes(self, graph, properties=[], database='neo4j', filters=[]):
+    def gds_nodes(self, graph, properties=[], database='neo4j', filters=[], extra={}):
         """Submit a GDS job for streaming Node properties. Returns a ticket."""
         params = {
             'db': database,
@@ -89,10 +92,9 @@ class Neo4jArrow:
             'properties': properties,
             'filters': filters,
         }
+        params.update(extra)
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS_READ, params_bytes)
-        results = self._client.do_action(action, options=self._options)
-        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+        return self._submit((_JOB_GDS_READ, params_bytes))
 
     def gds_write_nodes(self, graph, database='neo4j', idField='_node_id_', labelsField='_labels_'):
         """Submit a GDS Write Job for creating Nodes and Node Properties."""
@@ -103,9 +105,7 @@ class Neo4jArrow:
              'labelsField': labelsField,
          }
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS_WRITE_NODES, params_bytes)
-        results = self._client.do_action(action, options=self._options)
-        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+        return self._submit((_JOB_GDS_WRITE_NODES, params_bytes))
 
     def gds_write_relationships(self, graph, database='neo4j', sourceField='_source_id_', targetField='_target_id_', typeField='_type_'):
         """Submit a GDS Write Job for creating Rels and Rel Properties."""
@@ -117,11 +117,9 @@ class Neo4jArrow:
              'typeField': typeField,
          }
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS_WRITE_RELS, params_bytes)
-        results = self._client.do_action(action, options=self._options)
-        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+        return self._submit((_JOB_GDS_WRITE_RELS, params_bytes))
 
-    def gds_relationships(self, graph, properties=[], database='neo4j', filters=[]):
+    def gds_relationships(self, graph, properties=[], database='neo4j', filters=[], extra={}):
         """
         Submit a GDS job for streaming Relationship properties.
         Returns a ticket.
@@ -133,12 +131,11 @@ class Neo4jArrow:
             'properties': properties,
             'filters': filters,
         }
+        params.update(extra)
         params_bytes = json.dumps(params).encode('utf8')
-        action = (_JOB_GDS_READ, params_bytes)
-        results = self._client.do_action(action, options=self._options)
-        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
+        return self._submit((_JOB_GDS_READ, params_bytes))
 
-    def khop(self, graph, database='neo4j', rel_property='_type_'):
+    def khop(self, graph, database='neo4j', rel_property='_type_', extra={}):
         """ Experimental K-Hop Job support """
         params = {
             'db': database,
@@ -147,26 +144,9 @@ class Neo4jArrow:
             'properties': [rel_property],
             'filters': [],
         }
+        params.update(extra)
         params_bytes = json.dumps(params).encode('utf8')
-        results = self._client.do_action(
-                (_JOB_GDS_READ, params_bytes),
-                options=self._options)
-        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
-
-    def khop_tx(self, database='neo4j', k=2):
-        """ Experimental K-Hop Job support """
-        if k < 1 or k > 4:
-            raise ValueError("k out of valid range")
-        params = {
-            'db': database,
-            'k': 2,
-        }
-        params_bytes = json.dumps(params).encode('utf8')
-        results = self._client.do_action(
-                (_JOB_KHOP, params_bytes),
-                options=self._options)
-        return pa.flight.Ticket.deserialize((next(results).body.to_pybytes()))
-
+        return self._submit((_JOB_GDS_READ, params_bytes))
 
     def status(self, ticket):
         """Check job status for a ticket."""

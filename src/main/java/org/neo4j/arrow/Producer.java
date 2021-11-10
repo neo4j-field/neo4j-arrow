@@ -157,7 +157,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Tunable partition size...
             // TODO: figure out ideal way to set a good default based on host
-            final int maxPartitions = Config.arrowMaxPartitions;
+            final int maxPartitions = job.maxPartitionCnt;
 
             // Map<String, BaseWriter.ListWriter> writerMap
             @SuppressWarnings("unchecked") final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
@@ -231,7 +231,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         }
                         for (FieldVector fieldVector : vectorList) {
                             int retries = 1000;
-                            fieldVector.setInitialCapacity(Config.arrowBatchSize);
+                            fieldVector.setInitialCapacity(job.maxRowCount);
                             while (!fieldVector.allocateNewSafe() && --retries > 0) {
                                 // logger.error("failed to allocate memory for field {}", fieldVector.getName());
                                 try {
@@ -376,7 +376,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
 
                     // Flush at our batch size limit and reset our batch states.
-                    if ((idx + 1) == Config.arrowBatchSize ||
+                    if ((idx + 1) == job.maxRowCount ||
                             streamAllocator.getHeadroom() < (0.05 * streamAllocator.getLimit())) { // XXX ratio guess
                         writerMap.values().forEach(writer -> {
                             if (writer instanceof UnionFixedSizeListWriter) {

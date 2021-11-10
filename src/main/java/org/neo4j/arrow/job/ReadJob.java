@@ -1,5 +1,6 @@
 package org.neo4j.arrow.job;
 
+import org.neo4j.arrow.Config;
 import org.neo4j.arrow.RowBasedRecord;
 
 import java.util.concurrent.CompletableFuture;
@@ -15,6 +16,25 @@ public abstract class ReadJob extends Job {
 
     /** Provides a {@link BiConsumer} taking a {@link RowBasedRecord} with data and a partition id {@link Integer} */
     protected final CompletableFuture<BiConsumer<RowBasedRecord, Integer>> futureConsumer = new CompletableFuture<>();
+
+    /** Maximum number of simultaneous buffers to populate */
+    public final int maxPartitionCnt;
+
+    /** Maximum number of "rows" in a batch, i.e. the max vector dimension. */
+    public final int maxRowCount;
+
+    /** Maximum entries in a variable size list. Selectively used by certain jobs. */
+    public final int maxVariableListSize;
+
+    protected ReadJob() {
+        this(Config.arrowMaxPartitions, Config.arrowBatchSize, Config.arrowMaxListSize);
+    }
+
+    protected ReadJob(int maxPartitionCnt, int maxRowCount, int maxVariableListSize) {
+        this.maxPartitionCnt = maxPartitionCnt;
+        this.maxRowCount = maxRowCount;
+        this.maxVariableListSize = maxVariableListSize;
+    }
 
     protected void onFirstRecord(RowBasedRecord record) {
         logger.info("First record received {}", record);

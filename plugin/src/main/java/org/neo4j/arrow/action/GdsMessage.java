@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.neo4j.arrow.Config;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -39,6 +40,11 @@ public class GdsMessage implements Message {
     public static final String JSON_KEY_FILTER_LIST = "filters";
     public static final String JSON_KEY_PROPERTY_LIST = "properties";
 
+    // Additional GDS Job parameters
+    public static final String JSON_KEY_PARTITION_CNT = "partitions";
+    public static final String JSON_KEY_BATCH_SIZE = "batch_size";
+    public static final String JSON_KEY_MAX_LIST_SIZE = "list_size";
+
     /** Name of the Neo4j Database where our Graph lives. Optional. Defaults to "neo4j" */
     private final String dbName;
     /** Name of the Graph (projection) from the Graph Catalog. Required. */
@@ -52,17 +58,30 @@ public class GdsMessage implements Message {
      */
     private final List<String> properties;
 
+    private final int partitionCnt;
+    private final int batchSize;
+    private final int listSize;
+
     /** Special instance to use as a way for us to "fail open" with properties */
     public static final List<String> ANY_PROPERTIES = List.of();
 
-    public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters) {
+    public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters,
+                      int partitionCnt, int batchSize, int listSize) {
         this.dbName = dbName;
         this.graphName = graphName;
         this.requestType = requestType;
         this.properties = properties;
         this.filters = filters;
 
+        this.partitionCnt = partitionCnt;
+        this.batchSize = batchSize;
+        this.listSize = listSize;
+
         // TODO: validation / constraints of values?
+    }
+
+    public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters) {
+        this(dbName, graphName, requestType, properties, filters, Config.arrowMaxPartitions, Config.arrowBatchSize, Config.arrowMaxListSize);
     }
 
     /**
@@ -118,7 +137,17 @@ public class GdsMessage implements Message {
         if (properties.isEmpty())
             properties = ANY_PROPERTIES;
 
-        return new GdsMessage(dbName, graphName, requestType, properties, filters);
+        final int partitionCnt = Integer.parseInt(
+                params.getOrDefault(JSON_KEY_PARTITION_CNT, String.valueOf(Config.arrowMaxPartitions)).toString());
+
+        final int batchSize = Integer.parseInt(
+                params.getOrDefault(JSON_KEY_BATCH_SIZE, String.valueOf(Config.arrowBatchSize)).toString());
+
+        final int listSize = Integer.parseInt(
+                params.getOrDefault(JSON_KEY_MAX_LIST_SIZE, String.valueOf(Config.arrowMaxListSize)).toString());
+
+
+        return new GdsMessage(dbName, graphName, requestType, properties, filters, partitionCnt, batchSize, listSize);
     }
 
     public String getDbName() {
@@ -139,14 +168,29 @@ public class GdsMessage implements Message {
         return properties;
     }
 
+    public int getPartitionCnt() {
+        return partitionCnt;
+    }
+
+    public int getBatchSize() {
+        return batchSize;
+    }
+
+    public int getListSize() {
+        return listSize;
+    }
+
     @Override
     public String toString() {
         return "GdsMessage{" +
-                "db='" + dbName + '\'' +
-                ", graph='" + graphName + '\'' +
-                ", type='" + requestType + '\'' +
+                "dbName='" + dbName + '\'' +
+                ", graphName='" + graphName + '\'' +
+                ", requestType=" + requestType +
                 ", filters=" + filters +
-                ", properties=" + (properties == ANY_PROPERTIES ? "ANY" : properties) +
+                ", properties=" + properties +
+                ", partitionCnt=" + partitionCnt +
+                ", batchSize=" + batchSize +
+                ", listSize=" + listSize +
                 '}';
     }
 }

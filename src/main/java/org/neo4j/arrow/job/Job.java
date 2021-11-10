@@ -11,6 +11,8 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     protected static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Job.class);
     private static final AtomicLong jobCounter = new AtomicLong(0);
 
+    protected final String jobId;
+
     public enum Mode {
         READ,
         WRITE
@@ -44,8 +46,6 @@ public abstract class Job implements AutoCloseable, Future<JobSummary> {
     private Status jobStatus = Status.INITIALIZING;
 
     protected final CompletableFuture<JobSummary> jobSummary = new CompletableFuture<>();
-
-    protected final String jobId;
 
     protected Job() {
         jobId = String.format("job-%d", jobCounter.getAndIncrement());

@@ -49,7 +49,7 @@ public class GdsReadJob extends ReadJob {
      * @param username an already authenticated username
      */
     public GdsReadJob(GdsMessage msg, String username) throws RuntimeException {
-        super();
+        super(msg.getPartitionCnt(), msg.getBatchSize(), msg.getListSize());
         final CompletableFuture<Boolean> job;
         logger.info("GdsReadJob called with msg: {}", msg);
 
@@ -138,7 +138,7 @@ public class GdsReadJob extends ReadJob {
             final Function<Integer, Long> processNode = (origin) -> {
                 final LongStream stream = KHop.stream(origin, k, graph, supernodeCache);
                 final AtomicLong cnt = new AtomicLong(0);
-                Iterators.partition(stream.iterator(), Config.arrowMaxListSize)
+                Iterators.partition(stream.iterator(), this.maxVariableListSize)
                         .forEachRemaining(batch -> {
                             consumer.accept(SubGraphRecord.of(origin, batch, batch.size()));
                             cnt.incrementAndGet();
