@@ -4,18 +4,17 @@ import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.lang3.tuple.Pair;
 import org.neo4j.gds.api.Graph;
+import org.roaringbitmap.BitmapDataProvider;
+import org.roaringbitmap.RoaringBitmap;
+import org.roaringbitmap.RoaringBitmapWriter;
+import org.roaringbitmap.longlong.Roaring64Bitmap;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.LongStream;
-
-import static org.neo4j.arrow.gds.Edge.target;
 
 /**
  * Utilities for our k-hop implementation.
@@ -107,7 +106,6 @@ public class KHop {
                  * This prevents duplicates without having to keep a huge list of edges.
                  */
                 copy.streamRelationships(origin, Double.NaN)
-                        .sequential()
                         .mapToInt(cursor -> (int) cursor.targetId())
                         .forEach(id -> {
                             if (history.getAndSet(id))

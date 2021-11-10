@@ -2,6 +2,7 @@ package org.neo4j.arrow.gds;
 
 import org.neo4j.gds.core.utils.BitUtil;
 import org.roaringbitmap.RoaringBitmap;
+import org.roaringbitmap.RoaringBitmapWriter;
 
 import java.nio.ByteBuffer;
 import java.util.HashSet;
@@ -15,7 +16,7 @@ public abstract class NodeHistory {
         if (numNodes < CUTOFF) {
             return new SmolNodeHistory((int) numNodes);
         }
-        return new LorgeNodeHistory();
+        return new LorgeNodeHistory(numNodes);
     }
 
     public static NodeHistory offHeap(int numNodes) {
@@ -83,8 +84,12 @@ public abstract class NodeHistory {
 
         private final RoaringBitmap bitmap;
 
-        protected LorgeNodeHistory() {
-             bitmap = new RoaringBitmap();
+        protected LorgeNodeHistory(long numNodes) {
+            final RoaringBitmapWriter<RoaringBitmap> writer = RoaringBitmapWriter.writer()
+                    .expectedRange(0, numNodes)
+                    .optimiseForArrays()
+                    .get();
+             bitmap = writer.get();
         }
 
         @Override

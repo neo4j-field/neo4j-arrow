@@ -146,7 +146,6 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
 
-            // listener.setUseZeroCopy(true);
             // Add a job cancellation hook
             listener.setOnCancelHandler(() -> {
                 logger.info("client disconnected or cancelled stream");
@@ -154,7 +153,6 @@ public class Producer implements FlightProducer, AutoCloseable {
             });
 
             // Signal the client that we're about to start the stream
-            listener.setUseZeroCopy(false);
             listener.start(root);
 
             // Tunable partition size...

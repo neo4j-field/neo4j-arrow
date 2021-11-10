@@ -1,17 +1,12 @@
 package org.neo4j.arrow.job;
 
 import com.google.common.collect.Iterators;
-import com.google.common.collect.Streams;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.arrow.flight.CallStatus;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.neo4j.arrow.*;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.action.KHopMessage;
-import org.neo4j.arrow.gds.Edge;
 import org.neo4j.arrow.gds.KHop;
-import org.neo4j.arrow.gds.NodeHistory;
 import org.neo4j.arrow.gds.SuperNodeCache;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.RelationshipType;
@@ -35,8 +30,6 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
-
-import static org.neo4j.arrow.gds.Edge.target;
 
 /**
  * Interact directly with the GDS in-memory Graph, allowing for reads of node properties.
@@ -159,7 +152,7 @@ public class GdsReadJob extends ReadJob {
              * and semaphores. This also lets us name the threads.
              */
             final Executor khopExecutor = KHop.buildKhopExecutor();
-            final int tickets = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
+            final int tickets = Math.max(6, Runtime.getRuntime().availableProcessors() + 4);
             final Semaphore semaphore = new Semaphore(tickets);
             final AtomicLong rowCnt = new AtomicLong(0);
 
@@ -176,7 +169,10 @@ public class GdsReadJob extends ReadJob {
                         semaphore.acquire();
                         khopExecutor.execute(() -> {
                             try {
-                                rowCnt.addAndGet(processNode.apply(nodeId));
+                                final long cnt = rowCnt.addAndGet(processNode.apply(nodeId));
+                                if (nodeId > 0 && nodeId % 10_000 == 0) {
+                                    logger.info(String.format("at node %,d, rowCnt: %,d", nodeId, cnt));
+                                }
                             } finally {
                                 semaphore.release();
                                 countDownLatch.countDown();
