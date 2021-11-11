@@ -181,8 +181,8 @@ below), that's `~1.875 Terabytes` of data!
 ## Optimizations in this 2-hop Implementation
 
 A few optimizations were used to get what I'd consider "ok" performance, where
-I'd consider "ok" performance to be _100-200 nodes/s on a dense graph with
-supernodes_.
+I'd consider "ok" performance to be generating _100-200 complete 2-hop 
+subgraph/s on a dense graph with supernodes_.
 
 ### Edge Packing
 
