@@ -101,18 +101,26 @@ public class Producer implements FlightProducer, AutoCloseable {
             return;
         }
 
+        // Track certain stream states. This is flaky...
         final AtomicBoolean isFeeding = new AtomicBoolean(true);
+        final AtomicBoolean flusherDone = new AtomicBoolean(false);
         final AtomicBoolean fatality = new AtomicBoolean(false);
-        final BlockingQueue<WorkBuffer> workQueue = new LinkedBlockingQueue<>(job.maxPartitionCnt);
 
-        try (BufferAllocator converterAllocator = allocator.newChildAllocator(
+        // We utilize 2 queues to allow reuse of BufferAllocators and ValueVectors
+        final BlockingQueue<WorkBuffer> workQueue = new LinkedBlockingQueue<>();
+        final BlockingQueue<WorkBuffer> availableBuffers = new LinkedBlockingQueue<>();
+
+        // 75% of stream memory is available for converting records to vectors, the other
+        // 25% is utilized by the flusher to take ownership of the buffers before transmission
+        final BufferAllocator converterAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
                 0, 3 * Math.floorDiv(Config.maxStreamMemory, 4));
-             BufferAllocator transmitAllocator = allocator.newChildAllocator(
-                     String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                     0, Math.floorDiv(Config.maxStreamMemory, 4));
-             VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), converterAllocator)) {
+        final BufferAllocator transmitAllocator = allocator.newChildAllocator(
+                String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
+                0, Math.floorDiv(Config.maxStreamMemory, 4));
 
+        // The heart of the stream producer...
+        try (VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), transmitAllocator)) {
             final VectorLoader loader = new VectorLoader(root);
             final Schema schema = info.getSchema();
             final List<Field> fieldList = info.getSchema().getFields();
@@ -125,7 +133,6 @@ public class Producer implements FlightProducer, AutoCloseable {
             });
 
             // Our buffers
-            final BlockingQueue<WorkBuffer> availableBuffers = new LinkedBlockingQueue<>(job.maxPartitionCnt);
             for (int i = 0; i < job.maxPartitionCnt; i++) {
                 final long maxAllocation = Math.floorDiv(converterAllocator.getLimit(), job.maxPartitionCnt);
                 final WorkBuffer buffer = new WorkBuffer(fieldList, converterAllocator, maxAllocation, job.maxRowCount);
@@ -138,17 +145,25 @@ public class Producer implements FlightProducer, AutoCloseable {
             final CompletableFuture<Void> flushJob = CompletableFuture.runAsync(() -> {
                 while (isFeeding.get() || !workQueue.isEmpty()) {
                     try {
-                        final WorkBuffer workBuffer = workQueue.poll(50, TimeUnit.MILLISECONDS);
+                        final WorkBuffer workBuffer = workQueue.poll(100, TimeUnit.MILLISECONDS);
                         if (workBuffer != null) {
                             if (workBuffer.getVectorDimension() > 0) {
-                                workBuffer.prepareForFlush();
-                                final List<ValueVector> vectors = workBuffer.transfer(transmitAllocator);
-                                flush(listener, loader, schema, vectors, workBuffer.getVectorDimension());
-                            }
+                                workBuffer.prepareForFlush(); // TODO: move prepareForFlush into transfer method?
 
-                            // Return a re-initialized buffer to the queue
-                            workBuffer.init();
-                            availableBuffers.add(workBuffer);
+                                // Take ownership of the backing Arrow buffers
+                                final int vectorDimension = workBuffer.getVectorDimension();
+                                final List<ValueVector> vectors = workBuffer.transfer(transmitAllocator);
+
+                                // Before we perform a flush, which could block, re-queue this buffer
+                                workBuffer.init();
+                                availableBuffers.add(workBuffer);
+
+                                flush(listener, loader, schema, vectors, vectorDimension);
+                            } else {
+                                logger.warn("empty work buffer, re-initializing and making available");
+                                workBuffer.init();
+                                availableBuffers.add(workBuffer);
+                            }
                         }
                     } catch (InterruptedException e) {
                         logger.error("flush job interrupted!", e);
@@ -160,7 +175,9 @@ public class Producer implements FlightProducer, AutoCloseable {
                         workQueue.forEach(WorkBuffer::release);
                     }
                 }
+                flusherDone.set(true);
                 logger.info("flusher for job {} finished", job);
+                assert(workQueue.size() == 0);
             }, Executors.newSingleThreadExecutor((new ThreadFactoryBuilder())
                     .setNameFormat("arrow-flusher").setDaemon(true).build()));
 
@@ -181,7 +198,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                     WorkBuffer buffer;
                     int retries = 100_000;
                     do {
-                        buffer = availableBuffers.poll(25, TimeUnit.MILLISECONDS);
+                        buffer = availableBuffers.poll(100, TimeUnit.MILLISECONDS);
                         if (buffer == null) pauses.incrementAndGet();
                     } while (--retries > 0 && buffer == null);
                     if (buffer == null) {
@@ -195,7 +212,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         retries = 10_000;
                         boolean accepted = false;
                         do {
-                            accepted = workQueue.offer(buffer, 25, TimeUnit.MILLISECONDS);
+                            accepted = workQueue.offer(buffer, 100, TimeUnit.MILLISECONDS);
                             if (!accepted) pauses.incrementAndGet();
                         } while(--retries > 0 && !accepted);
                         if (!accepted) {
@@ -217,32 +234,48 @@ public class Producer implements FlightProducer, AutoCloseable {
             // This should block until all data from the Job is prepared for the stream
             job.get();
 
-            // Drain any remaining work
+            // Drain the flush worker
+            logger.info("waiting up to {} seconds for flush task to finish...", Config.arrowFlushTimeout);
             isFeeding.set(false);
-            availableBuffers.drainTo(workQueue);
-            // Worker/flusher *should* be closing the WorkBuffers
-
-            logger.info("waiting up to {} seconds for flushing to finish...", Config.arrowFlushTimeout);
             flushJob.get(Config.arrowFlushTimeout, TimeUnit.SECONDS);
-            logger.info("flushing complete");
 
             // Clean up any outstanding buffers
-            AutoCloseables.close(availableBuffers);
+            assert(availableBuffers.size() == job.maxPartitionCnt);
+            availableBuffers.stream()
+                    .filter(buffer -> buffer.getVectorDimension() > 0)
+                    .forEach(buffer -> {
+                        buffer.prepareForFlush();
+                        try {
+                            flush(listener, loader, schema, buffer.getVectors(), buffer.getVectorDimension());
+                        } catch (Exception e) {
+                            logger.warn("failed to flush remaining data in a buffer");
+                        }
+                    });
+            logger.info("flushing complete");
 
-            logger.info(String.format("dropped %,d rows, paused %,d times", drops.get(), pauses.get()));
+            // Just in case there's anything lingering
+            AutoCloseables.close(availableBuffers);
+            AutoCloseables.close(workQueue);
+
+            if (drops.get() > 0 || pauses.get() > 0) {
+                logger.warn(String.format("dropped %,d rows, paused %,d times", drops.get(), pauses.get()));
+            }
+            logger.debug("finishing getStream for ticket {}", ticket);
 
         } catch (Exception e) {
-            isFeeding.set(false);
+            // Ideally we don't get here...errors should be handled above if at all possible.
             fatality.set(true);
-
-            workQueue.forEach(WorkBuffer::release);
-            workQueue.clear();
-            logger.error(String.format("ruh row: %s", e.getMessage()), e);
+            logger.error(String.format("fatal error in stream: %s", e.getMessage()), e);
             listener.error(CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException());
         } finally {
-            logger.info("finishing getStream for ticket {}", ticket);
             flightMap.remove(ticket);
-            listener.completed();
+            if (!fatality.get()) listener.completed();
+
+            /*
+             * We *must* close the allocators after the VectorSchemaRoot!
+             */
+            AutoCloseables.closeNoChecked(converterAllocator);
+            AutoCloseables.closeNoChecked(transmitAllocator);
         }
     }
 
@@ -258,7 +291,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      * @param loader    reference to the {@link VectorLoader}
      */
     private static void flush(ServerStreamListener listener, VectorLoader loader, Schema schema,
-                              List<ValueVector> vectors, int dimension) throws Exception {
+                              List<ValueVector> vectors, int dimension) {
         final List<ArrowFieldNode> nodes = new ArrayList<>();
         final List<ArrowBuf> buffers = new ArrayList<>();
 
@@ -311,7 +344,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             }
         } catch (Exception e) {
             logger.error("error preparing batch", e);
-            AutoCloseables.close(vectors);
+            vectors.forEach(ValueVector::close);
             throw e;
         }
 
@@ -323,7 +356,7 @@ public class Producer implements FlightProducer, AutoCloseable {
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());
             throw e;
         } finally {
-            AutoCloseables.close(vectors);
+            vectors.forEach(ValueVector::close);
         }
     }
 
@@ -518,9 +551,10 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        logger.info("closing");
+        logger.info("closing producer...");
         for (Job job : jobMap.values()) {
-            job.close();
+            job.cancel(true);
+            job.get(5, TimeUnit.SECONDS);
         }
         AutoCloseables.close(closeable);
         AutoCloseables.close(allocator);

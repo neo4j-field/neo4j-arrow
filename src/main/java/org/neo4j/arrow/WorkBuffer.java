@@ -3,6 +3,7 @@ package org.neo4j.arrow;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
@@ -10,14 +11,20 @@ import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.util.TransferPair;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+/**
+ * Encapsulates the state of ValueVectors. Each WorkBuffer is fully isolated from others and contains its own
+ * memory allocator. This class is explicitly NOT thread safe by design.
+ */
 class WorkBuffer implements AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(WorkBuffer.class);
 
@@ -65,15 +72,15 @@ class WorkBuffer implements AutoCloseable {
                         throw new RuntimeException("failed to allocate memory for work buffer");
                     }
 
+                    BaseWriter.ListWriter writer = null;
                     if (vector instanceof FixedSizeListVector) {
-                        final UnionFixedSizeListWriter writer = ((FixedSizeListVector) vector).getWriter();
-                        listWriters[idx] = writer;
+                        writer = ((FixedSizeListVector) vector).getWriter();
                     } else if (vector instanceof ListVector) {
-                        final UnionListWriter writer = ((ListVector) vector).getWriter();
-                        writer.start();
-                        listWriters[idx] = writer;
+                        writer = ((ListVector) vector).getWriter();
+                        ((UnionListWriter) writer).start();
                     }
 
+                    listWriters[idx] = writer;
                     vectors[idx] = vector;
                 });
     }
@@ -211,12 +218,28 @@ class WorkBuffer implements AutoCloseable {
     }
 
     public List<ValueVector> transfer(BufferAllocator toAllocator) {
-        return Arrays.stream(vectors)
-                .map(vector -> vector.getTransferPair(toAllocator))
-                .map(pair -> {
-                    pair.transfer();
-                    return pair.getTo();
-                }).collect(Collectors.toUnmodifiableList());
+        final List<ValueVector> list = new ArrayList<>();
+
+        for (int i=0; i<vectors.length; i++) {
+            final ValueVector vector = vectors[i];
+            final TransferPair tp = vector.getTransferPair(toAllocator);
+            tp.transfer();
+            list.add(tp.getTo());
+            vector.clear();
+
+            final BaseWriter.ListWriter writer = listWriters[i];
+            if (writer != null) AutoCloseables.closeNoChecked(writer);
+        }
+
+        try {
+            for (BaseWriter.ListWriter writer : listWriters) {
+                if (writer != null) writer.close();
+            }
+        } catch (Exception e) {
+            logger.warn("error while closing writer: " + e.getMessage());
+        }
+
+        return list;
     }
 
     public void release() {
@@ -227,18 +250,24 @@ class WorkBuffer implements AutoCloseable {
         return vectorDimension;
     }
 
+    public List<ValueVector> getVectors() {
+        return Arrays.stream(vectors).collect(Collectors.toUnmodifiableList());
+    }
+
     @Override
     public void close() throws Exception {
-        for (ValueVector vector : vectors) {
-            vector.close();
-        }
-
         for (BaseWriter.ListWriter writer : listWriters) {
             if (writer != null) {
                 writer.close();
             }
         }
 
+        for (ValueVector vector : vectors) {
+            vector.close();
+        }
+
+        assert(allocator.getAllocatedMemory() == 0);
         allocator.close();
+        logger.debug("closed workbuffer {}", allocator.getName());
     }
 }
