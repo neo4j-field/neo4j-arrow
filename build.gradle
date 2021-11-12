@@ -14,9 +14,9 @@ project.ext {
     arrowFlightGrpc = 'org.apache.arrow:flight-grpc:6.0.0'
     arrowCompression = 'org.apache.arrow:arrow-compression:6.0.0'
     neo4j = [
-        driverVersion: '4.3.4',
-        serverVersion: '4.3.6',
-        gdsVersion: '1.7.1',
+        driverVersion: '4.3.5',
+        serverVersion: '4.3.7',
+        gdsVersion: '1.7.2',
     ]
     jupiterVersion = '5.7.0'
     sl4jVersion = '1.7.31'
