@@ -51,9 +51,15 @@ class WorkBuffer implements AutoCloseable {
                 .forEach(idx -> {
                     final ValueVector vector = vectors[idx];
                     vector.setInitialCapacity(batchSize);
-                    int retries = 1000;
+                    int retries = 10_000;
                     while (!vector.allocateNewSafe()) {
                         --retries;
+                        try {
+                            Thread.sleep(1);
+                        } catch (InterruptedException e) {
+                            retries = 0;
+                            break;
+                        }
                     }
                     if (retries == 0) {
                         throw new RuntimeException("failed to allocate memory for work buffer");
