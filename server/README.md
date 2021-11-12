@@ -1,3 +1,5 @@
+> **NOTE**: I'm no longer hacking on this server sub-project!
+
 # neo4j-arrow "proxy" server
 Can't install the `neo4j-arrow` [plugin](../plugin)? Try the proxy.
 

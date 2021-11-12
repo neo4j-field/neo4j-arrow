@@ -120,7 +120,7 @@ format (in utf-8):
 {
   "db": "<the database name>",
   "graph": "<name of the in-memory graph>",
-  "type": "<type of job: 'node' or 'relationships'>",
+  "type": "<type of job: 'node' or 'relationships' or 'khop'>",
   "filters": ["<list of label or relationship filters>"],
   "parameters": ["<list of node/relationship parameters>"]
 }
@@ -151,8 +151,9 @@ Some high level TODOs not in code comments:
 
 * General Stuff
 - [ ] Figure out how to properly interrupt/kill streams on exceptions
-- [ ] Write support
-- [ ] Dockerize the standalone server app
+- [X] Write support
+  - Basic GDS writing except GDS rel properties
+- [ ] ~~Dockerize the standalone server app~~
 
 * GDS Native Support
 - [X] Multiple node property support for GDS Jobs
@@ -164,32 +165,50 @@ Some high level TODOs not in code comments:
   flights?
 
 ## TODO's pulled from the code
-> last updated 20 Sep 2021 via [todo.sh](./todo.sh)
-
-- [ ] TODO: better mapping support for generic Cypher values? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
-- [ ] TODO: fallback to raw bytes? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
-- [ ] TODO: fallback to raw bytes? [GdsActionHandler.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsActionHandler.java)
-- [ ] TODO: "type" is pretty vague...needs a better name [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
-- [ ] TODO: validation / constraints of values? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
-- [ ] TODO: assert our minimum schema? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
+> last updated 11 Nov 2021 via [todo.sh](./todo.sh)
+> 
+- [ ] TODO: make an auth handler that isn't this silly [HorribleBasicAuthValidator.java](./src/main/java/org/neo4j/arrow/auth/HorribleBasicAuthValidator.java)
+- [ ] TODO: abort [WorkBuffer.java](./src/main/java/org/neo4j/arrow/WorkBuffer.java)
+- [ ] TODO: should we allocate a single byte array and not have to reallocate? [WorkBuffer.java](./src/main/java/org/neo4j/arrow/WorkBuffer.java)
+- [ ] TODO: should we allocate a single byte array and not have to reallocate? [WorkBuffer.java](./src/main/java/org/neo4j/arrow/WorkBuffer.java)
+- [ ] TODO: check isReady(), yield if not [Producer.javalistener.putNext();](./src/main/java/org/neo4j/arrow/Producer.javalistener.putNext();)
+- [ ] TODO: validate root.Schema [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
+- [ ] TODO!!! [Producer.javajob.onComplete(arrowBatch);](./src/main/java/org/neo4j/arrow/Producer.javajob.onComplete(arrowBatch);)
+- [ ] TODO: we need to wait until the post-processing completes, need a callback here [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
+- [ ] TODO: validate schema option? [ArrowBatch.java](./src/main/java/org/neo4j/arrow/ArrowBatch.java)
+- [ ] XXX  TODO [ArrowBatch.javareturn(int)rowCount;](./src/main/java/org/neo4j/arrow/ArrowBatch.javareturn(int)rowCount;)
+- [ ] TODO handle writejob close??? [WriteJob.java](./src/main/java/org/neo4j/arrow/job/WriteJob.java)
+- [ ] TODO: standardize on matching logic? case sensitive/insensitive? [StatusHandler.java](./src/main/java/org/neo4j/arrow/action/StatusHandler.java)
+- [ ] TODO: use all 4 bits [Edge.java](./plugin/src/main/java/org/neo4j/arrow/gds/Edge.java)
 - [ ] TODO: new Exception class [CypherRecord.java](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java)
 - [ ] TODO: clean this Double to Float mess :-( [CypherRecord.java](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java)
 - [ ] TODO: object copy might be slow, check on this [CypherRecord.java](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java)
 - [ ] TODO: ShortArray [CypherRecord.java}](./plugin/src/main/java/org/neo4j/arrow/CypherRecord.java})
-- [ ] TODO: INT? Does it exist? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
-- [ ] TODO: INT_ARRAY? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
-- [ ] TODO: String? Object? What should we do? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
-- [ ] TODO: support both rel type and node label filtering [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
-- [ ] TODO: nested for-loop is ugly [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
-- [ ] TODO: GDS lets us batch access to lists of nodes...future opportunity? [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
-- [ ] TODO: should it be nodeCount - 1? We advanced the iterator...maybe? [GdsJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsJob.java)
+- [ ] TODO: error handling for graph store retrieval [GdsReadJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsReadJob.java)
+- [ ] TODO: support both rel type and node label filtering [GdsReadJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsReadJob.java)
+- [ ] TODO: nested for-loop is ugly [GdsReadJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsReadJob.java)
+- [ ] TODO: GDS lets us batch access to lists of nodes...future opportunity? [GdsReadJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsReadJob.java)
+- [ ] TODO: should it be nodeCount - 1? We advanced the iterator...maybe? [GdsReadJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsReadJob.java)
+- [ ] TODO: clean up [GdsWriteJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsWriteJob.java)
+- [ ] TODO: add in filtered label support [GdsWriteJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsWriteJob.java)
+- [ ] TODO: implement cloning for id maps [GdsWriteJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsWriteJob.java)
+- [ ] TODO: what the heck is this Cases<R> stuff?! [GdsWriteJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsWriteJob.java)
+- [ ] TODO: relationship properties! [GdsWriteJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsWriteJob.java)
+- [ ] TODO: XXX when we implement rel props, do NOT close this here! [GdsWriteJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsWriteJob.java)
+- [ ] TODO: wire in maps [GdsWriteJob.java](./plugin/src/main/java/org/neo4j/arrow/job/GdsWriteJob.java)
 - [ ] TODO: pull in reference to LoginContext and use it in the Transaction [TransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/TransactionApiJob.java)
 - [ ] TODO: for now wait up to a minute for the first result...needs future work [TransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/TransactionApiJob.java)
 - [ ] TODO: wrap function should take our assumed schema to optimize [TransactionApiJob.java](./plugin/src/main/java/org/neo4j/arrow/job/TransactionApiJob.java)
-- [ ] TODO: we need to hand out special tokens that map to drivers I think [ProxyAuthHandler.java](./server/src/main/java/org/neo4j/arrow/auth/ProxyAuthHandler.java)
-- [ ] TODO: standardize on matching logic? case sensitive/insensitive? [StatusHandler.java](./src/main/java/org/neo4j/arrow/action/StatusHandler.java)
-- [ ] TODO: make an auth handler that isn't this silly [HorribleBasicAuthValidator.java](./src/main/java/org/neo4j/arrow/auth/HorribleBasicAuthValidator.java)
-- [ ] TODO: do we need to allocate explicitly? Or can we just not? [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
-- [ ] TODO: handle batches of records to decrease frequency of calls [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
-- [ ] TODO: figure out ideal way to set a good default based on host [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
-- [ ] TODO: refactor to using fixed arrays for speed [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
+- [ ] TODO: INT? Does it exist? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
+- [ ] TODO: INT_ARRAY? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
+- [ ] TODO: String? Object? What should we do? [GdsNodeRecord.java](./plugin/src/main/java/org/neo4j/arrow/GdsNodeRecord.java)
+- [ ] TODO: rename property keys to read/write forms [GdsActionHandler.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsActionHandler.java)
+- [ ] TODO: fallback to raw bytes? [GdsActionHandler.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsActionHandler.java)
+- [ ] TODO: "type" is pretty vague...needs a better name [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
+- [ ] TODO: validation / constraints of values? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
+- [ ] TODO: assert our minimum schema? [GdsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsMessage.java)
+- [ ] TODO: assert our minimum schema? [GdsWriteRelsMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsWriteRelsMessage.java)
+- [ ] TODO: "type" is pretty vague...needs a better name [GdsWriteNodeMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsWriteNodeMessage.java)
+- [ ] TODO: assert our minimum schema? [GdsWriteNodeMessage.java](./plugin/src/main/java/org/neo4j/arrow/action/GdsWriteNodeMessage.java)
+- [ ] TODO: better mapping support for generic Cypher values? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)
+- [ ] TODO: fallback to raw bytes? [CypherActionHandler.java](./common/src/main/java/org/neo4j/arrow/action/CypherActionHandler.java)

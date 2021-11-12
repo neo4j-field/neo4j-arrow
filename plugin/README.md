@@ -58,5 +58,5 @@ docker run --rm -it --name neo4j-test \
         -e NEO4J_dbms_jvm_additional=-Dio.netty.tryReflectionSetAccessible=true \
         -e NEO4J_dbms_allow__upgrade=true \
         -e NEO4J_gds_enterprise_license__file=/plugins/gds.txt \
-        neo4j:4.3.3-enterprise
+        neo4j:4.3.6-enterprise
 ```
