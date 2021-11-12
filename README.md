@@ -25,8 +25,8 @@ This project aims to step outside of traditional ways of integrating with Neo4j 
 ## Building and Deploying 🛠️
 
 Most users will want to use the `plugin` form of `neo4j-arrow`. The
-most recent tagged version is available on the [./releases](Releases)
-page.
+most recent tagged version is available on the 
+[releases](https://github.com/neo4j-field/neo4j-arrow/releases) page.
 
 To build your own from source, you'll need:
 
