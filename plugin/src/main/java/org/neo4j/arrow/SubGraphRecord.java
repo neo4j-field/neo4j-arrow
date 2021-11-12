@@ -4,6 +4,7 @@ import org.neo4j.arrow.gds.Edge;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class SubGraphRecord implements RowBasedRecord {
@@ -36,17 +37,17 @@ public class SubGraphRecord implements RowBasedRecord {
         return new SubGraphRecord(origin, sourceIds, targetIds);
     }
 
-    public static SubGraphRecord of(long origin, Iterable<Long> edges, int size) {
+    public static SubGraphRecord of(long origin, Iterable<Long> edges, int size, Function<Long, Long> idMapper) {
         final int[] sources = new int[size];
         final int[] targets = new int[size];
 
         int pos = 0;
         for (long edge : edges) {
-            sources[pos] = Edge.sourceAsInt(edge);
-            targets[pos] = Edge.targetAsInt(edge);
+            sources[pos] = idMapper.apply(Edge.source(edge)).intValue();
+            targets[pos] = idMapper.apply(Edge.target(edge)).intValue();
             pos++;
         }
-        return new SubGraphRecord((int) origin, sources, targets); // XXX cast
+        return new SubGraphRecord(idMapper.apply(origin).intValue(), sources, targets); // XXX cast
     }
 
     @Override

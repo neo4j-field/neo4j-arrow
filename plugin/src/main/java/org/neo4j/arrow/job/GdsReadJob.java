@@ -68,7 +68,8 @@ public class GdsReadJob extends ReadJob {
                 job = handleRelationshipsJob(msg, store);
                 break;
             case khop:
-                final KHopMessage kmsg = new KHopMessage(msg.getDbName(), msg.getGraphName(), 2, msg.getProperties().get(0));
+                final KHopMessage kmsg = new KHopMessage(msg.getDbName(), msg.getGraphName(),
+                        msg.getNodeIdProperty(), 2, msg.getProperties().get(0));
                 job = handleKHopJob(kmsg, store);
                 break;
 
@@ -114,6 +115,10 @@ public class GdsReadJob extends ReadJob {
         final int k = msg.getK();
         assert(k == 2); // XXX optimizations for this condition exist for now
 
+        final NodeProperties idProperties = msg.getNodeIdProperty().isBlank()
+                ? null : graph.nodeProperties(msg.getNodeIdProperty());
+        final Function<Long, Long> idMapper = idProperties != null ? idProperties::longValue : graph::toOriginalNodeId;
+
         // XXX faux record...needed to progress the job status
         onFirstRecord(SubGraphRecord.of(0, new int[]{1}, new int[]{2}));
 
@@ -141,7 +146,7 @@ public class GdsReadJob extends ReadJob {
                 final AtomicLong cnt = new AtomicLong(0);
                 Iterators.partition(stream.iterator(), this.maxVariableListSize)
                         .forEachRemaining(batch -> {
-                            consumer.accept(SubGraphRecord.of(origin, batch, batch.size()));
+                            consumer.accept(SubGraphRecord.of(origin, batch, batch.size(), idMapper));
                             cnt.incrementAndGet();
                         });
 
