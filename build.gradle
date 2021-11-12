@@ -216,20 +216,6 @@ project(':plugin') {
     }
 
     repositories {
-        maven {
-            url "https://m2.neo4j.com/enterprise"
-            credentials {
-                // define user and password in your $HOME/.gradle/gradle.properties
-                username 'neo4j-enterprise'
-                password neo4j_enterprise_password
-            }
-            authentication {
-                basic(BasicAuthentication)
-            }
-            content {
-                includeGroup 'com.neo4j'
-            }
-        }
         mavenCentral()
     }
 
@@ -245,7 +231,6 @@ project(':plugin') {
                 [group: 'org.neo4j', name: 'neo4j-configuration', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j', name: 'neo4j-security', version: rootProject.ext.neo4j.serverVersion],
-                [group: 'com.neo4j', name: 'neo4j-security-enterprise', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j.gds', name: 'proc-catalog', version: rootProject.ext.neo4j.gdsVersion],
                 rootProject.ext.arrowFlightGrpc,
         )
