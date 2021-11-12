@@ -31,10 +31,7 @@ page.
 To build your own from source, you'll need:
 
 * A **JDK 11** distribution
-* Access to the Neo4j _private_ maven repo (contact Neo4j Support or
-  your Customer Success Manager)
-  - This restriction may be lifted with a bit more dev work...it's on
-    the backlog.
+* Internet access to the public Maven repo
 
 Simply run: `$ ./gradlew plugin:shadowJar`
 
@@ -49,9 +46,11 @@ v1.7**. If you have earlier versions of either, you'll need to compile
 your own jars from source.
 
 The `neo4j_arrow.py` PyArrow client requires **Python 3** and
-**PyArrow 5.0.0**.
+**PyArrow 6.0.0**. (It may still work with v5.0.0, but I'm developing on
+v6.0.0.)
 
-Any other Arrow Flight clients should use `v5.0.0` of Arrow/Arrow Flight.
+Any other Arrow Flight clients should use `v6.0.0` of Arrow/Arrow Flight if
+possible.
 
 ### Configuration ✔️
 
