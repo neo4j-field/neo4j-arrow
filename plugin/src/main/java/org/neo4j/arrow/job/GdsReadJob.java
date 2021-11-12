@@ -255,7 +255,7 @@ public class GdsReadJob extends ReadJob {
                 if (!found) {
                     logger.error("no relationship property found for {}", key);
                     throw CallStatus.NOT_FOUND
-                            .withDescription(String.format("no relationship property found for %s", key))
+                            .withDescription("no relationship property found for " + key)
                             .toRuntimeException();
                 }
             }
@@ -266,6 +266,16 @@ public class GdsReadJob extends ReadJob {
                 : store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
         logger.info("got graph for labels {}, relationship types {}", baseGraph.schema().nodeSchema().availableLabels(),
                 baseGraph.schema().relationshipSchema().availableTypes());
+
+        if (!msg.getNodeIdProperty().isBlank() && !store.hasNodeProperty(store.nodeLabels(), msg.getNodeIdProperty())) {
+            logger.error("no node id property '{}' found", msg.getNodeIdProperty());
+            throw CallStatus.NOT_FOUND
+                    .withDescription("no node property found for " + msg.getNodeIdProperty())
+                    .toRuntimeException();
+        }
+        final NodeProperties idProperties = msg.getNodeIdProperty().isBlank() ?
+                null : baseGraph.nodeProperties(msg.getNodeIdProperty());
+        final Function<Long, Long> idMapper = idProperties != null ? idProperties::longValue : baseGraph::toOriginalNodeId;
 
         // Borrow the approach used by gds.graph.streamRelationshipProperties()...i.e. build triples
         // of relationship types, property keys, and references to filtered graph views.
@@ -311,8 +321,6 @@ public class GdsReadJob extends ReadJob {
                     .parallel()
                     .boxed()
                     .forEach(nodeId -> {
-                        final long originalNodeId = baseGraph.toOriginalNodeId(nodeId);
-                        // logger.info("processing node {} (originalId: {})", nodeId, originalNodeId);
                         Arrays.stream(triples)
                                 .flatMap(triple -> {
                                     final RelationshipType type = (RelationshipType) triple.getLeft();
@@ -322,8 +330,8 @@ public class GdsReadJob extends ReadJob {
                                     return graph
                                             .streamRelationships(nodeId, Double.NaN)
                                             .map(cursor -> new GdsRelationshipRecord(
-                                                    originalNodeId,
-                                                    graph.toOriginalNodeId(cursor.targetId()),
+                                                    idMapper.apply(nodeId),
+                                                    idMapper.apply(cursor.targetId()),
                                                     type.name(),
                                                     key,
                                                     GdsRecord.wrapScalar(cursor.property(), ValueType.DOUBLE)));
