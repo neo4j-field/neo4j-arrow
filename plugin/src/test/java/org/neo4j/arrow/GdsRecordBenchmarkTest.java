@@ -131,7 +131,7 @@ public class GdsRecordBenchmarkTest {
 
             final long start = System.currentTimeMillis();
             final GdsMessage msg = new GdsMessage("neo4j", "mygraph",
-                    GdsMessage.RequestType.node, List.of("fastRp"), List.of());
+                    GdsMessage.RequestType.node, List.of("fastRp"), List.of(), "");
             final Action action = new Action(GdsActionHandler.GDS_READ_ACTION, msg.serialize());
             client.run(action);
             final long stop = signal.join();

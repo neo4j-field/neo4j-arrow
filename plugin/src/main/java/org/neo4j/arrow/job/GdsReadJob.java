@@ -355,8 +355,9 @@ public class GdsReadJob extends ReadJob {
         logger.info("got graph for labels {}, relationship types {}", store.nodeLabels(),
                 store.relationshipTypes());
 
-        // Make sure we have the requested node properties
-        for (String key : msg.getProperties()) {
+        // Make sure we have the requested node properties and any request node id property
+        for (String key : Stream.concat(Stream.of(msg.getNodeIdProperty()), msg.getProperties().stream())
+                .filter(s -> !s.isBlank()).collect(Collectors.toUnmodifiableList())) {
             if (!store.hasNodeProperty(store.nodeLabels(), key)) {
                 logger.error("no node property found for {}", key);
                 throw CallStatus.NOT_FOUND
@@ -370,13 +371,18 @@ public class GdsReadJob extends ReadJob {
         final NodeProperties[] propertiesArray = new NodeProperties[keys.length];
         for (int i = 0; i < keys.length; i++)
             propertiesArray[i] = store.nodePropertyValues(keys[i]);
+        final NodeProperties idProperties = msg.getNodeIdProperty().isBlank()
+                ? null : store.nodePropertyValues(msg.getNodeIdProperty());
 
         final PrimitiveLongIterator iterator = graph.nodeIterator();
+
+        // TODO: support node id properties other than longs
+        final Function<Long, Long> nodeIdResolver = idProperties != null ? idProperties::longValue : graph::toOriginalNodeId;
 
         return CompletableFuture.supplyAsync(() -> {
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
-            GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, graph.nodeLabels(nodeId), keys, propertiesArray, graph::toOriginalNodeId);
+            GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, graph.nodeLabels(nodeId), keys, propertiesArray, nodeIdResolver);
             onFirstRecord(record);
             logger.debug("offered first record to producer");
             for (int i = 0; i < keys.length; i++)
@@ -393,7 +399,7 @@ public class GdsReadJob extends ReadJob {
             // TODO: should it be nodeCount - 1? We advanced the iterator...maybe?
             var s = spliterate(iterator, graph.nodeCount() - 1);
             StreamSupport.stream(s, true).forEach(i ->
-                    consumer.accept(GdsNodeRecord.wrap(i, graph.nodeLabels(i), keys, propertiesArray, graph::toOriginalNodeId),
+                    consumer.accept(GdsNodeRecord.wrap(i, graph.nodeLabels(i), keys, propertiesArray, nodeIdResolver),
                             i.intValue()));
 
             final long delta = System.currentTimeMillis() - start;

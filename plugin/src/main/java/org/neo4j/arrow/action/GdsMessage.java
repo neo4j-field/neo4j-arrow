@@ -39,6 +39,7 @@ public class GdsMessage implements Message {
     public static final String JSON_KEY_REQUEST_TYPE = "type";
     public static final String JSON_KEY_FILTER_LIST = "filters";
     public static final String JSON_KEY_PROPERTY_LIST = "properties";
+    public static final String JSON_KEY_NODE_ID_PROPERTY = "node_id";
 
     // Additional GDS Job parameters
     public static final String JSON_KEY_PARTITION_CNT = "partitions";
@@ -51,6 +52,8 @@ public class GdsMessage implements Message {
     private final String graphName;
     /** Type of data request: either "node" or "relationship". */
     private final RequestType requestType;
+    /** Property name to use when generating a node id. Fallback/default is the original id. */
+    private final String nodeIdProperty;
     /** List of "filters" to apply to the Graph when generating results. Optional. */
     private final List<String> filters;
     /** List of properties to read or write. Optional for reads (Can be empty for "all" properties
@@ -66,12 +69,13 @@ public class GdsMessage implements Message {
     public static final List<String> ANY_PROPERTIES = List.of();
 
     public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters,
-                      int partitionCnt, int batchSize, int listSize) {
+                      String nodeIdProperty, int partitionCnt, int batchSize, int listSize) {
         this.dbName = dbName;
         this.graphName = graphName;
         this.requestType = requestType;
         this.properties = properties;
         this.filters = filters;
+        this.nodeIdProperty = nodeIdProperty;
 
         this.partitionCnt = partitionCnt;
         this.batchSize = batchSize;
@@ -80,8 +84,8 @@ public class GdsMessage implements Message {
         // TODO: validation / constraints of values?
     }
 
-    public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters) {
-        this(dbName, graphName, requestType, properties, filters, Config.arrowMaxPartitions, Config.arrowBatchSize, Config.arrowMaxListSize);
+    public GdsMessage(String dbName, String graphName, RequestType requestType, List<String> properties, List<String> filters, String nodeIdProperty) {
+        this(dbName, graphName, requestType, properties, filters, nodeIdProperty, Config.arrowMaxPartitions, Config.arrowBatchSize, Config.arrowMaxListSize);
     }
 
     /**
@@ -94,6 +98,7 @@ public class GdsMessage implements Message {
                     Map.of(JSON_KEY_DATABASE_NAME, dbName,
                             JSON_KEY_GRAPH_NAME, graphName,
                             JSON_KEY_REQUEST_TYPE, requestType,
+                            JSON_KEY_NODE_ID_PROPERTY, nodeIdProperty,
                             JSON_KEY_FILTER_LIST, filters,
                             JSON_KEY_PROPERTY_LIST, properties))
                     .getBytes(StandardCharsets.UTF_8);
@@ -123,6 +128,8 @@ public class GdsMessage implements Message {
         final RequestType requestType = RequestType.valueOf(
                 params.getOrDefault(JSON_KEY_REQUEST_TYPE, RequestType.node).toString());
 
+        final String nodeIdProperty = params.getOrDefault(JSON_KEY_NODE_ID_PROPERTY, "").toString();
+
         List<String> filters = List.of();
         Object obj = params.getOrDefault(JSON_KEY_FILTER_LIST, filters);
         if (obj instanceof List) {
@@ -147,7 +154,7 @@ public class GdsMessage implements Message {
                 params.getOrDefault(JSON_KEY_MAX_LIST_SIZE, String.valueOf(Config.arrowMaxListSize)).toString());
 
 
-        return new GdsMessage(dbName, graphName, requestType, properties, filters, partitionCnt, batchSize, listSize);
+        return new GdsMessage(dbName, graphName, requestType, properties, filters, nodeIdProperty, partitionCnt, batchSize, listSize);
     }
 
     public String getDbName() {
@@ -180,12 +187,17 @@ public class GdsMessage implements Message {
         return listSize;
     }
 
+    public String getNodeIdProperty() {
+        return nodeIdProperty;
+    }
+
     @Override
     public String toString() {
         return "GdsMessage{" +
                 "dbName='" + dbName + '\'' +
                 ", graphName='" + graphName + '\'' +
                 ", requestType=" + requestType +
+                ", nodeIdProperty='" + nodeIdProperty + '\'' +
                 ", filters=" + filters +
                 ", properties=" + properties +
                 ", partitionCnt=" + partitionCnt +
