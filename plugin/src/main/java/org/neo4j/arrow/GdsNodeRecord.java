@@ -36,10 +36,6 @@ public class GdsNodeRecord extends GdsRecord {
         this.labels = wrapNodeLabels(labels);
     }
 
-    public static GdsNodeRecord wrap(long nodeId, Set<NodeLabel> labels, String[] keys, Value[] values) {
-        return new GdsNodeRecord(nodeId, labels, keys, values, Function.identity());
-    }
-
     /**
      * Wrap the given GDS information into a single {@link GdsNodeRecord}.
      *

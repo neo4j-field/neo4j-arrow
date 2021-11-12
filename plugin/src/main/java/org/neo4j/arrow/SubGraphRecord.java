@@ -1,8 +1,6 @@
 package org.neo4j.arrow;
 
 import org.neo4j.arrow.gds.Edge;
-import org.neo4j.graphdb.Node;
-import org.neo4j.graphdb.Relationship;
 
 import java.util.Arrays;
 import java.util.List;
@@ -51,10 +49,6 @@ public class SubGraphRecord implements RowBasedRecord {
         return new SubGraphRecord((int) origin, sources, targets); // XXX cast
     }
 
-    public static SubGraphRecord of(Node source, Relationship rel, Node target) {
-        return null;
-    }
-
     @Override
     public Value get(int index) {
         switch (index) {
@@ -75,10 +69,6 @@ public class SubGraphRecord implements RowBasedRecord {
             default:
                 throw new RuntimeException("invalid field: " + field);
         }
-    }
-
-    public int numEdges() {
-        return sourceIds.length;
     }
 
     @Override
