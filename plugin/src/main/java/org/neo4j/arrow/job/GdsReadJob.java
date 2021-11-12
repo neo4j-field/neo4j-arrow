@@ -1,6 +1,7 @@
 package org.neo4j.arrow.job;
 
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Streams;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Triple;
 import org.neo4j.arrow.*;
@@ -243,13 +244,13 @@ public class GdsReadJob extends ReadJob {
             for (String key : msg.getProperties()) {
                 boolean found = false;
                 for (RelationshipType type : relTypes) {
-                    logger.info("type {} has key {}", type.name(), key);
+                    logger.trace("type {} has key {}", type.name(), key);
                     if (store.hasRelationshipProperty(type, key)) {
-                        logger.info("  yes!");
+                        logger.trace("  yes!");
                         found = true;
                         break;
                     } else {
-                        logger.info("  nope.");
+                        logger.trace("  nope.");
                     }
                 }
                 if (!found) {
@@ -291,11 +292,12 @@ public class GdsReadJob extends ReadJob {
                                 .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key))));
                     } else {
                         logger.info("using all property keys for {}", relType);
-                        return Stream.concat(
-                                store.relationshipPropertyKeys(relType).stream()
-                                        .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key)))),
-                                Stream.of(Triple.of(relType, null, store.getGraph(relType, Optional.empty())))
-                        );
+                        if (store.relationshipPropertyKeys(relType).isEmpty()) {
+                            return Stream.of(Triple.of(relType, null, store.getGraph(relType, Optional.empty())));
+                        } else {
+                            return store.relationshipPropertyKeys(relType).stream()
+                                    .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key))));
+                        }
                     }
                 })
                 .peek(triple -> logger.debug("constructed triple {}", triple))
