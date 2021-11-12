@@ -2,25 +2,20 @@ package org.neo4j.arrow;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.arrow.flight.*;
-import org.apache.arrow.memory.AllocationListener;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.util.AutoCloseables;
-import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorLoader;
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.BaseListVector;
-import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.UnionVector;
-import org.apache.arrow.vector.complex.impl.UnionFixedSizeListWriter;
-import org.apache.arrow.vector.complex.impl.UnionListWriter;
-import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
-import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.apache.arrow.vector.util.TransferPair;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.StatusHandler;
@@ -28,10 +23,9 @@ import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.ReadJob;
 import org.neo4j.arrow.job.WriteJob;
 
-import java.io.*;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -75,25 +69,6 @@ public class Producer implements FlightProducer, AutoCloseable {
         handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
     }
 
-    private static class FlushWork {
-        public final List<ValueVector> vectors;
-        public final int vectorDimension;
-
-        private FlushWork(List<ValueVector> vectors, int vectorDimension) {
-            this.vectors = vectors;
-            this.vectorDimension = vectorDimension;
-        }
-
-        public static FlushWork from(List<ValueVector> vectors, int vectorDimension) {
-            return new FlushWork(vectors, vectorDimension);
-        }
-
-        public void release() {
-            // Pull the rip cord
-            vectors.forEach(ValueVector::close);
-        }
-    }
-
     /**
      * Attempt to get an Arrow stream for the given {@link Ticket}.
      *
@@ -126,25 +101,22 @@ public class Producer implements FlightProducer, AutoCloseable {
             return;
         }
 
-        // Our work queue for multiple producers, but a single consumer
-        final BlockingDeque<FlushWork> workQueue = new LinkedBlockingDeque<>();
         final AtomicBoolean isFeeding = new AtomicBoolean(true);
         final AtomicBoolean fatality = new AtomicBoolean(false);
+        final BlockingQueue<WorkBuffer> workQueue = new LinkedBlockingQueue<>(job.maxPartitionCnt);
 
-        try (BufferAllocator baseAllocator = allocator.newChildAllocator(
+        try (BufferAllocator converterAllocator = allocator.newChildAllocator(
                 String.format("convert-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                0, Config.maxStreamMemory / 2);
+                0, 3 * Math.floorDiv(Config.maxStreamMemory, 4));
              BufferAllocator transmitAllocator = allocator.newChildAllocator(
                      String.format("transmit-%s", UUID.nameUUIDFromBytes(ticket.getBytes())),
-                     0, Config.maxStreamMemory / 2);
-             VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), baseAllocator)) {
+                     0, Math.floorDiv(Config.maxStreamMemory, 4));
+             VectorSchemaRoot root = VectorSchemaRoot.create(info.getSchema(), converterAllocator)) {
 
             final VectorLoader loader = new VectorLoader(root);
             final Schema schema = info.getSchema();
-            logger.debug("using schema: {}", schema);
-
-            // TODO: do we need to allocate explicitly? Or can we just not?
             final List<Field> fieldList = info.getSchema().getFields();
+            logger.debug("using schema: {}", schema);
 
             // Add a job cancellation hook
             listener.setOnCancelHandler(() -> {
@@ -152,30 +124,31 @@ public class Producer implements FlightProducer, AutoCloseable {
                 job.cancel(true);
             });
 
-            // Signal the client that we're about to start the stream
-            listener.start(root);
-
-            // Tunable partition size...
-            // TODO: figure out ideal way to set a good default based on host
-            final int maxPartitions = job.maxPartitionCnt;
-
-            // Map<String, BaseWriter.ListWriter> writerMap
-            @SuppressWarnings("unchecked") final Map<String, BaseWriter.ListWriter>[] partitionedWriters = new Map[maxPartitions];
-            @SuppressWarnings("unchecked") final List<FieldVector>[] partitionedVectorList = new List[maxPartitions];
-            final BufferAllocator[] bufferAllocators = new BufferAllocator[maxPartitions];
-            final AtomicInteger[] partitionedCounts = new AtomicInteger[maxPartitions];
-            final Semaphore[] partitionedSemaphores = new Semaphore[maxPartitions];
-            final Semaphore transferMutex = new Semaphore(1);
+            // Our buffers
+            final BlockingQueue<WorkBuffer> availableBuffers = new LinkedBlockingQueue<>(job.maxPartitionCnt);
+            for (int i = 0; i < job.maxPartitionCnt; i++) {
+                final long maxAllocation = Math.floorDiv(converterAllocator.getLimit(), job.maxPartitionCnt);
+                final WorkBuffer buffer = new WorkBuffer(fieldList, converterAllocator, maxAllocation, job.maxRowCount);
+                buffer.init();
+                availableBuffers.add(buffer);
+            }
+            logger.info(String.format("prepared %,d buffers", availableBuffers.size()));
 
             // Our work queue consumer
             final CompletableFuture<Void> flushJob = CompletableFuture.runAsync(() -> {
                 while (isFeeding.get() || !workQueue.isEmpty()) {
                     try {
-                        final FlushWork work = workQueue.pollFirst(100, TimeUnit.MILLISECONDS);
-                        if (work != null) {
-                            transferMutex.acquire();
-                            flush(listener, loader, schema, work.vectors, work.vectorDimension);
-                            transferMutex.release();
+                        final WorkBuffer workBuffer = workQueue.poll(50, TimeUnit.MILLISECONDS);
+                        if (workBuffer != null) {
+                            if (workBuffer.getVectorDimension() > 0) {
+                                workBuffer.prepareForFlush();
+                                final List<ValueVector> vectors = workBuffer.transfer(transmitAllocator);
+                                flush(listener, loader, schema, vectors, workBuffer.getVectorDimension());
+                            }
+
+                            // Return a re-initialized buffer to the queue
+                            workBuffer.init();
+                            availableBuffers.add(workBuffer);
                         }
                     } catch (InterruptedException e) {
                         logger.error("flush job interrupted!", e);
@@ -184,321 +157,85 @@ public class Producer implements FlightProducer, AutoCloseable {
                         logger.error("problem flushing :(", e);
                         job.cancel(true);
                         fatality.set(true);
-                        workQueue.forEach(FlushWork::release);
+                        workQueue.forEach(WorkBuffer::release);
                     }
                 }
                 logger.info("flusher for job {} finished", job);
             }, Executors.newSingleThreadExecutor((new ThreadFactoryBuilder())
                     .setNameFormat("arrow-flusher").setDaemon(true).build()));
 
-            // Wasteful, but pre-init for now
-            for (int i = 0; i < maxPartitions; i++) {
-                final long size = Math.floorDiv(baseAllocator.getLimit(), maxPartitions);
-                logger.debug(String.format("creating partitioned allocator %d of %d: %,d bytes", i+1, maxPartitions - 1, size));
-                bufferAllocators[i] = baseAllocator.newChildAllocator(String.format("partition-%02d", i+1), 0, size);
-                partitionedSemaphores[i] = new Semaphore(1);
-                partitionedWriters[i] = new HashMap<>();
-                partitionedCounts[i] = new AtomicInteger(0);
-                partitionedVectorList[i] = new ArrayList<>(0);
-            }
+            // Signal the client that we're about to start the stream
+            listener.start(root);
 
             logger.info("starting consumer");
-
             // Core job logic
+            final AtomicInteger drops = new AtomicInteger(0);
+            final AtomicLong pauses = new AtomicLong(0);
             job.consume((record, partitionKey) -> {
                 if (fatality.get()) {
                     // drop record
                     return;
                 }
-                // Trivial partitioning scheme...
-                final int partition = Math.abs(partitionKey % maxPartitions);
+
                 try {
-                    partitionedSemaphores[partition].acquire();
-                    final BufferAllocator streamAllocator = bufferAllocators[partition];
-                    final AtomicInteger cnt = partitionedCounts[partition];
-                    final int idx = cnt.getAndIncrement();
-                    final List<FieldVector> vectorList = partitionedVectorList[partition];
-                    final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
-
-                    if (idx == 0) {
-                        logger.trace("starting new batch for partition {}", partition);
-                        // (re)init field vectors
-                        if (vectorList.size() == 0) {
-                            for (Field field : fieldList) {
-                                FieldVector fieldVector = field.createVector(streamAllocator);
-                                vectorList.add(fieldVector);
-                            }
-                        }
-                        for (FieldVector fieldVector : vectorList) {
-                            int retries = 1000;
-                            fieldVector.setInitialCapacity(job.maxRowCount);
-                            while (!fieldVector.allocateNewSafe() && --retries > 0) {
-                                // logger.error("failed to allocate memory for field {}", fieldVector.getName());
-                                try {
-                                    Thread.sleep(100);
-                                } catch (Exception ignored) {
-                                }
-                            }
-                            if (retries == 0) {
-                                fatality.set(true);
-                                throw new Exception("failed to allocate memory for vector" + fieldVector.getName());
-                            }
-                        }
+                    WorkBuffer buffer;
+                    int retries = 100_000;
+                    do {
+                        buffer = availableBuffers.poll(25, TimeUnit.MILLISECONDS);
+                        if (buffer == null) pauses.incrementAndGet();
+                    } while (--retries > 0 && buffer == null);
+                    if (buffer == null) {
+                        logger.warn("failed to acquire an available buffer :(");
+                        drops.incrementAndGet();
+                        return;
                     }
 
-                    // TODO: refactor to using fixed arrays for speed
-                    // Our translation guts...CPU intensive
-                    for (int n = 0; n < fieldList.size(); n++) {
-                        final Field field = fieldList.get(n);
-                        final RowBasedRecord.Value value = record.get(n);
-                        final FieldVector vector = vectorList.get(n);
-
-                        if (vector instanceof IntVector) {
-                            ((IntVector) vector).set(idx, value.asInt());
-                        } else if (vector instanceof BigIntVector) {
-                            ((BigIntVector) vector).set(idx, value.asLong());
-                        } else if (vector instanceof Float4Vector) {
-                            ((Float4Vector) vector).set(idx, value.asFloat());
-                        } else if (vector instanceof Float8Vector) {
-                            ((Float8Vector) vector).set(idx, value.asDouble());
-                        } else if (vector instanceof VarCharVector && value.asString() != null) {
-                            ((VarCharVector) vector).setSafe(idx, value.asString().getBytes(StandardCharsets.UTF_8));
-                        } else if (vector instanceof FixedSizeListVector) {
-                            // Used for GdsJobs
-                            final UnionFixedSizeListWriter writer =
-                                    (UnionFixedSizeListWriter) writerMap.computeIfAbsent(field.getName(),
-                                            s -> ((FixedSizeListVector) vector).getWriter());
-                            writer.startList();
-                            // XXX: Assumes all values share the same type and first value is non-null
-                            switch (value.type()) {
-                                case INT_ARRAY:
-                                    for (int i : value.asIntArray())
-                                        writer.writeInt(i);
-                                    break;
-                                case LONG_ARRAY:
-                                    for (long l : value.asLongArray())
-                                        writer.writeBigInt(l);
-                                    break;
-                                case FLOAT_ARRAY:
-                                    for (float f : value.asFloatArray())
-                                        writer.writeFloat4(f);
-                                    break;
-                                case DOUBLE_ARRAY:
-                                    for (double d : value.asDoubleArray())
-                                        writer.writeFloat8(d);
-                                    break;
-                                default:
-                                    if (fatality.compareAndSet(false, true)) {
-                                        Exception e = CallStatus.INVALID_ARGUMENT.withDescription("invalid array type")
-                                                .toRuntimeException();
-                                        listener.error(e);
-                                        logger.error("invalid array type: " + value.type(), e);
-                                        job.cancel(true);
-                                    }
-                                    return;
-                            }
-                            writer.setValueCount(value.size());
-                            writer.endList();
-                        } else if (vector instanceof ListVector) {
-                            // Used for Cypher
-                            final UnionListWriter writer =
-                                    (UnionListWriter) writerMap.computeIfAbsent(field.getName(),
-                                            s -> {
-                                                UnionListWriter w = ((ListVector) vector).getWriter();
-                                                w.start();
-                                                return w;
-                                            });
-                            writer.startList();
-                            switch (value.type()) {
-                                case INT_ARRAY:
-                                    for (int i : value.asIntArray())
-                                        writer.writeInt(i);
-                                    break;
-                                case LONG_ARRAY:
-                                    for (long l : value.asLongArray())
-                                        writer.writeBigInt(l);
-                                    break;
-                                case FLOAT_ARRAY:
-                                    for (float f : value.asFloatArray())
-                                        writer.writeFloat4(f);
-                                    break;
-                                case DOUBLE_ARRAY:
-                                    for (double d : value.asDoubleArray())
-                                        writer.writeFloat8(d);
-                                    break;
-                                case INT_LIST:
-                                    /* XXX: for now we'll try using an int array instead of a List<Integer> for the value */
-                                    try {
-                                        for (int i : value.asIntArray()) {
-                                            writer.writeInt(i);
-                                        }
-                                    } catch (OutOfMemoryException oom) {
-                                        logger.error(String.format("OOM writing INT_LIST %s (value size: %,d, allocator limit: %,d): %s",
-                                                vector.getName(), value.size(), streamAllocator.getLimit(), oom.getMessage()));
-                                        fatality.set(true);
-                                    }
-                                    break;
-                                case LONG_LIST:
-                                    try {
-                                        for (long l : value.asLongList()) {
-                                            writer.writeBigInt(l);
-                                        }
-                                    } catch (OutOfMemoryException oom) {
-                                        logger.error(String.format("OOM writing LONG_LIST %s (value size: %,d, allocator limit: %,d): %s",
-                                                vector.getName(), value.size(), streamAllocator.getLimit(), oom.getMessage()));
-                                        fatality.set(true);
-                                    }
-                                    break;
-                                case STRING_LIST:
-                                    for (final String s : value.asStringList()) {
-                                        // TODO: should we allocate a single byte array and not have to reallocate?
-                                        final byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
-                                        try (final ArrowBuf buf = streamAllocator.buffer(bytes.length)) {
-                                            buf.setBytes(0, bytes);
-                                            writer.writeVarChar(0, bytes.length, buf);
-                                            logger.trace("wrote string {}", s);
-                                        }
-                                    }
-                                    break;
-                                default:
-                                    for (final Object o : value.asList()) {
-                                        // TODO: should we allocate a single byte array and not have to reallocate?
-                                        final byte[] bytes = o.toString().getBytes(StandardCharsets.UTF_8);
-                                        try (final ArrowBuf buf = streamAllocator.buffer(bytes.length)) {
-                                            buf.setBytes(0, bytes);
-                                            writer.writeVarChar(0, bytes.length, buf);
-                                        }
-                                    }
-                                    break;
-                            }
-                            writer.endList();
+                    if (buffer.convert(record) == job.maxRowCount) {
+                        // move the buffer to the flushable queue
+                        retries = 10_000;
+                        boolean accepted = false;
+                        do {
+                            accepted = workQueue.offer(buffer, 25, TimeUnit.MILLISECONDS);
+                            if (!accepted) pauses.incrementAndGet();
+                        } while(--retries > 0 && !accepted);
+                        if (!accepted) {
+                            logger.warn("failed to queue full buffer for flusher :(");
+                            buffer.init();
+                            availableBuffers.add(buffer);
                         }
-                    }
-
-                    // Flush at our batch size limit and reset our batch states.
-                    if ((idx + 1) == job.maxRowCount ||
-                            streamAllocator.getHeadroom() < (0.05 * streamAllocator.getLimit())) { // XXX ratio guess
-                        writerMap.values().forEach(writer -> {
-                            if (writer instanceof UnionFixedSizeListWriter) {
-                                logger.trace("calling writer.end() on {}", writer);
-                                //((UnionFixedSizeListWriter) writer).end();
-                            } else if (writer instanceof UnionListWriter) {
-                                logger.trace("calling writer.end() on {}", writer);
-                                ((UnionListWriter) writer).end();
-                            } else {
-                                logger.warn("writer isn't what we thought! {}", writer.getClass().getCanonicalName());
-                            }
-                        });
-                        // Yolo?
-                        final ArrayList<ValueVector> copy = new ArrayList<>();
-                        final int vectorSize = idx + 1;
-                        try {
-                            transferMutex.acquire();
-                            for (final FieldVector vector : vectorList) {
-                                final TransferPair tp = vector.getTransferPair(transmitAllocator);
-                                tp.transfer();
-                                copy.add(tp.getTo());
-                            }
-                        } finally {
-                            transferMutex.release();
-                        }
-
-                        // Queue the flush work
-                        logger.trace("flushing partition {}", partition);
-                        workQueue.add(FlushWork.from(copy, vectorSize));
-
-                        // Reset our partition state
-                        cnt.set(0);
-                        vectorList.forEach(FieldVector::clear);
-                        writerMap.values().forEach(writer -> {
-                            try {
-                                writer.close();
-                            } catch (Exception e) {
-                                e.printStackTrace();
-                            }
-                        });
-                        writerMap.clear();
+                    } else {
+                        // return to the queue
+                        availableBuffers.add(buffer);
                     }
                 } catch (Exception e) {
-                    if (fatality.compareAndSet(false, true)) {
-                        logger.error(String.format("exception while flushing partition %d: %s", partition, e.getMessage()), e);
-                        job.cancel(true);
-                        listener.error(CallStatus.UNKNOWN.withDescription(e.getMessage()).toRuntimeException());
-                    }
-                } finally {
-                    partitionedSemaphores[partition].release();
+                    fatality.set(true);
+                    logger.error("aborting stream due to error: " + e.getMessage());
+                    job.cancel(true);
                 }
             });
 
             // This should block until all data from the Job is prepared for the stream
             job.get();
 
-            // Final conversion of stragglers...
-            for (int partition = 0; partition < maxPartitions; partition++) {
-                logger.trace("checking for stragglers in partition {}", partition);
-                if (fatality.get())
-                    break;
-
-                final List<FieldVector> vectorList = partitionedVectorList[partition];
-                final Map<String, BaseWriter.ListWriter> writerMap = partitionedWriters[partition];
-                final int vectorSize = partitionedCounts[partition].get();
-
-                writerMap.values().forEach(writer -> {
-                    if (writer instanceof UnionFixedSizeListWriter) {
-                        logger.trace("calling writer.end() on {}", writer);
-                        // ((UnionFixedSizeListWriter) writer).end();
-                    } else if (writer instanceof UnionListWriter) {
-                        logger.trace("calling writer.end() on {}", writer);
-                        ((UnionListWriter) writer).end();
-                    } else {
-                        logger.warn("writer isn't what we thought! {}", writer.getClass().getCanonicalName());
-                    }
-                });
-
-                if (vectorSize > 0) {
-                    logger.debug("flushing remainder {} rows in partition {}", vectorSize, partition);
-                    final ArrayList<ValueVector> copy = new ArrayList<>();
-                    try {
-                        transferMutex.acquire();
-                        for (FieldVector vector : partitionedVectorList[partition]) {
-                            final TransferPair tp = vector.getTransferPair(transmitAllocator);
-                            tp.transfer();
-                            copy.add(tp.getTo());
-                        }
-                    } finally {
-                        transferMutex.release();
-                    }
-                    workQueue.add(FlushWork.from(copy, vectorSize));
-                }
-                vectorList.forEach(FieldVector::close);
-                writerMap.values().forEach(writer -> {
-                    try {
-                        writer.close();
-                    } catch (Exception e) {
-                        // XXX unhandled exception
-                        e.printStackTrace();
-                    }
-                });
-            }
-
-            if (!isFeeding.compareAndSet(true, false)) {
-                logger.error("invalid state: expected isFeeding == true");
-                listener.error(CallStatus.INTERNAL.withDescription("unexpected state").toRuntimeException());
-                return;
-            }
-
-            // Close the allocators for each partition
-            for (BufferAllocator allocator : bufferAllocators)
-                allocator.close();
+            // Drain any remaining work
+            isFeeding.set(false);
+            availableBuffers.drainTo(workQueue);
+            // Worker/flusher *should* be closing the WorkBuffers
 
             logger.info("waiting up to {} seconds for flushing to finish...", Config.arrowFlushTimeout);
             flushJob.get(Config.arrowFlushTimeout, TimeUnit.SECONDS);
             logger.info("flushing complete");
+
+            // Clean up any outstanding buffers
+            AutoCloseables.close(availableBuffers);
+
+            logger.info(String.format("dropped %,d rows, paused %,d times", drops.get(), pauses.get()));
+
         } catch (Exception e) {
             isFeeding.set(false);
             fatality.set(true);
 
-            workQueue.forEach(FlushWork::release);
+            workQueue.forEach(WorkBuffer::release);
             workQueue.clear();
             logger.error(String.format("ruh row: %s", e.getMessage()), e);
             listener.error(CallStatus.INTERNAL.withCause(e).withDescription(e.getMessage()).toRuntimeException());
@@ -519,8 +256,6 @@ public class Producer implements FlightProducer, AutoCloseable {
      *
      * @param listener  reference to the {@link ServerStreamListener}
      * @param loader    reference to the {@link VectorLoader}
-     * @param vectors   list of {@link ValueVector}s corresponding to the columns of data to flush
-     * @param dimension dimension of the vectors
      */
     private static void flush(ServerStreamListener listener, VectorLoader loader, Schema schema,
                               List<ValueVector> vectors, int dimension) throws Exception {
@@ -529,14 +264,11 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         try {
             for (ValueVector vector : vectors) {
-                vector.setValueCount(dimension);
                 nodes.add(new ArrowFieldNode(dimension, vector.getNullCount()));
 
                 if (vector instanceof BaseListVector) {
                     // Variable-width ListVectors have some special crap we need to deal with
                     if (vector instanceof ListVector) {
-                        logger.trace("working on ListVector {}", vector.getName());
-                        ((ListVector) vector).setLastSet(dimension - 1);
                         buffers.add(vector.getValidityBuffer());
                         buffers.add(vector.getOffsetBuffer());
                     } else {
@@ -544,8 +276,6 @@ public class Producer implements FlightProducer, AutoCloseable {
                     }
 
                     for (FieldVector child : ((BaseListVector) vector).getChildrenFromFields()) {
-                        logger.trace("batching child vector {} ({}, {})", child.getName(), child.getValueCount(), child.getNullCount());
-
                         nodes.add(new ArrowFieldNode(child.getValueCount(), child.getNullCount()));
                         if (vector instanceof ListVector && child instanceof UnionVector) {
                             final UnionVector uv = (UnionVector) child;
@@ -575,30 +305,25 @@ public class Producer implements FlightProducer, AutoCloseable {
                             buffers.addAll(List.of(child.getBuffers(false)));
                         }
                     }
-
                 } else {
-                    for (ArrowBuf buf : vector.getBuffers(false)) {
-                        logger.trace("adding buf {} for vector {}", buf, vector.getName());
-                        buffers.add(buf);
-                    }
+                    Collections.addAll(buffers, vector.getBuffers(false));
                 }
             }
         } catch (Exception e) {
-            vectors.forEach(ValueVector::close);
             logger.error("error preparing batch", e);
+            AutoCloseables.close(vectors);
             throw e;
         }
 
         // The actual data transmission...
         try (ArrowRecordBatch batch = new ArrowRecordBatch(dimension, nodes, buffers)) {
             loader.load(batch);
-            listener.putNext();
+            listener.putNext(); // TODO: check isReady(), yield if not
         } catch (Exception e) {
             listener.error(CallStatus.UNKNOWN.withDescription("Unknown error during batching").toRuntimeException());
             throw e;
         } finally {
-            // We need to close our reference to the ValueVector to decrement the ref count in the underlying buffers.
-            vectors.forEach(ValueVector::close);
+            AutoCloseables.close(vectors);
         }
     }
 

@@ -11,9 +11,7 @@ import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.auth.HorribleBasicAuthValidator;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
 
 /**

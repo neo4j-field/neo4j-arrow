@@ -1,6 +1,5 @@
 package org.neo4j.arrow;
 
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
 

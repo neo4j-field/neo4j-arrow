@@ -1,11 +1,9 @@
 package org.neo4j.arrow;
 
-import com.google.common.collect.Lists;
 import org.neo4j.gds.api.nodeproperties.ValueType;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;

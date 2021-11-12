@@ -152,7 +152,7 @@ public class GdsReadJob extends ReadJob {
              * and semaphores. This also lets us name the threads.
              */
             final Executor khopExecutor = KHop.buildKhopExecutor();
-            final int tickets = Math.max(2, Runtime.getRuntime().availableProcessors() - 2);
+            final int tickets = Math.max(1, Runtime.getRuntime().availableProcessors() - 4);
             final Semaphore semaphore = new Semaphore(tickets);
             final AtomicLong rowCnt = new AtomicLong(0);
 

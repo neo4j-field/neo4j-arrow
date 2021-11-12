@@ -4,7 +4,8 @@ import org.neo4j.arrow.gds.Edge;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Relationship;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class SubGraphRecord implements RowBasedRecord {
