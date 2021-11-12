@@ -4,10 +4,6 @@ package org.neo4j.arrow.gds;
  * Optimized relationship format in 64-bits
  */
 public class Edge {
-    public static final int BITS_META = 4;
-    public static final int BITS_NODE = 30;
-    public static final int SIZE = 64;
-
     public static final long ZERO = 0x0L;
     public static final long ORIENTATION_BIT = 0x8000000000000000L;
     public static final long FLAG_BITS = 0xF000000000000000L;
@@ -54,11 +50,4 @@ public class Edge {
         return (edge & ORIENTATION_BIT) != 0;
     }
 
-    public static int realTarget(long edge) {
-        return isNatural(edge) ? targetAsInt(edge) : sourceAsInt(edge);
-    }
-
-    public static int realSource(long edge) {
-        return isNatural(edge) ? sourceAsInt(edge) : targetAsInt(edge);
-    }
 }
