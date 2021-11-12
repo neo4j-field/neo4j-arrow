@@ -258,7 +258,7 @@ project(':plugin') {
     shadowJar {
         // APOC's use of Jackson breaks Apache Arrow at the moment
         relocate 'com.fasterxml.jackson', 'com.fasterxml.jackson.shaded'
-
+        relocate 'io.netty', 'io.netty.shaded'
         dependencies {
             // Neo4j adds this for us
             exclude(dependency('org.neo4j:neo4j-parser'))
