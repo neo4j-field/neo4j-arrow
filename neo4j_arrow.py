@@ -83,12 +83,13 @@ class Neo4jArrow:
             len(params_bytes), params_bytes)
         return self._submit((_JOB_CYPHER, buffer))
 
-    def gds_nodes(self, graph, properties=[], database='neo4j', filters=[], extra={}):
+    def gds_nodes(self, graph, properties=[], database='neo4j', node_id='', filters=[], extra={}):
         """Submit a GDS job for streaming Node properties. Returns a ticket."""
         params = {
             'db': database,
             'graph': graph,
             'type': 'node',
+            'node_id': node_id,
             'properties': properties,
             'filters': filters,
         }
@@ -119,7 +120,7 @@ class Neo4jArrow:
         params_bytes = json.dumps(params).encode('utf8')
         return self._submit((_JOB_GDS_WRITE_RELS, params_bytes))
 
-    def gds_relationships(self, graph, properties=[], database='neo4j', filters=[], extra={}):
+    def gds_relationships(self, graph, properties=[], database='neo4j', node_id='', filters=[], extra={}):
         """
         Submit a GDS job for streaming Relationship properties.
         Returns a ticket.
@@ -128,6 +129,7 @@ class Neo4jArrow:
             'db': database,
             'graph': graph,
             'type': 'relationship',
+            'node_id': node_id,
             'properties': properties,
             'filters': filters,
         }
