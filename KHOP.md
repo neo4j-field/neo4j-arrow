@@ -20,8 +20,9 @@ Even simpler, for node `5`: `[[5, 4] [4, 1]]`
 To construct it quickly with Cypher:
 
 ```cypher
-CREATE (n0:User)<-[:FOLLOWS]-(n2)<-[:FOLLOWS]-(n0)-[:FOLLOWS]->()<-[:FOLLOWS]-(n2)-[:FOLLOWS]->()<-[:FOLLOWS]-(n0),
-(n2)-[:FOLLOWS]->()-[:FOLLOWS]->()
+CREATE (n0)<-[:FOLLOWS]-(n2)<-[:FOLLOWS]-(n0)-[:FOLLOWS]->()<-[:FOLLOWS]-(n2)-[:FOLLOWS]->()<-[:FOLLOWS]-(n0),
+  (n2)-[:FOLLOWS]->()-[:FOLLOWS]->()
+MATCH (n) SET n:User
 ```
 
 ## neo4j_arrow & k-hop
