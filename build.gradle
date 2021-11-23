@@ -1,6 +1,9 @@
+import org.gradle.api.java.archives.internal.DefaultManifest
+
 plugins {
     id 'java'
     id 'com.github.johnrengelman.shadow' version '7.0.0'
+    id 'org.ajoberstar.grgit' version '4.1.0'
 }
 
 group 'org.neo4j'
@@ -20,6 +23,12 @@ project.ext {
     ]
     jupiterVersion = '5.7.0'
     sl4jVersion = '1.7.31'
+    sharedManifest = manifest {
+        attributes(
+                ['Neo4j-Arrow-Version': project.version,
+                 'Neo4j-Arrow-Commit': grgit.head().abbreviatedId]
+        )
+    } as DefaultManifest
 }
 
 dependencies {
@@ -112,12 +121,6 @@ project(':client') {
         )
         runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion
     }
-
-    jar {
-        manifest {
-            attributes 'Description': 'An Apache Arrow client for experimenting with neo4j-arrow'
-        }
-    }
 }
 
 project(':server') {
@@ -155,12 +158,6 @@ project(':server') {
     application {
         mainClass.set("org.neo4j.arrow.demo.Neo4jProxyServer")
     }
-
-    jar {
-        manifest {
-            attributes 'Description': 'An Apache Arrow server for fun and profit(?)'
-        }
-    }
 }
 
 project(':strawman') {
@@ -188,12 +185,6 @@ project(':strawman') {
                 [group: 'org.neo4j.driver', name: 'neo4j-java-driver', version: rootProject.ext.neo4j.driverVersion],
                 [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion]
         )
-    }
-
-    jar {
-        manifest {
-            attributes 'Description': 'Basic Java Driver implementation'
-        }
     }
 }
 
@@ -249,12 +240,6 @@ project(':plugin') {
         )
     }
 
-    jar {
-        manifest {
-            attributes 'Description': 'TBD'
-        }
-    }
-
     shadowJar {
         // APOC's use of Jackson breaks Apache Arrow at the moment
         relocate 'com.fasterxml.jackson', 'com.fasterxml.jackson.shaded'
@@ -264,6 +249,7 @@ project(':plugin') {
             exclude(dependency('org.neo4j:neo4j-parser'))
             exclude(dependency('org.opencypher::'))
         }
+        manifest { inheritFrom rootProject.ext.sharedManifest }
     }
 
     test {
