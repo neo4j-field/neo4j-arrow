@@ -1,7 +1,6 @@
 package org.neo4j.arrow.job;
 
 import com.google.common.collect.Iterators;
-import com.google.common.collect.Streams;
 import org.apache.arrow.flight.CallStatus;
 import org.apache.commons.lang3.tuple.Triple;
 import org.neo4j.arrow.*;

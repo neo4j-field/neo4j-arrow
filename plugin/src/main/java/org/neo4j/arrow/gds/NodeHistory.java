@@ -1,6 +1,6 @@
 package org.neo4j.arrow.gds;
 
-import org.neo4j.gds.core.utils.BitUtil;
+import org.neo4j.gds.mem.BitUtil;
 import org.roaringbitmap.RoaringBitmap;
 import org.roaringbitmap.RoaringBitmapWriter;
 

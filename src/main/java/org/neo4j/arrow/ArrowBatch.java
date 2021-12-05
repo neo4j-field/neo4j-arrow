@@ -146,7 +146,6 @@ public class ArrowBatch implements AutoCloseable {
             // assumption is our batches only become "short" at the end
             int column = (int) Math.floorDiv(index, batchSize);
             int offset = (int) (index % batchSize);
-            //logger.info("looking up index {} (col = {}, offset = {})", index, column, offset);
 
             try {
                 if (column < watermark) {

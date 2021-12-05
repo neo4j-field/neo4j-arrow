@@ -14,12 +14,12 @@ repositories {
 }
 
 project.ext {
-    arrowFlightGrpc = 'org.apache.arrow:flight-grpc:6.0.0'
-    arrowCompression = 'org.apache.arrow:arrow-compression:6.0.0'
+    arrowFlightGrpc = 'org.apache.arrow:flight-grpc:6.0.1'
+    arrowCompression = 'org.apache.arrow:arrow-compression:6.0.1'
     neo4j = [
-        driverVersion: '4.3.5',
-        serverVersion: '4.3.7',
-        gdsVersion: '1.7.2',
+        driverVersion: '4.4.1',
+        serverVersion: '4.4.0',
+        gdsVersion: '1.8.0',
     ]
     jupiterVersion = '5.7.0'
     sl4jVersion = '1.7.31'
@@ -216,12 +216,17 @@ project(':plugin') {
                 project(':common'),
                 [group: 'org.slf4j', name: 'slf4j-api', version: rootProject.ext.sl4jVersion],
                 [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion],
-                [group: 'org.roaringbitmap', name: 'RoaringBitmap', version: '0.9.22'],
+                [group: 'org.roaringbitmap', name: 'RoaringBitmap', version: '0.9.23'],
         )
         compileOnly (
                 [group: 'org.neo4j', name: 'neo4j-configuration', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j', name: 'neo4j-security', version: rootProject.ext.neo4j.serverVersion],
+                [group: 'org.neo4j.gds', name: 'core', version: rootProject.ext.neo4j.gdsVersion],
+                [group: 'org.neo4j.gds', name: 'config-api', version: rootProject.ext.neo4j.gdsVersion],
+                [group: 'org.neo4j.gds', name: 'graph-schema-api', version: rootProject.ext.neo4j.gdsVersion],
+                [group: 'org.neo4j.gds', name: 'neo4j-adapter', version: rootProject.ext.neo4j.gdsVersion],
+                [group: 'org.neo4j.gds', name: 'memory-usage', version: rootProject.ext.neo4j.gdsVersion],
                 [group: 'org.neo4j.gds', name: 'proc-catalog', version: rootProject.ext.neo4j.gdsVersion],
                 rootProject.ext.arrowFlightGrpc,
         )
@@ -229,14 +234,16 @@ project(':plugin') {
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: rootProject.ext.jupiterVersion],
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-params', version: rootProject.ext.jupiterVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
-                [group: 'org.neo4j.gds', name: 'proc-catalog', version: rootProject.ext.neo4j.gdsVersion],
+                [group: 'org.neo4j', name: 'neo4j-logging', version: rootProject.ext.neo4j.serverVersion],
+                [group: 'org.neo4j.gds', name: 'graph-projection-api', version: rootProject.ext.neo4j.gdsVersion],
                 project(':client'),
                 rootProject.ext.arrowFlightGrpc
         )
         testRuntimeOnly (
                 [group: 'org.junit.jupiter', name: 'junit-jupiter-engine', version: rootProject.ext.jupiterVersion],
                 [group: 'org.slf4j', name: 'slf4j-simple', version: rootProject.ext.sl4jVersion],
-                [group: 'org.neo4j.gds', name: 'core', version: rootProject.ext.neo4j.gdsVersion],
+                [group: 'org.neo4j.gds', name: 'memory-usage', version: rootProject.ext.neo4j.gdsVersion],
+                [group: 'org.neo4j.gds', name: 'neo4j-adapter', version: rootProject.ext.neo4j.gdsVersion],
         )
     }
 

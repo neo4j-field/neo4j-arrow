@@ -113,8 +113,8 @@ public class NativeAuthValidator
 
         if (context.subject().getAuthenticationResult() == AuthenticationResult.SUCCESS) {
             // XXX: this is HORRIBLE /facepalm
-            contextMap.put(context.subject().username(), context);
-            return () -> context.subject().username();
+            contextMap.put(context.subject().authenticatedUser(), context);
+            return () -> context.subject().authenticatedUser();
         }
         throw CallStatus.UNAUTHENTICATED.withDescription("invalid username or password").toRuntimeException();
     }
