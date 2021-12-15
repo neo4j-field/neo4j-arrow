@@ -18,6 +18,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
+import org.neo4j.arrow.action.ServerInfoHandler;
 import org.neo4j.arrow.action.StatusHandler;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.ReadJob;
@@ -67,6 +68,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
         // Default event handlers
         handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
+        handlerMap.put(ServerInfoHandler.SERVER_INFO, new ServerInfoHandler());
     }
 
     /**

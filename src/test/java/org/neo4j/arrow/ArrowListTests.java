@@ -17,6 +17,7 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.VectorBatchAppender;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -50,6 +51,7 @@ public class ArrowListTests {
     }
 
     @Test
+    @Disabled
     public void longListTest() {
         try (BufferAllocator allocator = new RootAllocator(((5 << 20)))) {
             Field field = new Field("test-list", FieldType.nullable(new ArrowType.List()),

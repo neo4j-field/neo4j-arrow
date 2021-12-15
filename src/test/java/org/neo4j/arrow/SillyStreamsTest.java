@@ -5,12 +5,30 @@ import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 public class SillyStreamsTest {
+
+    @Test
+    public void autoclosingTest() throws Exception {
+        Function<String, AutoCloseable> make = (name) -> new AutoCloseable() {
+            @Override
+            public void close() throws Exception {
+                System.out.println(name + " closed!");
+            }
+        };
+
+        try (var one = make.apply("one");
+        var two = make.apply("two");
+        var three = make.apply("three")) {
+            System.out.println("Made the following: " + one + ", " + two + ", " + three);
+            System.out.println("ok...closing now...");
+        }
+    }
 
     @Test
     public void testChokingStreams() throws Exception {

@@ -162,6 +162,11 @@ public class ArrowGraphStore implements GraphStore {
     }
 
     @Override
+    public RelationshipProperty relationshipPropertyValues(RelationshipType relationshipType, String propertyKey) {
+        return wrappedStore.relationshipPropertyValues(relationshipType, propertyKey);
+    }
+
+    @Override
     public void addRelationshipType(RelationshipType relationshipType, Optional<String> relationshipPropertyKey, Optional<NumberType> relationshipPropertyType, Relationships relationships) {
         wrappedStore.addRelationshipType(relationshipType, relationshipPropertyKey, relationshipPropertyType, relationships);
     }

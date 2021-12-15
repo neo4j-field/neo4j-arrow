@@ -13,6 +13,7 @@ _JOB_GDS_WRITE_NODES = "gds.write.nodes"
 _JOB_GDS_WRITE_RELS = "gds.write.relationships"
 _JOB_KHOP = "khop"
 _JOB_STATUS = "jobStatus"
+_JOB_INFO = "info"
 
 _DEFAULT_HOST = env.get('NEO4J_ARROW_HOST', 'localhost')
 _DEFAULT_PORT = int(env.get('NEO4J_ARROW_PORT', '9999'))
@@ -58,6 +59,11 @@ class Neo4jArrow:
         """List all known flights. (No filtering support yet.)"""
         return list(self._client.list_flights(options=self._options))
 
+    def info(self):
+        """Get info on the Neo4j Arrow server"""
+        result = self._client.do_action((_JOB_INFO, b''), options=self._options) 
+        return json.loads(next(result).body.to_pybytes())
+
     def _submit(self, action):
         """Attempt to ticket the given action/job"""
         results = self._client.do_action(action, options=self._options)
@@ -83,12 +89,13 @@ class Neo4jArrow:
             len(params_bytes), params_bytes)
         return self._submit((_JOB_CYPHER, buffer))
 
-    def gds_nodes(self, graph, properties=[], database='neo4j', filters=[], extra={}):
+    def gds_nodes(self, graph, properties=[], database='neo4j', node_id='', filters=[], extra={}):
         """Submit a GDS job for streaming Node properties. Returns a ticket."""
         params = {
             'db': database,
             'graph': graph,
             'type': 'node',
+            'node_id': node_id,
             'properties': properties,
             'filters': filters,
         }
@@ -119,7 +126,7 @@ class Neo4jArrow:
         params_bytes = json.dumps(params).encode('utf8')
         return self._submit((_JOB_GDS_WRITE_RELS, params_bytes))
 
-    def gds_relationships(self, graph, properties=[], database='neo4j', filters=[], extra={}):
+    def gds_relationships(self, graph, properties=[], database='neo4j', node_id='', filters=[], extra={}):
         """
         Submit a GDS job for streaming Relationship properties.
         Returns a ticket.
@@ -128,6 +135,7 @@ class Neo4jArrow:
             'db': database,
             'graph': graph,
             'type': 'relationship',
+            'node_id': node_id,
             'properties': properties,
             'filters': filters,
         }
@@ -135,11 +143,12 @@ class Neo4jArrow:
         params_bytes = json.dumps(params).encode('utf8')
         return self._submit((_JOB_GDS_READ, params_bytes))
 
-    def khop(self, graph, database='neo4j', rel_property='_type_', extra={}):
+    def khop(self, graph, database='neo4j', node_id='', rel_property='_type_', extra={}):
         """ Experimental K-Hop Job support """
         params = {
             'db': database,
             'graph': graph,
+            'node_id': node_id,
             'type': 'khop',
             'properties': [rel_property],
             'filters': [],

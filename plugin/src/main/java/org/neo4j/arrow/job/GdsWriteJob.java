@@ -198,6 +198,11 @@ public class GdsWriteJob extends WriteJob {
                 }
 
                 @Override
+                public NodeMapping rootNodeMapping() {
+                    return this;
+                }
+
+                @Override
                 public Collection<PrimitiveLongIterable> batchIterables(long batchSize) {
                     logger.info("generating iterable batches of size {}", batchSize);
                     final List<PrimitiveLongIterable> iterables = new ArrayList<>();
@@ -233,6 +238,15 @@ public class GdsWriteJob extends WriteJob {
                         // return NOT_FOUND;
                     }
                     return mappedId.longValue();
+                }
+
+                @Override
+                public long safeToMappedNodeId(long nodeId) {
+                   try {
+                       return toMappedNodeId(nodeId);
+                   } catch (Exception e) {
+                       return NodeMapping.NOT_FOUND;
+                   }
                 }
 
                 @Override

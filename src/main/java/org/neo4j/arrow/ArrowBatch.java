@@ -54,7 +54,8 @@ public class ArrowBatch implements AutoCloseable {
         // TODO: validate schema option?
         final int rows = root.getRowCount();
 
-        if (maxBatchSize > 0 && rows > maxBatchSize) {
+        // TODO: we trip this condition with very small graphs but using many partitions
+        if (rows > maxBatchSize && maxBatchSize > 0) {
             logger.error("maxBatchSize: {}, root row count: {}", maxBatchSize, rows);
             throw new RuntimeException("BOOP BOOP BOOP!");
         }
@@ -146,7 +147,6 @@ public class ArrowBatch implements AutoCloseable {
             // assumption is our batches only become "short" at the end
             int column = (int) Math.floorDiv(index, batchSize);
             int offset = (int) (index % batchSize);
-            //logger.info("looking up index {} (col = {}, offset = {})", index, column, offset);
 
             try {
                 if (column < watermark) {

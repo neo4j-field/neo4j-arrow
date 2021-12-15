@@ -67,7 +67,8 @@ public class GdsReadJob extends ReadJob {
                 job = handleRelationshipsJob(msg, store);
                 break;
             case khop:
-                final KHopMessage kmsg = new KHopMessage(msg.getDbName(), msg.getGraphName(), 2, msg.getProperties().get(0));
+                final KHopMessage kmsg = new KHopMessage(msg.getDbName(), msg.getGraphName(),
+                        msg.getNodeIdProperty(), 2, msg.getProperties().get(0));
                 job = handleKHopJob(kmsg, store);
                 break;
 
@@ -113,6 +114,10 @@ public class GdsReadJob extends ReadJob {
         final int k = msg.getK();
         assert(k == 2); // XXX optimizations for this condition exist for now
 
+        final NodeProperties idProperties = msg.getNodeIdProperty().isBlank()
+                ? null : graph.nodeProperties(msg.getNodeIdProperty());
+        final Function<Long, Long> idMapper = idProperties != null ? idProperties::longValue : graph::toOriginalNodeId;
+
         // XXX faux record...needed to progress the job status
         onFirstRecord(SubGraphRecord.of(0, new int[]{1}, new int[]{2}));
 
@@ -140,7 +145,7 @@ public class GdsReadJob extends ReadJob {
                 final AtomicLong cnt = new AtomicLong(0);
                 Iterators.partition(stream.iterator(), this.maxVariableListSize)
                         .forEachRemaining(batch -> {
-                            consumer.accept(SubGraphRecord.of(origin, batch, batch.size()));
+                            consumer.accept(SubGraphRecord.of(origin, batch, batch.size(), idMapper));
                             cnt.incrementAndGet();
                         });
 
@@ -243,19 +248,19 @@ public class GdsReadJob extends ReadJob {
             for (String key : msg.getProperties()) {
                 boolean found = false;
                 for (RelationshipType type : relTypes) {
-                    logger.info("type {} has key {}", type.name(), key);
+                    logger.trace("type {} has key {}", type.name(), key);
                     if (store.hasRelationshipProperty(type, key)) {
-                        logger.info("  yes!");
+                        logger.trace("  yes!");
                         found = true;
                         break;
                     } else {
-                        logger.info("  nope.");
+                        logger.trace("  nope.");
                     }
                 }
                 if (!found) {
                     logger.error("no relationship property found for {}", key);
                     throw CallStatus.NOT_FOUND
-                            .withDescription(String.format("no relationship property found for %s", key))
+                            .withDescription("no relationship property found for " + key)
                             .toRuntimeException();
                 }
             }
@@ -266,6 +271,16 @@ public class GdsReadJob extends ReadJob {
                 : store.getGraph(store.nodeLabels(), store.relationshipTypes(), Optional.empty());
         logger.info("got graph for labels {}, relationship types {}", baseGraph.schema().nodeSchema().availableLabels(),
                 baseGraph.schema().relationshipSchema().availableTypes());
+
+        if (!msg.getNodeIdProperty().isBlank() && !store.hasNodeProperty(store.nodeLabels(), msg.getNodeIdProperty())) {
+            logger.error("no node id property '{}' found", msg.getNodeIdProperty());
+            throw CallStatus.NOT_FOUND
+                    .withDescription("no node property found for " + msg.getNodeIdProperty())
+                    .toRuntimeException();
+        }
+        final NodeProperties idProperties = msg.getNodeIdProperty().isBlank() ?
+                null : baseGraph.nodeProperties(msg.getNodeIdProperty());
+        final Function<Long, Long> idMapper = idProperties != null ? idProperties::longValue : baseGraph::toOriginalNodeId;
 
         // Borrow the approach used by gds.graph.streamRelationshipProperties()...i.e. build triples
         // of relationship types, property keys, and references to filtered graph views.
@@ -281,11 +296,12 @@ public class GdsReadJob extends ReadJob {
                                 .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key))));
                     } else {
                         logger.info("using all property keys for {}", relType);
-                        return Stream.concat(
-                                store.relationshipPropertyKeys(relType).stream()
-                                        .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key)))),
-                                Stream.of(Triple.of(relType, null, store.getGraph(relType, Optional.empty())))
-                        );
+                        if (store.relationshipPropertyKeys(relType).isEmpty()) {
+                            return Stream.of(Triple.of(relType, null, store.getGraph(relType, Optional.empty())));
+                        } else {
+                            return store.relationshipPropertyKeys(relType).stream()
+                                    .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key))));
+                        }
                     }
                 })
                 .peek(triple -> logger.debug("constructed triple {}", triple))
@@ -311,8 +327,6 @@ public class GdsReadJob extends ReadJob {
                     .parallel()
                     .boxed()
                     .forEach(nodeId -> {
-                        final long originalNodeId = baseGraph.toOriginalNodeId(nodeId);
-                        // logger.info("processing node {} (originalId: {})", nodeId, originalNodeId);
                         Arrays.stream(triples)
                                 .flatMap(triple -> {
                                     final RelationshipType type = (RelationshipType) triple.getLeft();
@@ -322,8 +336,8 @@ public class GdsReadJob extends ReadJob {
                                     return graph
                                             .streamRelationships(nodeId, Double.NaN)
                                             .map(cursor -> new GdsRelationshipRecord(
-                                                    originalNodeId,
-                                                    graph.toOriginalNodeId(cursor.targetId()),
+                                                    idMapper.apply(nodeId),
+                                                    idMapper.apply(cursor.targetId()),
                                                     type.name(),
                                                     key,
                                                     GdsRecord.wrapScalar(cursor.property(), ValueType.DOUBLE)));
@@ -355,8 +369,9 @@ public class GdsReadJob extends ReadJob {
         logger.info("got graph for labels {}, relationship types {}", store.nodeLabels(),
                 store.relationshipTypes());
 
-        // Make sure we have the requested node properties
-        for (String key : msg.getProperties()) {
+        // Make sure we have the requested node properties and any request node id property
+        for (String key : Stream.concat(Stream.of(msg.getNodeIdProperty()), msg.getProperties().stream())
+                .filter(s -> !s.isBlank()).collect(Collectors.toUnmodifiableList())) {
             if (!store.hasNodeProperty(store.nodeLabels(), key)) {
                 logger.error("no node property found for {}", key);
                 throw CallStatus.NOT_FOUND
@@ -370,13 +385,18 @@ public class GdsReadJob extends ReadJob {
         final NodeProperties[] propertiesArray = new NodeProperties[keys.length];
         for (int i = 0; i < keys.length; i++)
             propertiesArray[i] = store.nodePropertyValues(keys[i]);
+        final NodeProperties idProperties = msg.getNodeIdProperty().isBlank()
+                ? null : store.nodePropertyValues(msg.getNodeIdProperty());
 
         final PrimitiveLongIterator iterator = graph.nodeIterator();
+
+        // TODO: support node id properties other than longs
+        final Function<Long, Long> nodeIdResolver = idProperties != null ? idProperties::longValue : graph::toOriginalNodeId;
 
         return CompletableFuture.supplyAsync(() -> {
             // XXX: hacky get first node...assume it exists
             long nodeId = iterator.next();
-            GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, graph.nodeLabels(nodeId), keys, propertiesArray, graph::toOriginalNodeId);
+            GdsNodeRecord record = GdsNodeRecord.wrap(nodeId, graph.nodeLabels(nodeId), keys, propertiesArray, nodeIdResolver);
             onFirstRecord(record);
             logger.debug("offered first record to producer");
             for (int i = 0; i < keys.length; i++)
@@ -393,7 +413,7 @@ public class GdsReadJob extends ReadJob {
             // TODO: should it be nodeCount - 1? We advanced the iterator...maybe?
             var s = spliterate(iterator, graph.nodeCount() - 1);
             StreamSupport.stream(s, true).forEach(i ->
-                    consumer.accept(GdsNodeRecord.wrap(i, graph.nodeLabels(i), keys, propertiesArray, graph::toOriginalNodeId),
+                    consumer.accept(GdsNodeRecord.wrap(i, graph.nodeLabels(i), keys, propertiesArray, nodeIdResolver),
                             i.intValue()));
 
             final long delta = System.currentTimeMillis() - start;
