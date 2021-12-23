@@ -222,6 +222,7 @@ project(':plugin') {
                 [group: 'org.neo4j', name: 'neo4j-configuration', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j', name: 'neo4j-kernel', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j', name: 'neo4j-security', version: rootProject.ext.neo4j.serverVersion],
+                [group: 'org.neo4j', name: 'neo4j-record-storage-engine', version: rootProject.ext.neo4j.serverVersion],
                 [group: 'org.neo4j.gds', name: 'core', version: rootProject.ext.neo4j.gdsVersion],
                 [group: 'org.neo4j.gds', name: 'config-api', version: rootProject.ext.neo4j.gdsVersion],
                 [group: 'org.neo4j.gds', name: 'graph-schema-api', version: rootProject.ext.neo4j.gdsVersion],
