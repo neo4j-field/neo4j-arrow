@@ -369,6 +369,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      * @return new Ticket
      */
     public Ticket ticketJob(Job job) {
+        assert job != null;
         final Ticket ticket = new Ticket(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8));
         jobMap.put(ticket, job);
         logger.info("ticketed job {}", ticket);

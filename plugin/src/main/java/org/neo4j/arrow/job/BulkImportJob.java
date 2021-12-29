@@ -1,5 +1,6 @@
 package org.neo4j.arrow.job;
 
+import org.neo4j.arrow.action.BulkImportActionHandler;
 import org.neo4j.arrow.action.BulkImportMessage;
 import org.neo4j.arrow.batchimport.NodeInputIterable;
 import org.neo4j.arrow.batchimport.RelationshipInputIterable;
@@ -31,6 +32,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 public class BulkImportJob extends WriteJob {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(BulkImportJob.class);
 
     private final CompletableFuture<Boolean> future;
 
@@ -41,6 +43,9 @@ public class BulkImportJob extends WriteJob {
 
     public BulkImportJob(BulkImportMessage msg, String username, DatabaseManagementService dbms) {
         super();
+
+        logger.info("constructor called");
+
         this.username = username;
 
         // We need a reference to a GraphDatabaseAPI. Any reference will do.
@@ -56,8 +61,10 @@ public class BulkImportJob extends WriteJob {
         final LifeSupport lifeSupport = new LifeSupport();
         final JobScheduler jobScheduler = lifeSupport.add(JobSchedulerFactory.createScheduler());
 
+        logger.info("building future...");
 
         future = CompletableFuture.supplyAsync(() -> {
+            logger.info("building importer for database {}", msg.getDbName());
             lifeSupport.start();
 
             var importer = Neo4jProxy.instantiateBatchImporter(
@@ -77,6 +84,7 @@ public class BulkImportJob extends WriteJob {
                     Collector.EMPTY
             );
             try {
+                logger.info("doing import...");
                 importer.doImport(new BulkInput());
             } catch (IOException io) {
                 logger.error("failed import", io);
@@ -84,11 +92,20 @@ public class BulkImportJob extends WriteJob {
             }
             return true;
         }).exceptionally(throwable -> {
+            logger.error("crap", throwable);
             return false;
         }).handleAsync((aBoolean, throwable) -> {
             lifeSupport.stop();
+            if (throwable != null) {
+                logger.error("oh crap", throwable);
+            } else {
+                logger.info("finished job: {}", aBoolean);
+            }
             return aBoolean;
         });
+
+        // xxx
+        future.join();
     }
 
 
@@ -116,34 +133,12 @@ public class BulkImportJob extends WriteJob {
 
         @Override
         public ReadableGroups groups() {
-            return new ReadableGroups() {
-                @Override
-                public Group get(int id) {
-                    return new Group() {
-                        @Override
-                        public int id() {
-                            return 0;
-                        }
-
-                        @Override
-                        public String name() {
-                            return "uhhh-a-group?";
-                        }
-                    };
-                }
-
-                @Override
-                public int size() {
-                    return 1;
-                }
-            };
+            return Groups.EMPTY;
         }
 
         @Override
         public Estimates calculateEstimates(PropertySizeCalculator valueSizeCalculator) throws IOException {
-            return null;
+            return Input.knownEstimates(2, 1, 1, 0, Double.BYTES * 1, 0, 3);
         }
     }
-
-    
 }

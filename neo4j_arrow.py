@@ -7,6 +7,7 @@ import time as _time
 from enum import Enum
 from os import environ as env
 
+_JOB_BULK_IMPORT = "import.bulk"
 _JOB_CYPHER = "cypherRead"
 _JOB_GDS_READ = "gds.read"      # TODO: rename
 _JOB_GDS_WRITE_NODES = "gds.write.nodes"
@@ -214,3 +215,9 @@ class Neo4jArrow:
         print(f"wrote {num:,} batches, {nbytes:,} bytes")
         return (num, nbytes)
 
+    def bulk_import(self, database):
+        params = {
+            'db': database,
+        }
+        params_bytes = json.dumps(params).encode('utf8')
+        return self._submit((_JOB_BULK_IMPORT, params_bytes))

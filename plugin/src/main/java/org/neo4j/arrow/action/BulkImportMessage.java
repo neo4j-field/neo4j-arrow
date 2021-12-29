@@ -76,7 +76,10 @@ public class BulkImportMessage implements Message {
         final JsonParser parser = mapper.createParser(bytes);
         final Map<String, Object> params = parser.readValueAs(new BulkImportMessage.MapTypeReference());
 
-        final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "neo4j").toString();
+        final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "").toString();
+        if (dbName.isEmpty()) {
+            throw new IOException("empty or invalid db parameter");
+        }
 
         final String idField = params.get(JSON_KEY_NODE_ID_FIELD) != null ?
                 params.get(JSON_KEY_NODE_ID_FIELD).toString() : null;

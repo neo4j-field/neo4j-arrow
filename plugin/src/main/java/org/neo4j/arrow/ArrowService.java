@@ -5,14 +5,12 @@ import org.apache.arrow.flight.auth2.BasicCallHeaderAuthenticator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.util.AutoCloseables;
+import org.neo4j.arrow.action.BulkImportActionHandler;
 import org.neo4j.arrow.action.CypherActionHandler;
 import org.neo4j.arrow.action.GdsActionHandler;
 import org.neo4j.arrow.action.GdsMessage;
 import org.neo4j.arrow.auth.NativeAuthValidator;
-import org.neo4j.arrow.job.GdsReadJob;
-import org.neo4j.arrow.job.GdsWriteJob;
-import org.neo4j.arrow.job.Job;
-import org.neo4j.arrow.job.TransactionApiJob;
+import org.neo4j.arrow.job.*;
 import org.neo4j.configuration.GraphDatabaseSettings;
 import org.neo4j.dbms.api.DatabaseManagementService;
 import org.neo4j.gds.compat.GraphDatabaseApiProxy;
@@ -108,6 +106,8 @@ public class ArrowService extends LifecycleAdapter {
                 (msg, mode, username) -> // XXX casts and stuff
                         (mode == Job.Mode.READ) ? new GdsReadJob((GdsMessage) msg, username)
                                 : new GdsWriteJob(msg, username, dbms), log));
+        app.registerHandler(new BulkImportActionHandler(
+                (msg, mode, username) -> new BulkImportJob(msg, username, dbms)));
     }
 
     @Override
