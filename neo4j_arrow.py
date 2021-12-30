@@ -199,7 +199,7 @@ class Neo4jArrow:
             # TODO: server should be telling us what the results were...shouldn't assume!
             return table.num_rows, table.nbytes
         except Exception as e:
-            printf("error during put_stream: {e}")
+            print(f"error during put_stream: {e}")
             return 0, 0
 
     def put_stream_batches(self, ticket, results):

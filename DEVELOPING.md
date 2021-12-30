@@ -173,7 +173,7 @@ Some high level TODOs not in code comments:
 - [ ] TODO: should we allocate a single byte array and not have to reallocate? [WorkBuffer.java](./src/main/java/org/neo4j/arrow/WorkBuffer.java)
 - [ ] TODO: check isReady(), yield if not [Producer.javalistener.putNext();](./src/main/java/org/neo4j/arrow/Producer.javalistener.putNext();)
 - [ ] TODO: validate root.Schema [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
-- [ ] TODO!!! [Producer.javajob.onComplete(arrowBatch);](./src/main/java/org/neo4j/arrow/Producer.javajob.onComplete(arrowBatch);)
+- [ ] TODO!!! [Producer.javajob.onComplete(arrowBatches);](./src/main/java/org/neo4j/arrow/Producer.javajob.onComplete(arrowBatches);)
 - [ ] TODO: we need to wait until the post-processing completes, need a callback here [Producer.java](./src/main/java/org/neo4j/arrow/Producer.java)
 - [ ] TODO: validate schema option? [ArrowBatch.java](./src/main/java/org/neo4j/arrow/ArrowBatch.java)
 - [ ] XXX  TODO [ArrowBatch.javareturn(int)rowCount;](./src/main/java/org/neo4j/arrow/ArrowBatch.javareturn(int)rowCount;)

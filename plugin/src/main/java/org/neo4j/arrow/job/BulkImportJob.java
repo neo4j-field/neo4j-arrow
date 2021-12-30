@@ -1,7 +1,10 @@
 package org.neo4j.arrow.job;
 
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.VectorSchemaRoot;
 import org.neo4j.arrow.action.BulkImportActionHandler;
 import org.neo4j.arrow.action.BulkImportMessage;
+import org.neo4j.arrow.batch.ArrowBatch;
 import org.neo4j.arrow.batchimport.NodeInputIterable;
 import org.neo4j.arrow.batchimport.RelationshipInputIterable;
 import org.neo4j.configuration.Config;
@@ -30,6 +33,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 public class BulkImportJob extends WriteJob {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(BulkImportJob.class);
@@ -41,8 +45,9 @@ public class BulkImportJob extends WriteJob {
     private final Path homePath;
     private final FileSystemAbstraction fs;
 
-    public BulkImportJob(BulkImportMessage msg, String username, DatabaseManagementService dbms) {
-        super();
+    public BulkImportJob(BulkImportMessage msg, String username, BufferAllocator allocator,
+                         DatabaseManagementService dbms) {
+        super(allocator);
 
         logger.info("constructor called");
 
@@ -108,10 +113,9 @@ public class BulkImportJob extends WriteJob {
         future.join();
     }
 
-
     @Override
-    public void onError(Exception e) {
-
+    public Consumer<ArrowBatch> getConsumer() {
+        return null;
     }
 
     static class BulkInput implements Input {

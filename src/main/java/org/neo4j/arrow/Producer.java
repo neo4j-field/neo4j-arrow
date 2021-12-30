@@ -20,6 +20,8 @@ import org.neo4j.arrow.action.ActionHandler;
 import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.ServerInfoHandler;
 import org.neo4j.arrow.action.StatusHandler;
+import org.neo4j.arrow.batch.ArrowBatch;
+import org.neo4j.arrow.batch.ArrowBatches;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.ReadJob;
 import org.neo4j.arrow.job.WriteJob;
@@ -32,6 +34,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 /**
  * The Producer encapsulates the core Arrow Flight orchestration logic including both the RPC
@@ -469,46 +472,41 @@ public class Producer implements FlightProducer, AutoCloseable {
             // TODO: validate root.Schema
 
             final WriteJob job = (WriteJob) rawJob;
-            final ArrowBatch arrowBatch = new ArrowBatch(flightStream.getSchema(), allocator, job.getJobId());
 
             // Process our stream. Everything in here needs to be checked for memory leaks!
             try (final VectorSchemaRoot streamRoot = flightStream.getRoot()) {
-
                 logger.info("client putting stream with schema: {}", streamRoot.getSchema());
+                job.onSchema(streamRoot.getSchema());
+
                 // Consume the entire stream into memory
+                final Consumer<ArrowBatch> consumer = job.getConsumer();
+                final BufferAllocator jobAllocator = job.getAllocator();
                 long cnt = 0;
+
                 while (flightStream.next()) {
                     if (cnt % 1_000 == 0) {
                         logger.info(String.format("consuming @ batch %,d each with %,d rows", cnt, streamRoot.getRowCount()));
                     }
-                    arrowBatch.appendRoot(streamRoot);
+                    final ArrowBatch batch = ArrowBatch.fromRoot(streamRoot, jobAllocator);
+                    logger.info("batch: {}", batch);
+                    consumer.accept(batch);
                     ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
                     cnt++;
                 }
-                logger.info(String.format("consumed %,d batches (%,d rows)", cnt, arrowBatch.rowCount));
+                logger.info(String.format("consumed %,d batches", cnt));
 
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
+                job.onComplete();
 
-                logger.info(String.format("produced ArrowBatch of est. size %,d MiB, actual size %,d MiB",
-                        (arrowBatch.estimateSize() >> 20), (arrowBatch.actualSize() >> 20)));
-                job.onComplete(arrowBatch); // TODO!!!
-                closeable.add(arrowBatch);
             } catch (Exception e) {
                 logger.error("error during batch unloading", e);
                 ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());
-                try {
-                    arrowBatch.close();
-                } catch (Exception ex) {
-                    ex.printStackTrace();
-                }
+                job.cancel(true);
                 return;
             }
             // TODO: we need to wait until the post-processing completes, need a callback here
             ackStream.onCompleted();
-
-            // At this point we should have the full stream in memory.
-            logger.debug("batch rowCount={}, schema={}", arrowBatch.getRowCount(), arrowBatch.getSchema());
         };
     }
 

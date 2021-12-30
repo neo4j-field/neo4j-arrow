@@ -105,9 +105,9 @@ public class ArrowService extends LifecycleAdapter {
         app.registerHandler(new GdsActionHandler(
                 (msg, mode, username) -> // XXX casts and stuff
                         (mode == Job.Mode.READ) ? new GdsReadJob((GdsMessage) msg, username)
-                                : new GdsWriteJob(msg, username, dbms), log));
+                                : new GdsWriteJob(msg, username, allocator, dbms), log));
         app.registerHandler(new BulkImportActionHandler(
-                (msg, mode, username) -> new BulkImportJob(msg, username, dbms)));
+                (msg, mode, username) -> new BulkImportJob(msg, username, allocator, dbms)));
     }
 
     @Override

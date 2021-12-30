@@ -12,20 +12,24 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.neo4j.arrow.batch.ArrowBatch;
+import org.neo4j.arrow.batch.ArrowBatches;
+import org.neo4j.arrow.batch.BatchedVector;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-public class ArrowBatchTest {
+public class ArrowBatchesTest {
 
     @Test
     public void testSearchingTailEnd() {
         Field field = new Field("junk", FieldType.nullable(new ArrowType.Int(64, true)), null);
         Schema schema = new Schema(List.of(field));
 
-        try (BufferAllocator allocator = new RootAllocator(Integer.MAX_VALUE);
-             ArrowBatch batch = new ArrowBatch(schema, allocator, "test-batch")) {
+        try (BufferAllocator allocator = new RootAllocator(Integer.MAX_VALUE)) {
+            final BufferAllocator batchAllocator = allocator.newChildAllocator("batch", 0, Integer.MAX_VALUE);
+            final ArrowBatches batches = new ArrowBatches(schema);
 
             long nodeId = 0;
             for (int i=0; i<10; i++) {
@@ -39,7 +43,8 @@ public class ArrowBatchTest {
                     root.setRowCount(6);
                     System.out.println("created vector: " + biv);
 
-                    batch.appendRoot(root);
+                    final ArrowBatch batch = ArrowBatch.fromRoot(root, batchAllocator);
+                    batches.appendBatch(batch);
                     vector.close();
                 }
             }
@@ -55,13 +60,20 @@ public class ArrowBatchTest {
                     root.setRowCount(5);
                     System.out.println("created vector: " + biv);
 
-                    batch.appendRoot(root);
+                    final ArrowBatch batch = ArrowBatch.fromRoot(root, batchAllocator);
+                    batches.appendBatch(batch);
                     vector.close();
                 }
             }
 
-            ArrowBatch.BatchedVector bv = batch.getVector(0);
-            List<ValueVector> list = bv.getVectors();
+            Assertions.assertEquals(6 * 10 + 5 * 48, batches.getRowCount());
+
+            final List<BatchedVector> batchedVectors = batches.getFieldVectors();
+            Assertions.assertNotNull(batchedVectors);
+            Assertions.assertEquals(1, batchedVectors.size());
+
+            final BatchedVector bv = batches.getVector(0);
+            final List<ValueVector> list = bv.getVectors();
             Assertions.assertEquals(58, list.size());
 
             Set<Long> seen = new HashSet<>();
@@ -73,6 +85,9 @@ public class ArrowBatchTest {
                 }
                 seen.add(id);
             }
+
+            batches.close();
+            batchAllocator.close();
         }
     }
 }

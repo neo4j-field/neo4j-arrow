@@ -19,10 +19,10 @@ public class GdsWriteNodeMessage implements Message {
     public static final String JSON_KEY_GRAPH_NAME = "graph";
     // TODO: "type" is pretty vague...needs a better name
     public static final String JSON_KEY_NODE_ID_FIELD = "idField";
-    public static final String DEFAULT_NODE_ID_FIELD = "id";
+    public static final String DEFAULT_NODE_ID_FIELD = "_node_id_";
 
     public static final String JSON_KEY_LABELS_FIELD = "labelsField";
-    public static final String DEFAULT_LABELS_FIELD = "labels";
+    public static final String DEFAULT_LABELS_FIELD = "_labels_";
 
     /** Name of the Neo4j Database where our Graph lives. Optional. Defaults to "neo4j" */
     private final String dbName;

@@ -6,7 +6,7 @@ import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
-import org.neo4j.arrow.ArrowBatch;
+import org.neo4j.arrow.batch.BatchedVector;
 import org.neo4j.gds.NodeLabel;
 import org.neo4j.gds.api.NodeProperties;
 import org.neo4j.gds.api.nodeproperties.ValueType;
@@ -22,7 +22,7 @@ import java.util.function.Function;
 public class ArrowNodeProperties implements NodeProperties {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowNodeProperties.class);
 
-    final private ArrowBatch.BatchedVector vector;
+    final private BatchedVector vector;
     final private ValueType type;
     final private NodeLabel label;
     final int maxId;
@@ -31,7 +31,7 @@ public class ArrowNodeProperties implements NodeProperties {
     final Function<Integer, Number> numberReader;
     final Function<Integer, Number[]> arrayReader;
 
-    public ArrowNodeProperties(ArrowBatch.BatchedVector vector, NodeLabel label, int maxId) {
+    public ArrowNodeProperties(BatchedVector vector, NodeLabel label, int maxId) {
         this.vector = vector;
         this.label = label;
         this.maxId = maxId;

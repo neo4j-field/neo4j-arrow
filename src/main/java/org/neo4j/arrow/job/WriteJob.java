@@ -1,19 +1,31 @@
 package org.neo4j.arrow.job;
 
 
-import org.neo4j.arrow.ArrowBatch;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.types.pojo.Schema;
+import org.neo4j.arrow.Config;
+import org.neo4j.arrow.batch.ArrowBatch;
+import org.neo4j.arrow.batch.ArrowBatches;
 
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.function.Consumer;
 
 public abstract class WriteJob extends Job {
 
     public static final Mode mode = Mode.WRITE;
 
-    private final CompletableFuture<ArrowBatch> streamComplete = new CompletableFuture<>();
+    private final BufferAllocator allocator;
+    private CompletableFuture<Schema> schema = new CompletableFuture<>();
 
-    public WriteJob() {
+    private final CompletableFuture<Void> streamComplete = new CompletableFuture<>();
+
+    public WriteJob(BufferAllocator parentAllocator) {
         super();
+        allocator = parentAllocator.newChildAllocator(this.getJobId(), 0L, Config.maxStreamMemory);
     }
 
     @Override
@@ -23,16 +35,29 @@ public abstract class WriteJob extends Job {
 
     @Override
     public void close() throws Exception {
-        // TODO handle writejob close???
+        allocator.close();
     }
 
-    public Future<ArrowBatch> getStreamCompletion() {
+    public Future<Void> getStreamCompletion() {
         return streamComplete;
     }
 
-    public void onComplete(ArrowBatch root) {
-        streamComplete.complete(root);
+    public void onComplete() {
+        streamComplete.complete(null);
     }
 
-    public abstract void onError(Exception e);
+    public void onSchema(Schema schema) {
+        this.schema.complete(schema);
+    }
+
+    public CompletableFuture<Schema> getSchema() {
+        return schema;
+    }
+
+    public abstract Consumer<ArrowBatch> getConsumer();
+
+    public BufferAllocator getAllocator() {
+        return allocator;
+    }
+
 }
