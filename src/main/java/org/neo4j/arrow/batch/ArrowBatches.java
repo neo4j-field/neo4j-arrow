@@ -2,6 +2,7 @@ package org.neo4j.arrow.batch;
 
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -24,14 +25,16 @@ public class ArrowBatches implements AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowBatches.class);
 
     final Schema schema;
+    private BufferAllocator allocator;
     final List<List<ValueVector>> vectorSpace = new ArrayList<>();
     final String[] fieldNames;
 
     long rowCount = 0;
     int maxBatchSize = -1;
 
-    public ArrowBatches(Schema schema) {
+    public ArrowBatches(Schema schema, BufferAllocator parentAllocator, String name) {
         this.schema = schema;
+        this.allocator = parentAllocator.newChildAllocator(name, 0L, Config.maxStreamMemory);
         final List<Field> fields = schema.getFields();
         fieldNames = new String[fields.size()];
 
@@ -59,10 +62,14 @@ public class ArrowBatches implements AutoCloseable {
         IntStream.range(0, vectors.length)
                 .forEach(idx -> {
                     final List<ValueVector> vectorList = vectorSpace.get(idx);
-                    vectorList.add(vectors[idx]);
+                    final TransferPair pair = vectors[idx].getTransferPair(allocator);
+                    pair.transfer();
+                    vectorList.add(pair.getTo());
                 });
 
         rowCount += rows;
+
+        AutoCloseables.closeNoChecked(batch);
     }
 
     public long estimateSize() {
@@ -122,6 +129,8 @@ public class ArrowBatches implements AutoCloseable {
 
     @Override
     public void close() {
+        allocator.assertOpen();
         vectorSpace.forEach(list -> list.forEach(ValueVector::close));
+        allocator.close();
     }
 }

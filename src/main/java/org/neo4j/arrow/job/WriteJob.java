@@ -2,16 +2,12 @@ package org.neo4j.arrow.job;
 
 
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.Config;
 import org.neo4j.arrow.batch.ArrowBatch;
-import org.neo4j.arrow.batch.ArrowBatches;
 
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
 
 public abstract class WriteJob extends Job {

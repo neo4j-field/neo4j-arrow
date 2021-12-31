@@ -28,8 +28,7 @@ public class ArrowBatchesTest {
         Schema schema = new Schema(List.of(field));
 
         try (BufferAllocator allocator = new RootAllocator(Integer.MAX_VALUE)) {
-            final BufferAllocator batchAllocator = allocator.newChildAllocator("batch", 0, Integer.MAX_VALUE);
-            final ArrowBatches batches = new ArrowBatches(schema);
+            final ArrowBatches batches = new ArrowBatches(schema, allocator, "batch");
 
             long nodeId = 0;
             for (int i=0; i<10; i++) {
@@ -43,7 +42,7 @@ public class ArrowBatchesTest {
                     root.setRowCount(6);
                     System.out.println("created vector: " + biv);
 
-                    final ArrowBatch batch = ArrowBatch.fromRoot(root, batchAllocator);
+                    final ArrowBatch batch = ArrowBatch.fromRoot(root, allocator);
                     batches.appendBatch(batch);
                     vector.close();
                 }
@@ -60,7 +59,7 @@ public class ArrowBatchesTest {
                     root.setRowCount(5);
                     System.out.println("created vector: " + biv);
 
-                    final ArrowBatch batch = ArrowBatch.fromRoot(root, batchAllocator);
+                    final ArrowBatch batch = ArrowBatch.fromRoot(root, allocator);
                     batches.appendBatch(batch);
                     vector.close();
                 }
@@ -87,7 +86,6 @@ public class ArrowBatchesTest {
             }
 
             batches.close();
-            batchAllocator.close();
         }
     }
 }

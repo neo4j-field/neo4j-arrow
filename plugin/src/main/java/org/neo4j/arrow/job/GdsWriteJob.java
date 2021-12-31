@@ -2,6 +2,8 @@ package org.neo4j.arrow.job;
 
 import org.apache.arrow.flight.CallStatus;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.util.AutoCloseableLock;
+import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.batch.ArrowBatch;
@@ -34,6 +36,7 @@ import org.neo4j.gds.core.utils.collection.primitive.PrimitiveLongIterator;
 import org.neo4j.gds.core.utils.mem.AllocationTracker;
 import org.neo4j.kernel.database.NamedDatabaseId;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
+import org.neo4j.kernel.lifecycle.LifeSupport;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -73,8 +76,13 @@ public class GdsWriteJob extends WriteJob {
         final BlockingQueue<ArrowBatch> incoming = new LinkedBlockingQueue<>();
         batchConsumer = incoming::add;
 
+        setStatus(Status.PENDING);
+
         future = getSchema()
-                .thenApplyAsync(ArrowBatches::new)
+                .thenApplyAsync(schema -> {
+                    setStatus(Status.PRODUCING);
+                    return new ArrowBatches(schema, allocator, "gds-write-" + getJobId());
+                })
                 .thenApplyAsync(batches -> {
                     // XXX for now we consume the entire stream :-(
                     final Future<Void> streamComplete = getStreamCompletion();
@@ -100,14 +108,18 @@ public class GdsWriteJob extends WriteJob {
                     } else {
                         throw CallStatus.UNIMPLEMENTED.withDescription("unhandled request type").toRuntimeException();
                     }
-                }).exceptionally(throwable -> {
-                    logger.error(throwable.getMessage(), throwable);
-                    return false;
                 }).handleAsync((aBoolean, throwable) -> {
-                    logger.info("GdsWriteJob completed! result: {}", (aBoolean == null ? "failed" : "ok!"));
-                    if (throwable != null)
+                    final String result = (aBoolean == null ? "failed" : "ok!");
+                    logger.info("GdsWriteJob completed! result: {}", result);
+                    AutoCloseables.closeNoChecked(this);
+
+                    if (throwable != null) {
                         logger.error(throwable.getMessage(), throwable);
-                    return false;
+                        return false;
+                    } else {
+                        onCompletion(() -> result);
+                        return aBoolean;
+                    }
                 });
     }
 
@@ -423,7 +435,7 @@ public class GdsWriteJob extends WriteJob {
             nodeIdVector.close();
             labelsVector.close();
             arrowBatches.close();
-            logger.debug("closed nodeIdVector, labelsVector, and arrowBatch");
+            logger.info("closed nodeIdVector, labelsVector, and arrowBatch");
         }));
 
         // nuke our garbage rel?
@@ -538,17 +550,15 @@ public class GdsWriteJob extends WriteJob {
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
-        return future.cancel(mayInterruptIfRunning);
-    }
-
-    @Override
-    public void close() {
-        future.cancel(true);
+        final boolean cancelled = future.cancel(mayInterruptIfRunning);
+        if (cancelled) {
+            AutoCloseables.closeNoChecked(this);
+        }
+        return cancelled;
     }
 
     @Override
     public Consumer<ArrowBatch> getConsumer() {
         return batchConsumer;
     }
-
 }

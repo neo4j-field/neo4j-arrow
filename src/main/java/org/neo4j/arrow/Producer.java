@@ -555,7 +555,11 @@ public class Producer implements FlightProducer, AutoCloseable {
         logger.info("closing producer...");
         for (Job job : jobMap.values()) {
             job.cancel(true);
-            job.get(5, TimeUnit.SECONDS);
+            try {
+                job.get(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                logger.error("failed to complete job {}", job);
+            }
         }
         AutoCloseables.close(closeable);
         AutoCloseables.close(allocator);
