@@ -1,9 +1,9 @@
-import pyarrow as pa, pyarrow.parquet
-import neo4j_arrow as na
+import pyarrow as pa
+from src.main.neo4j_arrow import neo4j_arrow as na
 from google.cloud import bigquery
 
 import os, sys, threading, queue
-from time import sleep, time
+from time import time
 
 ### Config
 HOST = os.environ.get('NEO4J_ARROW_HOST', 'localhost')

@@ -32,7 +32,9 @@ messages, but the `neo4j_arrow.py` client exposes a dedicated method to make it
 easy:
 
 ```python
-import neo4j_arrow as na
+
+from src.main.neo4j_arrow import neo4j_arrow as na
+
 client = na.Neo4jArrow('neo4j', 'password', (HOST, 9999))
 ticket = client.khop('mygraph')
 ```
@@ -70,10 +72,12 @@ CALL gds.graph.create('sample', 'User', {
 ### Step 2: Connect to `neo4j-arrow`
 
 Graph Python and install PyArrow (v5 or newer). Then create your client using
-the project's [neo4j_arrow.py](./neo4j_arrow.py) client/wrapper:
+the project's [neo4j_arrow.py](src/main/neo4j_arrow/neo4j_arrow.py) client/wrapper:
 
 ```python
-import neo4j_arrow as na
+
+from src.main.neo4j_arrow import neo4j_arrow as na
+
 client = na.Neo4jArrow('neo4j', 'password', ('localhost', 9999))
 ```
 

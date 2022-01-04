@@ -48,7 +48,7 @@ From a cold start, this should take about `4,670 ms`.
 3. Average the 3 best runs for the final result
 
 ### The Python Driver 🐍
-The code is in [direct.py](../../direct.py). It runs the following Cypher:
+The code is in [direct.py](../../examples/direct.py). It runs the following Cypher:
 
 ```python
 CALL gds.graph.streamNodeProperty('mygraph', 'n');
@@ -71,7 +71,7 @@ transaction and just prior to iterating through results. Time is stopped
 after the last result.
 
 ### The Neo4j-Arrow Client 🏹
-The code is in [client.py](../../client.py).
+The code is in [client.py](../../examples/client.py).
 
 It submits the following `GdsMessage` and then requests the stream:
 

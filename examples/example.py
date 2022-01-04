@@ -1,5 +1,4 @@
-import neo4j_arrow as na
-import time
+from src.main.neo4j_arrow import neo4j_arrow as na
 
 client = na.Neo4jArrow('neo4j', 'password', ('voutila-arrow-test', 9999))
 ticket = client.gds_nodes('mygraph', properties=['n'])

@@ -1,5 +1,4 @@
-import neo4j_arrow as na
-import pandas as pd
+from src.main.neo4j_arrow import neo4j_arrow as na
 from time import sleep
 
 client = na.Neo4jArrow('neo4j', 'password', ('<YOUR HOST HERE>', 9999))

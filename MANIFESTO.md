@@ -18,7 +18,7 @@ project to see if Arrow can help solve a few rough spots for us.
 * Details on design and how to hack on it: [DEVELOPING.md](./DEVELOPING.md)
 * The kitchen sink: [server-side neo4j-arrow plugin](./plugin/)
 * Neo4j Arrow proxy: [stand-alone server](./server/) (works with Aura, I think)
-* The PyArrow client: [neo4j-arrow.py](./neo4j_arrow.py)
+* The PyArrow client: [neo4j-arrow.py](src/main/neo4j_arrow/neo4j_arrow.py)
 * My demo: [PyArrow Demo](./PyArrow%20Demo.ipynb)
 
 ## Why? My Problem Statements
@@ -120,7 +120,7 @@ cores. (One can navigate the GIL for IO-bound things like networking, disk,
 etc., but anything creating/destroying Python objects needs to hold the GIL
 to do so.)
 
-Given the following program, [direct.py](./direct.py):
+Given the following program, [direct.py](examples/direct.py):
 
 ```python
 #!/usr/bin/env python

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import neo4j_arrow as na
+from src.main.neo4j_arrow import neo4j_arrow as na
 from time import time
 import os, sys
 

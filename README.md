@@ -98,7 +98,7 @@ to read/write a value.
 read/write operations to Neo4j. While you can implement the protocol
 yourself using an Arrow/Arrow Flight client implementation in any
 language, a helpful wrapper using *PyArrow* is provided in
-[./neo4j_arrow.py](neo4j_arrow.py).
+[./neo4j_arrow.py](src/main/neo4j_arrow/neo4j_arrow.py).
 
 The general lifecycle looks like:
 
@@ -124,7 +124,8 @@ Assuming you've using `neo4j_arrow.py`, a simple GDS read operation to
 request and stream computed node embeddings (for example) looks like:
 
 ```python
-import neo4j_arrow as na
+
+from src.main.neo4j_arrow import neo4j_arrow as na
 
 # using the neo4j user and 'password' as the password
 client = na.Neo4jArrow('neo4j', 'password', ('neo4-host', 9999))
@@ -145,15 +146,15 @@ df = table.to_pandas()
 A few *IPython notebooks* are provided that demonstrate more complex
 usage of `neo4j-arrow` via PyArrow:
 
-1. [Basic usage](./PyArrow%20Demo.ipynb) and lifecycle
-2. [Live migration](./live_migration_demo.ipynb) of a graph between
+1. [Basic usage](examples/PyArrow%20Demo.ipynb) and lifecycle
+2. [Live migration](examples/live_migration_demo.ipynb) of a graph between
   disparate Neo4j instances
 
 Some code examples:
 
-* [Integration with BigQuery](arrow_to_bq.py) showing how to relay a
+* [Integration with BigQuery](examples/arrow_to_bq.py) showing how to relay a
   `neo4j-arrow` stream to a target BigQuery table.
-* [Trivial example](./example.py) of reading some nodes from GDS
+* [Trivial example](examples/example.py) of reading some nodes from GDS
 
 
 ## Known Issues or Incomplete Things ⚠️
