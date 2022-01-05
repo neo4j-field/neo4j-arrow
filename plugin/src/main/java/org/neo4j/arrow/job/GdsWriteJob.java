@@ -50,6 +50,8 @@ import java.util.stream.LongStream;
 
 
 public class GdsWriteJob extends WriteJob {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(GdsWriteJob.class);
+
     private final Consumer<ArrowBatch> batchConsumer;
     private final CompletableFuture<Boolean> future;
     private final DatabaseManagementService dbms;

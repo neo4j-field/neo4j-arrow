@@ -21,7 +21,6 @@ import org.neo4j.arrow.action.Outcome;
 import org.neo4j.arrow.action.ServerInfoHandler;
 import org.neo4j.arrow.action.StatusHandler;
 import org.neo4j.arrow.batch.ArrowBatch;
-import org.neo4j.arrow.batch.ArrowBatches;
 import org.neo4j.arrow.job.Job;
 import org.neo4j.arrow.job.ReadJob;
 import org.neo4j.arrow.job.WriteJob;
@@ -70,8 +69,8 @@ public class Producer implements FlightProducer, AutoCloseable {
         this.allocator = parentAllocator.newChildAllocator("neo4j-flight-producer", 0, Config.maxArrowMemory);
 
         // Default event handlers
-        handlerMap.put(StatusHandler.STATUS_ACTION, new StatusHandler());
-        handlerMap.put(ServerInfoHandler.SERVER_INFO, new ServerInfoHandler());
+        registerHandler(new StatusHandler());
+        registerHandler(new ServerInfoHandler(jobMap));
     }
 
     /**
@@ -497,7 +496,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
-                job.onComplete();
+                job.onStreamComplete();
 
             } catch (Exception e) {
                 logger.error("error during batch unloading", e);

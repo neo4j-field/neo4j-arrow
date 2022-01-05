@@ -11,6 +11,7 @@ import java.util.concurrent.Future;
 import java.util.function.Consumer;
 
 public abstract class WriteJob extends Job {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(WriteJob.class);
 
     public static final Mode mode = Mode.WRITE;
 
@@ -38,11 +39,13 @@ public abstract class WriteJob extends Job {
         return streamComplete;
     }
 
-    public void onComplete() {
+    public void onStreamComplete() {
+        logger.info("stream completed");
         streamComplete.complete(null);
     }
 
     public void onSchema(Schema schema) {
+        logger.info("received schema");
         this.schema.complete(schema);
     }
 
