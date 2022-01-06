@@ -1,24 +1,20 @@
-import base64
-import json
 import pyarrow as pa
 import pyarrow.flight as flight
+import base64
+import json
 import struct
 import time as _time
 from enum import Enum
 from os import environ as env
 
-## These actions return serialized Tickets
 _JOB_BULK_IMPORT = "import.bulk"
 _JOB_CYPHER = "cypherRead"
-_JOB_GDS_READ = "gds.read"
+_JOB_GDS_READ = "gds.read"      # TODO: rename
 _JOB_GDS_WRITE_NODES = "gds.write.nodes"
 _JOB_GDS_WRITE_RELS = "gds.write.relationships"
 _JOB_KHOP = "khop"
-
-## These actions don't return Tickets, hence they aren't "jobs" really
-_ACTION_STATUS = "jobStatus"
-_ACTION_INFO_VERSION = "info.version"
-_ACTION_INFO_JOBS = "info.jobs"
+_JOB_STATUS = "jobStatus"
+_JOB_INFO = "info"
 
 _DEFAULT_HOST = env.get('NEO4J_ARROW_HOST', 'localhost')
 _DEFAULT_PORT = int(env.get('NEO4J_ARROW_PORT', '9999'))
@@ -64,10 +60,9 @@ class Neo4jArrow:
         """List all known flights. (No filtering support yet.)"""
         return list(self._client.list_flights(options=self._options))
 
-    def version(self):
-        """Get the version of the Neo4j Arrow server"""
-        result = self._client.do_action((_ACTION_INFO_VERSION, b''),
-                                        options=self._options)
+    def info(self):
+        """Get info on the Neo4j Arrow server"""
+        result = self._client.do_action((_JOB_INFO, b''), options=self._options) 
         return json.loads(next(result).body.to_pybytes())
 
     def _submit(self, action):
@@ -169,7 +164,7 @@ class Neo4jArrow:
             buffer = ticket.serialize()
         else:
             buffer = ticket
-        action = (_ACTION_STATUS, buffer)
+        action = (_JOB_STATUS, buffer)
         results = self._client.do_action(action, options=self._options)
         return JobStatus(next(results).body.to_pybytes().decode('utf8'))
     
@@ -190,10 +185,10 @@ class Neo4jArrow:
         self.wait_for_job(ticket, timeout=timeout)
         return self._client.do_get(ticket, options=self._options)
 
-    def put_stream(self, ticket, data):
+    def put_stream(self, ticket, data, metadata={}):
         """Write a stream to the server"""
         if type(data) is not pa.lib.Table:
-            table = pa.table(data=data)
+            table = pa.table(data=data, metadata=metadata)
         else:
             table = data
         try:
@@ -220,9 +215,15 @@ class Neo4jArrow:
         print(f"wrote {num:,} batches, {nbytes:,} bytes")
         return (num, nbytes)
 
-    def bulk_import(self, database):
+    def bulk_import(self, database, idField='_id_', labelsField='_labels_',
+            sourceField='_source_id_', targetField='_target_id_', typeField='_type_'):
         params = {
             'db': database,
+            'idField': idField,
+            'labelsField': labelsField,
+            'sourceField': sourceField,
+            'targetField': targetField,
+            'typeField': typeField,
         }
         params_bytes = json.dumps(params).encode('utf8')
         return self._submit((_JOB_BULK_IMPORT, params_bytes))

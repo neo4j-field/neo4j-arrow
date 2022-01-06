@@ -5,7 +5,8 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.action.BulkImportMessage;
 import org.neo4j.arrow.batch.ArrowBatch;
 import org.neo4j.arrow.batchimport.NodeInputIterator;
-import org.neo4j.arrow.batchimport.RelationshipInputIterable;
+import org.neo4j.arrow.batchimport.QueueInputIterator;
+import org.neo4j.arrow.batchimport.RelationshipInputIterator;
 import org.neo4j.configuration.Config;
 import org.neo4j.configuration.GraphDatabaseSettings;
 import org.neo4j.dbms.api.DatabaseExistsException;
@@ -33,16 +34,22 @@ import org.neo4j.scheduler.JobScheduler;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public class BulkImportJob extends WriteJob {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(BulkImportJob.class);
+
+    private static final String META_KEY = "stream.type";
+    private static final String NODE_STREAM = "node";
+    private static final String RELS_STREAM = "rels";
+
+    private final CompletableFuture<Schema> nodeSchema = new CompletableFuture<>();
+    private final CompletableFuture<Schema> relsSchema = new CompletableFuture<>();
 
     private final CompletableFuture<Boolean> future;
 
@@ -59,6 +66,24 @@ public class BulkImportJob extends WriteJob {
         bulkInput.signalCompletion();
     }
 
+    @Override
+    public void onSchema(Schema schema) {
+        // We expect TWO streams, so we need to differentiate Schema based on metadata
+        final Map<String, String> metadata = schema.getCustomMetadata();
+        assert (metadata != null); // XXX pretty sure this is guaranteed, but not sure
+
+        switch (metadata.getOrDefault(META_KEY, "")) {
+            case NODE_STREAM:
+                nodeSchema.complete(schema);
+                break;
+            case RELS_STREAM:
+                relsSchema.complete(schema);
+                break;
+            default:
+                logger.warn("unexpected or missing schema metadata type field ({})", META_KEY);
+        }
+    }
+
     public BulkImportJob(BulkImportMessage msg, String username, BufferAllocator allocator,
                          DatabaseManagementService dbms) {
         super(allocator);
@@ -71,7 +96,9 @@ public class BulkImportJob extends WriteJob {
         final GraphDatabaseAPI api = (GraphDatabaseAPI) dbms.database(GraphDatabaseSettings.SYSTEM_DATABASE_NAME);
         this.homePath = api.databaseLayout().getNeo4jLayout().homeDirectory();
         this.fs = api.getDependencyResolver().resolveDependency(FileSystemAbstraction.class);
-        this.bulkInput = new BulkInput(msg.getIdField(), msg.getLabelsField());
+        this.bulkInput = new BulkInput(
+                msg.getIdField(), msg.getLabelsField(),
+                msg.getSourceField(), msg.getTargetField(), msg.getTypeField());
 
         final Config config = Config.defaults(Settings.neo4jHome(), homePath);
         final DatabaseLayout dbLayout = Neo4jLayout.of(config).databaseLayout(dbName);
@@ -83,10 +110,10 @@ public class BulkImportJob extends WriteJob {
 
         setStatus(Status.PENDING);
 
-        logger.info("awaiting schema");
+        logger.info("awaiting node and relationship streams");
 
-        future = getSchema()
-                .thenApplyAsync((schema) -> {
+        future = CompletableFuture.allOf(nodeSchema, relsSchema)
+                .thenApplyAsync((unused) -> {
                     logger.info("building importer for database {}", dbName);
                     setStatus(Status.PRODUCING);
 
@@ -135,9 +162,19 @@ public class BulkImportJob extends WriteJob {
     }
 
     @Override
-    public Consumer<ArrowBatch> getConsumer() {
-        // TODO: toggle between node and rel consumption
-        return bulkInput.nodeBatchConsumer;
+    public Consumer<ArrowBatch> getConsumer(Schema schema) {
+        // We expect TWO streams, so we need to differentiate Schema based on metadata
+        final Map<String, String> metadata = schema.getCustomMetadata();
+        assert (metadata != null); // XXX pretty sure this is guaranteed, but not sure
+
+        switch (metadata.getOrDefault(META_KEY, "")) {
+            case NODE_STREAM:
+                return bulkInput.nodeBatchConsumer;
+            case RELS_STREAM:
+                return bulkInput.relsBatchConsumer;
+            default:
+                throw new RuntimeException(String.format("invalid stream metadata, no valid %s value found", META_KEY));
+        }
     }
 
     static class BulkInput implements Input {
@@ -148,15 +185,17 @@ public class BulkImportJob extends WriteJob {
         public final Consumer<ArrowBatch> nodeBatchConsumer = incomingNodes::add;
         public final Consumer<ArrowBatch> relsBatchConsumer = incomingRels::add;
 
-        private final NodeInputIterator nodeIterator;
-        // private final RelationshipInputIterator relsIterator;
+        private final QueueInputIterator nodeIterator;
+        private final QueueInputIterator relsIterator;
 
-        public BulkInput(String idField, String labelsField) {
-            this.nodeIterator = (NodeInputIterator) NodeInputIterator.fromQueue(incomingNodes, idField, labelsField);
+        public BulkInput(String idField, String labelsField, String sourceField, String targetField, String typeField) {
+            this.nodeIterator = NodeInputIterator.fromQueue(incomingNodes, idField, labelsField);
+            this.relsIterator = RelationshipInputIterator.fromQueue(incomingRels, sourceField, targetField, typeField);
         }
 
         public void signalCompletion() {
             nodeIterator.closeQueue();
+            relsIterator.closeQueue();
         }
 
         @Override
@@ -168,7 +207,7 @@ public class BulkImportJob extends WriteJob {
         @Override
         public InputIterable relationships(Collector badCollector) {
             logger.info("rels()");
-            return new RelationshipInputIterable();
+            return () -> relsIterator;
         }
 
         @Override

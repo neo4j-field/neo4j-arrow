@@ -14,7 +14,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class NodeInputIterator implements InputIterator {
+public class NodeInputIterator implements QueueInputIterator {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(NodeInputIterator.class);
 
     private final BlockingQueue<ArrowBatch> queue;
@@ -22,7 +22,7 @@ public class NodeInputIterator implements InputIterator {
     private final String idField;
     private final String labelsField;
 
-    public static InputIterator fromQueue(BlockingQueue<ArrowBatch> queue, String idField, String labelsField) {
+    public static QueueInputIterator fromQueue(BlockingQueue<ArrowBatch> queue, String idField, String labelsField) {
         return new NodeInputIterator(queue, idField, labelsField);
     }
 
@@ -33,6 +33,7 @@ public class NodeInputIterator implements InputIterator {
         logger.info("created {}", this);
     }
 
+    @Override
     public void closeQueue() {
         logger.info("closing queues");
         queueOpen.set(false);
@@ -73,7 +74,7 @@ public class NodeInputIterator implements InputIterator {
             try {
                 final ValueVector[] vectors = batch.getVectors();
 
-                // XXX Assume our vectors are propertly typed for now. (Casts!)
+                // XXX Assume our vectors are properly typed for now. (Casts!)
                 final long nodeId = ((BigIntVector) vectors[nodeIdIndex]).get(index);
                 final String[] labels = ((ListVector) vectors[labelsIndex]).getObject(index)
                         .stream().map(Object::toString).toArray(String[]::new);
@@ -108,7 +109,7 @@ public class NodeInputIterator implements InputIterator {
     }
 
     @Override
-    public boolean next(InputChunk chunk) throws IOException {
+    public boolean next(InputChunk chunk) {
         assert (chunk instanceof NodeChunk);
         try {
             final NodeChunk nodeChunk = (NodeChunk) chunk;

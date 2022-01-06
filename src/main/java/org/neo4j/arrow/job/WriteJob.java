@@ -49,11 +49,11 @@ public abstract class WriteJob extends Job {
         this.schema.complete(schema);
     }
 
-    public CompletableFuture<Schema> getSchema() {
+    protected CompletableFuture<Schema> getSchema() {
         return schema;
     }
 
-    public abstract Consumer<ArrowBatch> getConsumer();
+    public abstract Consumer<ArrowBatch> getConsumer(Schema schema);
 
     public BufferAllocator getAllocator() {
         return allocator;

@@ -474,11 +474,12 @@ public class Producer implements FlightProducer, AutoCloseable {
 
             // Process our stream. Everything in here needs to be checked for memory leaks!
             try (final VectorSchemaRoot streamRoot = flightStream.getRoot()) {
-                logger.info("client putting stream with schema: {}", streamRoot.getSchema());
-                job.onSchema(streamRoot.getSchema());
+                final Schema schema = streamRoot.getSchema();
+                logger.info("client putting stream with schema: {}", schema);
+                job.onSchema(schema);
 
                 // Consume the entire stream into memory
-                final Consumer<ArrowBatch> consumer = job.getConsumer();
+                final Consumer<ArrowBatch> consumer = job.getConsumer(schema);
                 final BufferAllocator jobAllocator = job.getAllocator();
                 long cnt = 0;
 

@@ -560,7 +560,7 @@ public class GdsWriteJob extends WriteJob {
     }
 
     @Override
-    public Consumer<ArrowBatch> getConsumer() {
+    public Consumer<ArrowBatch> getConsumer(Schema unused) {
         return batchConsumer;
     }
 }
