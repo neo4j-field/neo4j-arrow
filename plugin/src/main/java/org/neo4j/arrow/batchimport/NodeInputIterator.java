@@ -5,7 +5,6 @@ import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.neo4j.arrow.batch.ArrowBatch;
-import org.neo4j.internal.batchimport.InputIterator;
 import org.neo4j.internal.batchimport.input.InputChunk;
 import org.neo4j.internal.batchimport.input.InputEntityVisitor;
 
@@ -68,7 +67,7 @@ public class NodeInputIterator implements QueueInputIterator {
 
         @Override
         public boolean next(InputEntityVisitor visitor) throws IOException {
-            logger.info("next() @ {}", index);
+            logger.trace("next() @ {}", index);
 
             // Process a single "row" from the batch until we figure out the API
             try {
@@ -92,7 +91,7 @@ public class NodeInputIterator implements QueueInputIterator {
 
         @Override
         public void close() throws IOException {
-            logger.info("close()");
+            logger.trace("close()");
             try {
                 if (batch != null)
                     batch.close();
@@ -104,7 +103,7 @@ public class NodeInputIterator implements QueueInputIterator {
 
     @Override
     public InputChunk newChunk() {
-        logger.info("new chunk");
+        logger.trace("new chunk");
         return new NodeChunk();
     }
 
@@ -154,7 +153,7 @@ public class NodeInputIterator implements QueueInputIterator {
     @Override
     public void close() throws IOException {
         // TODO should this even happen? What's the API here?
-        logger.info("close()");
+        logger.trace("close()");
         try {
             for (ArrowBatch batch : queue) {
                 batch.close();

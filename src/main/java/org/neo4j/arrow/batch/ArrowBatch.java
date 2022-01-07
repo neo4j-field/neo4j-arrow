@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 /**
- *
+ * TBD
  */
 public class ArrowBatch implements AutoCloseable {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ArrowBatch.class);

@@ -68,7 +68,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
 
         @Override
         public boolean next(InputEntityVisitor visitor) throws IOException {
-            logger.info("next() @ {}", index);
+            logger.trace("next() @ {}", index);
 
             // Process a single "row" from the batch until we figure out the API
             try {
@@ -94,7 +94,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
 
         @Override
         public void close() throws IOException {
-            logger.info("close()");
+            logger.trace("close()");
             try {
                 if (batch != null)
                     batch.close();
@@ -106,7 +106,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
 
     @Override
     public InputChunk newChunk() {
-        logger.info("new chunk");
+        logger.trace("new chunk");
         return new RelsChunk();
     }
 
@@ -123,7 +123,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
                 batch = queue.poll(500, TimeUnit.MILLISECONDS);
 
                 if (batch != null) {
-                    logger.info("building RelsChunk from batch {}", batch);
+                    logger.trace("building RelsChunk from batch {}", batch);
                     // Assume only that field names are in same order as the vectors
                     final String[] names = batch.getFieldNames();
                     assert (names != null);
@@ -159,7 +159,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
 
     @Override
     public void close() throws IOException {
-        logger.info("close()");
+        logger.trace("close()");
         try {
             for (ArrowBatch batch : queue) {
                 batch.close();

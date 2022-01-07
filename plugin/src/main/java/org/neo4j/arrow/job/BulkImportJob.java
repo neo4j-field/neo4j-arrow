@@ -1,6 +1,7 @@
 package org.neo4j.arrow.job;
 
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.neo4j.arrow.action.BulkImportMessage;
 import org.neo4j.arrow.batch.ArrowBatch;
@@ -27,6 +28,7 @@ import org.neo4j.kernel.impl.scheduler.JobSchedulerFactory;
 import org.neo4j.kernel.impl.store.format.RecordFormatSelector;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.kernel.lifecycle.LifeSupport;
+import org.neo4j.kernel.lifecycle.LifecycleException;
 import org.neo4j.logging.NullLogProvider;
 import org.neo4j.logging.internal.LogService;
 import org.neo4j.logging.internal.SimpleLogService;
@@ -115,16 +117,15 @@ public class BulkImportJob extends WriteJob {
         future = CompletableFuture.allOf(nodeSchema, relsSchema)
                 .thenApplyAsync((unused) -> {
                     logger.info("building importer for database {}", dbName);
-                    setStatus(Status.PRODUCING);
 
                     lifeSupport.start();
-
+                    setStatus(Status.PRODUCING);
                     var importer = Neo4jProxy.instantiateBatchImporter(
                             BatchImporterFactory.withHighestPriority(),
                             dbLayout,
                             fs,
                             PageCacheTracer.NULL,
-                            1, //Runtime.getRuntime().availableProcessors(),
+                            4, // TODO: ? Runtime.getRuntime().availableProcessors(),
                             Optional.empty(),
                             logService,
                             Neo4jProxy.invisibleExecutionMonitor(),
@@ -151,12 +152,23 @@ public class BulkImportJob extends WriteJob {
                     }
                     return false;
                 }).handleAsync((aBoolean, throwable) -> {
-                    lifeSupport.stop();
+                    final String result = (aBoolean == null ? "failed" : "ok!");
+                    onCompletion(() -> result);
+
+                    try {
+                        lifeSupport.stop();
+                    } catch (LifecycleException e) {
+                        logger.error("failed to stop life support", e);
+                    }
+                    // Let's try proactive cleaning up here...
+                    AutoCloseables.closeNoChecked(bulkInput);
+                    AutoCloseables.closeNoChecked(allocator);
+
                     if (throwable != null) {
                         logger.error("oh crap", throwable);
                         return false;
                     }
-                    logger.info("finished job: {}", aBoolean);
+                    logger.info("finished BulkImportJob: {}", result);
                     return aBoolean;
                 });
     }
@@ -177,7 +189,7 @@ public class BulkImportJob extends WriteJob {
         }
     }
 
-    static class BulkInput implements Input {
+    static class BulkInput implements Input, AutoCloseable {
 
         private final BlockingQueue<ArrowBatch> incomingNodes = new LinkedBlockingQueue<>();
         private final BlockingQueue<ArrowBatch> incomingRels = new LinkedBlockingQueue<>();
@@ -224,6 +236,12 @@ public class BulkImportJob extends WriteJob {
         public Estimates calculateEstimates(PropertySizeCalculator valueSizeCalculator) throws IOException {
             // TODO wire in estimate details to a BulkImportMessage parameter
             return Input.knownEstimates(5, 1, 0, 0, 0, 0, 1);
+        }
+
+        @Override
+        public void close() throws Exception {
+            AutoCloseables.closeNoChecked(nodeIterator);
+            AutoCloseables.closeNoChecked(relsIterator);
         }
     }
 

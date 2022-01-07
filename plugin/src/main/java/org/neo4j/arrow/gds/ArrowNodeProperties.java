@@ -113,8 +113,7 @@ public class ArrowNodeProperties implements NodeProperties {
         throw new RuntimeException("invalid node id (not in idMap)");    }
 
     @Override
-    public
-    double[] doubleArrayValue(long nodeId) {
+    public double[] doubleArrayValue(long nodeId) {
         if (nodeId < maxId)
             return Arrays.stream(arrayReader.apply((int) nodeId)) // XXX cast
                     .mapToDouble(Number::doubleValue).toArray();
@@ -122,8 +121,7 @@ public class ArrowNodeProperties implements NodeProperties {
     }
 
     @Override
-    public
-    float[] floatArrayValue(long nodeId) {
+    public float[] floatArrayValue(long nodeId) {
         if (nodeId < maxId) {
             final Number[] data = arrayReader.apply((int) nodeId); // XXX cast
             final float[] floats = new float[data.length];
@@ -134,8 +132,7 @@ public class ArrowNodeProperties implements NodeProperties {
         throw new RuntimeException("invalid node id (not in idMap)");    }
 
     @Override
-    public
-    long[] longArrayValue(long nodeId) {
+    public long[] longArrayValue(long nodeId) {
         if (nodeId < maxId)
             return Arrays.stream(arrayReader.apply((int) nodeId)) // XXX cast
                     .mapToLong(Number::longValue).toArray();

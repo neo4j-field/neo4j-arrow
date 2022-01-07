@@ -115,11 +115,12 @@ public class GdsWriteJob extends WriteJob {
                     logger.info("GdsWriteJob completed! result: {}", result);
                     AutoCloseables.closeNoChecked(this);
 
+                    onCompletion(() -> result);
+
                     if (throwable != null) {
                         logger.error(throwable.getMessage(), throwable);
                         return false;
                     } else {
-                        onCompletion(() -> result);
                         return aBoolean;
                     }
                 });
