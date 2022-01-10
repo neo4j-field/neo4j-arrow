@@ -4,12 +4,16 @@ import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.complex.BaseListVector;
+import org.apache.arrow.vector.util.JsonStringArrayList;
 import org.neo4j.arrow.batch.ArrowBatch;
 import org.neo4j.internal.batchimport.input.InputChunk;
 import org.neo4j.internal.batchimport.input.InputEntityVisitor;
+import org.neo4j.values.storable.Values;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -44,7 +48,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
         private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(RelsChunk.class);
 
         private ArrowBatch batch = null;
-        private int index = 0;
+        private int row = 0;
         private int sourceIndex = -1;
         private int targetIndex = -1;
         private int typeIndex = -1;
@@ -63,33 +67,84 @@ public class RelationshipInputIterator implements QueueInputIterator {
             this.targetIndex = targetIndex;
             this.typeIndex = typeIndex;
 
-            index = 0;
+            row = 0;
         }
 
         @Override
         public boolean next(InputEntityVisitor visitor) throws IOException {
-            logger.trace("next() @ {}", index);
+            logger.trace("next() @ {}", row);
 
             // Process a single "row" from the batch until we figure out the API
             try {
                 final ValueVector[] vectors = batch.getVectors();
+                final String[] fieldNames = batch.getFieldNames();
 
-                // XXX Assume our vectors are properly typed for now. (Casts!)
-                final long sourceId = ((BigIntVector) vectors[sourceIndex]).get(index);
-                final long targetId = ((BigIntVector) vectors[targetIndex]).get(index);
-                final String type = new String(((VarCharVector) vectors[typeIndex]).get(index), StandardCharsets.UTF_8);
+                for (int idx = 0; idx < vectors.length; idx++) {
+                    if (idx == sourceIndex) {
+                        final long sourceId = ((BigIntVector) vectors[sourceIndex]).get(row);
+                        visitor.startId(sourceId);
+                    } else if (idx == targetIndex) {
+                        final long targetId = ((BigIntVector) vectors[targetIndex]).get(row);
+                        visitor.endId(targetId);
+                    } else if (idx == typeIndex) {
+                        final String type = new String(((VarCharVector) vectors[typeIndex]).get(row), StandardCharsets.UTF_8);
+                        visitor.type(type);
+                    } else {
+                        final ValueVector vector = vectors[idx];
 
-                visitor.startId(sourceId);
-                visitor.endId(targetId);
-                visitor.type(type);
+                        // TODO: the type detection should be cached. Should this be pulled up into ArrowBatch?
+                        if (vector instanceof VarCharVector) {
+                            final byte[] bytes = ((VarCharVector) vector).get(row);
+                            visitor.property(fieldNames[idx], new String(bytes, StandardCharsets.UTF_8));
+                        } else if (vector instanceof BaseListVector) {
+                            final Object value = vector.getObject(row);
+                            if (value instanceof JsonStringArrayList<?>) {
+                                // XXX Assume homogeneity as that's what the DB supports
+                                final int len = ((JsonStringArrayList<?>) value).size();
+                                if (len > 0) {
+                                    final Object head = ((JsonStringArrayList<?>) value).get(0);
+                                    Object[] values = null;
+                                    if (head instanceof Integer) {
+                                        values = new Integer[len];
+                                    } else if (head instanceof Long) {
+                                        values = new Long[len];
+                                    } else if (head instanceof Double) {
+                                        values = new Double[len];
+                                    } else if (head instanceof Float) {
+                                        values = new Float[len];
+                                    } else if (head instanceof String) {
+                                        values = new String[len];
+                                    } else {
+                                        logger.warn("unhandled JsonStringArrayList type: {}", head.getClass());
+                                    }
+                                    if (values != null) {
+                                        ((JsonStringArrayList<?>) value).toArray(values);
+                                        visitor.property(fieldNames[idx], values);
+                                    }
+                                } else {
+                                    visitor.property(fieldNames[idx], Values.EMPTY_INT_ARRAY);
+                                }
+                            } else {
+                                // XXX Hopefully this is a usable list ;)
+                                visitor.property(fieldNames[idx], value);
+                            }
+                        }  else {
+                            final Object value = vector.getObject(row);
+                            try {
+                                visitor.property(fieldNames[idx], value);
+                            } catch (IllegalArgumentException iae) {
+                                logger.warn(String.format("failed to set property from field '%s'", fieldNames[idx]), iae);
+                            }
+                        }
+                    }
+                }
                 visitor.endOfEntity();
-                // XXX skip properties for now
             } catch (Exception e) {
                 logger.error("oh crap", e);
             }
 
-            index++;
-            return (index < batch.getRowCount());
+            row++;
+            return (row < batch.getRowCount());
         }
 
         @Override

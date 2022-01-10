@@ -125,7 +125,7 @@ public class BulkImportJob extends WriteJob {
                             dbLayout,
                             fs,
                             PageCacheTracer.NULL,
-                            4, // TODO: ? Runtime.getRuntime().availableProcessors(),
+                            Runtime.getRuntime().availableProcessors(), // TODO: parameterize
                             Optional.empty(),
                             logService,
                             Neo4jProxy.invisibleExecutionMonitor(),
