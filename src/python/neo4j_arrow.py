@@ -190,7 +190,9 @@ class Neo4jArrow:
         if type(data) is not pa.lib.Table:
             table = pa.table(data=data, metadata=metadata)
         else:
-            table = data
+            # TODO: does this overwrite or append?
+            schema = data.schema.with_metadata(metadata)
+            table = data.replace_schema_metadata(schema.metadata)
         try:
             descriptor = pa.flight.FlightDescriptor.for_command(ticket.serialize())
             writer, _ = self._client.do_put(descriptor, table.schema, options=self._options)

@@ -58,14 +58,24 @@ public class BulkImportJob extends WriteJob {
     private final String username;
     private final String dbName;
 
-    private final Path homePath;
     private final FileSystemAbstraction fs;
     private final BulkInput bulkInput;
 
     @Override
-    public void onStreamComplete() {
-        super.onStreamComplete();
-        bulkInput.signalCompletion();
+    public void onStreamComplete(Schema schema) {
+        final Map<String, String> metadata = schema.getCustomMetadata();
+        assert (metadata != null); // XXX pretty sure this is guaranteed, but not sure
+
+        switch (metadata.getOrDefault(META_KEY, "")) {
+            case NODE_STREAM:
+                bulkInput.signalNodesComplete();
+                break;
+            case RELS_STREAM:
+                bulkInput.signalRelationshipsComplete();
+                break;
+            default:
+                throw new IllegalArgumentException("unexpected or missing schema metadata type field");
+        }
     }
 
     @Override
@@ -96,7 +106,7 @@ public class BulkImportJob extends WriteJob {
 
         // We need a reference to a GraphDatabaseAPI. Any reference will do.
         final GraphDatabaseAPI api = (GraphDatabaseAPI) dbms.database(GraphDatabaseSettings.SYSTEM_DATABASE_NAME);
-        this.homePath = api.databaseLayout().getNeo4jLayout().homeDirectory();
+        final Path homePath = api.databaseLayout().getNeo4jLayout().homeDirectory();
         this.fs = api.getDependencyResolver().resolveDependency(FileSystemAbstraction.class);
         this.bulkInput = new BulkInput(
                 msg.getIdField(), msg.getLabelsField(),
@@ -205,9 +215,16 @@ public class BulkImportJob extends WriteJob {
             this.relsIterator = RelationshipInputIterator.fromQueue(incomingRels, sourceField, targetField, typeField);
         }
 
-        public void signalCompletion() {
+        public void signalNodesComplete() {
             nodeIterator.closeQueue();
+        }
+
+        public void signalRelationshipsComplete() {
             relsIterator.closeQueue();
+        }
+
+        public boolean queuesOpen() {
+            return nodeIterator.isOpen() || relsIterator.isOpen();
         }
 
         @Override
@@ -233,7 +250,7 @@ public class BulkImportJob extends WriteJob {
         }
 
         @Override
-        public Estimates calculateEstimates(PropertySizeCalculator valueSizeCalculator) throws IOException {
+        public Estimates calculateEstimates(PropertySizeCalculator valueSizeCalculator) {
             // TODO wire in estimate details to a BulkImportMessage parameter
             return Input.knownEstimates(5, 1, 0, 0, 0, 0, 1);
         }
@@ -247,6 +264,16 @@ public class BulkImportJob extends WriteJob {
 
     public String getUsername() {
         return username;
+    }
+
+    @Override
+    public boolean isCancelled() {
+        return future.isCancelled();
+    }
+
+    @Override
+    public boolean isDone() {
+        return future.isDone();
     }
 
     @Override

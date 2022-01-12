@@ -488,7 +488,7 @@ public class Producer implements FlightProducer, AutoCloseable {
                         logger.info(String.format("consuming @ batch %,d each with %,d rows", cnt, streamRoot.getRowCount()));
                     }
                     final ArrowBatch batch = ArrowBatch.fromRoot(streamRoot, jobAllocator);
-                    logger.info("batch: {}", batch);
+                    logger.trace("batch: {}", batch);
                     consumer.accept(batch);
                     ackStream.onNext(PutResult.metadata(flightStream.getLatestMetadata()));
                     cnt++;
@@ -497,8 +497,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
                 // XXX need a way to guarantee we call this at the end (I think?)
                 flightStream.takeDictionaryOwnership();
-                job.onStreamComplete();
-
+                job.onStreamComplete(schema);
             } catch (Exception e) {
                 logger.error("error during batch unloading", e);
                 ackStream.onError(CallStatus.INTERNAL.withDescription(e.getMessage()).toRuntimeException());

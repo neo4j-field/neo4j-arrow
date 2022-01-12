@@ -39,7 +39,7 @@ public abstract class WriteJob extends Job {
         return streamComplete;
     }
 
-    public void onStreamComplete() {
+    public void onStreamComplete(Schema schema) {
         logger.info("stream completed");
         streamComplete.complete(null);
     }

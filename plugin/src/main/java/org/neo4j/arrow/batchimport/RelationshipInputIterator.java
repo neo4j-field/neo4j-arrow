@@ -1,9 +1,7 @@
 package org.neo4j.arrow.batchimport;
 
 import org.apache.arrow.util.AutoCloseables;
-import org.apache.arrow.vector.BigIntVector;
-import org.apache.arrow.vector.ValueVector;
-import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
 import org.apache.arrow.vector.util.JsonStringArrayList;
 import org.neo4j.arrow.batch.ArrowBatch;
@@ -13,7 +11,6 @@ import org.neo4j.values.storable.Values;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,8 +37,15 @@ public class RelationshipInputIterator implements QueueInputIterator {
 
     @Override
     public void closeQueue() {
-        logger.info("closing queues");
+        logger.info("closing Relationship queue");
+        Exception e = new RuntimeException();
+        e.printStackTrace();
         queueOpen.set(false);
+    }
+
+    @Override
+    public boolean isOpen() {
+        return queueOpen.get();
     }
 
     private static class RelsChunk implements InputChunk {
@@ -54,7 +58,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
         private int typeIndex = -1;
 
         public void offerBatch(ArrowBatch batch, int sourceIndex, int targetIndex, int typeIndex) {
-            logger.info("setting batch {}, sourceIndex = {}, targetIndex = {}, typeIndex = {}",
+            logger.debug("setting batch {}, sourceIndex = {}, targetIndex = {}, typeIndex = {}",
                     batch, sourceIndex, targetIndex, typeIndex);
 
             if (this.batch != null) {
@@ -71,7 +75,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
         }
 
         @Override
-        public boolean next(InputEntityVisitor visitor) throws IOException {
+        public boolean next(InputEntityVisitor visitor) {
             logger.trace("next() @ {}", row);
 
             // Process a single "row" from the batch until we figure out the API
@@ -80,18 +84,19 @@ public class RelationshipInputIterator implements QueueInputIterator {
                 final String[] fieldNames = batch.getFieldNames();
 
                 for (int idx = 0; idx < vectors.length; idx++) {
+                    final ValueVector vector = vectors[idx];
+
                     if (idx == sourceIndex) {
-                        final long sourceId = ((BigIntVector) vectors[sourceIndex]).get(row);
+                        final long sourceId = ((BigIntVector) vector).get(row);
                         visitor.startId(sourceId);
                     } else if (idx == targetIndex) {
-                        final long targetId = ((BigIntVector) vectors[targetIndex]).get(row);
+                        final long targetId = ((BigIntVector) vector).get(row);
                         visitor.endId(targetId);
                     } else if (idx == typeIndex) {
-                        final String type = new String(((VarCharVector) vectors[typeIndex]).get(row), StandardCharsets.UTF_8);
+                        final String type = new String(((VarCharVector) vector).get(row), StandardCharsets.UTF_8);
                         visitor.type(type);
-                    } else {
-                        final ValueVector vector = vectors[idx];
-
+                    } else if (!vector.isNull(row)) {
+                        // Skip null.
                         // TODO: the type detection should be cached. Should this be pulled up into ArrowBatch?
                         if (vector instanceof VarCharVector) {
                             final byte[] bytes = ((VarCharVector) vector).get(row);
@@ -128,7 +133,16 @@ public class RelationshipInputIterator implements QueueInputIterator {
                                 // XXX Hopefully this is a usable list ;)
                                 visitor.property(fieldNames[idx], value);
                             }
-                        }  else {
+                        } else if (vector instanceof Float4Vector) {
+                            final float value = ((Float4Vector) vector).get(row);
+                            if (Float.isFinite(value))
+                                visitor.property(fieldNames[idx], value);
+                        } else if (vector instanceof Float8Vector) {
+                            final double value = ((Float8Vector) vector).get(row);
+                            if (Double.isFinite(value))
+                                visitor.property(fieldNames[idx], value);
+                        } else {
+                            // And the rest...
                             final Object value = vector.getObject(row);
                             try {
                                 visitor.property(fieldNames[idx], value);
@@ -139,6 +153,9 @@ public class RelationshipInputIterator implements QueueInputIterator {
                     }
                 }
                 visitor.endOfEntity();
+            } catch (ClassCastException cce) {
+                logger.error("class cast issue!", cce);
+                throw new RuntimeException("class cast issue!");
             } catch (Exception e) {
                 logger.error("oh crap", e);
             }
@@ -173,9 +190,8 @@ public class RelationshipInputIterator implements QueueInputIterator {
             final RelsChunk relsChunk = (RelsChunk) chunk;
 
             // XXX poll interval guess
-            ArrowBatch batch = null;
             while (queueOpen.get() || !queue.isEmpty()) {
-                batch = queue.poll(500, TimeUnit.MILLISECONDS);
+                final ArrowBatch batch = queue.poll(500, TimeUnit.MILLISECONDS);
 
                 if (batch != null) {
                     logger.trace("building RelsChunk from batch {}", batch);
@@ -209,6 +225,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
         } catch (Exception e) {
             logger.error("oh crap", e);
         }
+        logger.info("done producing RelsChunks");
         return false;
     }
 

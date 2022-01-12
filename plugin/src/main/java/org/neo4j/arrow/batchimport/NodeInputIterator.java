@@ -1,23 +1,17 @@
 package org.neo4j.arrow.batchimport;
 
 import org.apache.arrow.util.AutoCloseables;
-import org.apache.arrow.vector.BigIntVector;
-import org.apache.arrow.vector.ValueVector;
-import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.complex.BaseListVector;
-import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.util.JsonStringArrayList;
-import org.apache.arrow.vector.util.Text;
 import org.neo4j.arrow.batch.ArrowBatch;
 import org.neo4j.internal.batchimport.input.InputChunk;
 import org.neo4j.internal.batchimport.input.InputEntityVisitor;
-import org.neo4j.values.storable.Value;
 import org.neo4j.values.storable.Values;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -43,8 +37,15 @@ public class NodeInputIterator implements QueueInputIterator {
 
     @Override
     public void closeQueue() {
-        logger.info("closing queues");
+        logger.info("closing Node queue");
+        Exception e = new RuntimeException();
+        e.printStackTrace();
         queueOpen.set(false);
+    }
+
+    @Override
+    public boolean isOpen() {
+        return queueOpen.get();
     }
 
     /**
@@ -60,7 +61,7 @@ public class NodeInputIterator implements QueueInputIterator {
         private int labelsIndex = -1;
 
         public void offerBatch(ArrowBatch batch, int nodeIndex, int labelsIndex) {
-            logger.info("setting batch {}, nodeIndex = {}, labelsIndex = {}", batch, nodeIndex, labelsIndex);
+            logger.debug("setting batch {}, nodeIndex = {}, labelsIndex = {}", batch, nodeIndex, labelsIndex);
 
             if (this.batch != null) {
                 // XXX should we be the ones closing this?
@@ -75,7 +76,7 @@ public class NodeInputIterator implements QueueInputIterator {
         }
 
         @Override
-        public boolean next(InputEntityVisitor visitor) throws IOException {
+        public boolean next(InputEntityVisitor visitor) {
             logger.trace("next() @ {}", row);
 
             // Process a single "row" from the batch until we figure out the API
@@ -85,16 +86,18 @@ public class NodeInputIterator implements QueueInputIterator {
 
                 // XXX Assume our vectors are properly typed for now. (Yuck, casts!)
                 for (int idx = 0; idx < vectors.length; idx++) {
+                    final ValueVector vector = vectors[idx];
+
                     if (idx == nodeIdIndex) {
-                        final long nodeId = ((BigIntVector) vectors[idx]).get(row);
+                        final long nodeId = ((BigIntVector) vector).get(row);
                         visitor.id(nodeId);
                     } else if (idx == labelsIndex) {
-                        final String[] labels = ((ListVector) vectors[idx]).getObject(row)
+                        // TODO: handle scalar labels
+                        final String[] labels = ((ListVector) vector).getObject(row)
                                 .stream().map(Object::toString).toArray(String[]::new);
                         visitor.labels(labels);
-                    } else {
-                        final ValueVector vector = vectors[idx];
-
+                    } else if (!vector.isNull(row)) {
+                        // Skip nulls.
                         // TODO: the type detection should be cached. Should this be pulled up into ArrowBatch?
                         if (vector instanceof VarCharVector) {
                             final byte[] bytes = ((VarCharVector) vector).get(row);
@@ -131,7 +134,16 @@ public class NodeInputIterator implements QueueInputIterator {
                                 // XXX Hopefully this is a usable list ;)
                                 visitor.property(fieldNames[idx], value);
                             }
-                        }  else {
+                        } else if (vector instanceof Float4Vector) {
+                            final float value = ((Float4Vector) vector).get(row);
+                            if (Float.isFinite(value))
+                                visitor.property(fieldNames[idx], value);
+                        } else if (vector instanceof Float8Vector) {
+                            final double value = ((Float8Vector) vector).get(row);
+                            if (Double.isFinite(value))
+                                visitor.property(fieldNames[idx], value);
+                        } else {
+                            // And the rest...
                             final Object value = vector.getObject(row);
                             try {
                                 visitor.property(fieldNames[idx], value);
@@ -142,6 +154,9 @@ public class NodeInputIterator implements QueueInputIterator {
                     }
                 }
                 visitor.endOfEntity();
+            } catch (ClassCastException cce) {
+                logger.error("class cast issue!", cce);
+                throw new RuntimeException("class cast failure");
             } catch (Exception e) {
                 logger.error("oh crap", e);
             }
@@ -175,12 +190,11 @@ public class NodeInputIterator implements QueueInputIterator {
             final NodeChunk nodeChunk = (NodeChunk) chunk;
 
             // XXX poll interval guess
-            ArrowBatch batch = null;
             while (queueOpen.get() || !queue.isEmpty()) {
-                batch = queue.poll(500, TimeUnit.MILLISECONDS);
+                final ArrowBatch batch = queue.poll(500, TimeUnit.MILLISECONDS);
 
                 if (batch != null) {
-                    logger.info("building NodeChunk from batch {}", batch);
+                    logger.debug("building NodeChunk from batch {}", batch);
                     // Assume only that field names are in same order as the vectors
                     final String[] names = batch.getFieldNames();
                     assert (names != null);
@@ -208,6 +222,7 @@ public class NodeInputIterator implements QueueInputIterator {
         } catch (Exception e) {
             logger.error("oh crap", e);
         }
+        logger.info("done producing NodeChunks");
         return false;
     }
 
