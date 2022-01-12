@@ -220,7 +220,7 @@ public class NodeInputIterator implements QueueInputIterator {
         } catch (Exception e) {
             logger.error("oh crap", e);
         }
-        logger.info("done producing NodeChunks");
+        logger.trace("done producing NodeChunks");
         return false;
     }
 

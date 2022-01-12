@@ -223,7 +223,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
         } catch (Exception e) {
             logger.error("oh crap", e);
         }
-        logger.info("done producing RelsChunks");
+        logger.trace("done producing RelsChunks");
         return false;
     }
 
