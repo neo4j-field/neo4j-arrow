@@ -511,7 +511,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     @Override
     public void doAction(CallContext context, Action action, StreamListener<Result> listener) {
-        logger.info("doAction called: action.type={}, peer={}", action.getType(), context.peerIdentity());
+        logger.debug("doAction called: action.type={}, peer={}", action.getType(), context.peerIdentity());
 
         ActionHandler handler = handlerMap.get(action.getType());
         if (handler == null) {

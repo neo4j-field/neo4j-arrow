@@ -37,9 +37,7 @@ public class NodeInputIterator implements QueueInputIterator {
 
     @Override
     public void closeQueue() {
-        logger.info("closing Node queue");
-        Exception e = new RuntimeException();
-        e.printStackTrace();
+        logger.trace("closing Node queue");
         queueOpen.set(false);
     }
 

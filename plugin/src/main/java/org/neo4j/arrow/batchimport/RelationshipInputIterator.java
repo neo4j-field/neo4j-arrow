@@ -37,9 +37,7 @@ public class RelationshipInputIterator implements QueueInputIterator {
 
     @Override
     public void closeQueue() {
-        logger.info("closing Relationship queue");
-        Exception e = new RuntimeException();
-        e.printStackTrace();
+        logger.trace("closing Relationship queue");
         queueOpen.set(false);
     }
 
