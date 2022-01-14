@@ -5,4 +5,4 @@ build/
 .#*
 venv/
 __pycache__/
-/neo4j_arrow/neo4j_arrow.iml
+/python/neo4j_arrow.iml
