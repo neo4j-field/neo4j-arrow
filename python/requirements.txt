@@ -1,3 +1,1 @@
-matplotlib==3.4.2
-neo4j==4.3.8
 pyarrow==6.0.1
