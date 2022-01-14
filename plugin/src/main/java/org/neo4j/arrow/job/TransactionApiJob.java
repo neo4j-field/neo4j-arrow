@@ -110,20 +110,20 @@ public class TransactionApiJob extends ReadJob {
                                         int spunout = 10;
                                         final AnyValue[] copy = Arrays.copyOf(values, values.length);
                                         while (!queue.offerLast(copy, 10, TimeUnit.SECONDS)) {
-                                            log.info("...timed out adding to queue. Trying again.");
+                                            log.warn("...timed out adding to queue. Trying again.");
                                             spunout--;
                                             if (spunout < 0) {
-                                                log.error("spunout adding to queue :-(");
+                                                log.error("spun out adding to queue :-(");
                                                 break;
                                             }
                                         }
 
                                         if (rowNum == 0) {
-                                            log.info("producer completing the firstRecordReady future");
+                                            log.debug("producer completing the firstRecordReady future");
                                             firstRecordReady.complete(copy);
                                         }
                                         if (rowNum % 50_000 == 0)
-                                            log.info("added row %d (queue size = %d)", rowNum, queue.size());
+                                            log.debug("added row %d (queue size = %d)", rowNum, queue.size());
                                         rowNum++;
                                     } catch (Exception e) {
                                         log.error("failed to add work to the queue", e);
@@ -153,25 +153,24 @@ public class TransactionApiJob extends ReadJob {
                         } catch (Exception e) {
                             e.printStackTrace();
                         }
-                        log.info("finished requesting all rows");
+                        log.debug("finished requesting all rows");
                     });
 
                     // onFirstRecord
-                    log.info("...waiting for first item before blasting off 🚀");
                     // TODO: for now wait up to a minute for the first result...needs future work
                     AnyValue[] firstValues;
                     try {
                         firstValues = firstRecordReady.get(5, TimeUnit.SECONDS);
-                        log.info("first record should be ready!");
+                        log.debug("first record should be ready!");
                         for (AnyValue av : firstValues)
-                            log.info("av: " + av.getTypeName());
+                            log.debug("av: " + av.getTypeName());
                     } catch (Exception e) {
                         log.error("bad news bears with the first record!");
                         throw CallStatus.INTERNAL.withCause(e).toRuntimeException();
                     }
 
                     final CypherRecord firstRecord = CypherRecord.wrap(fieldNames, firstValues);
-                    log.info("processing first record...");
+                    log.debug("processing first record...");
                     onFirstRecord(firstRecord);
 
                     // Feed the first record, then go hog wild
@@ -181,7 +180,7 @@ public class TransactionApiJob extends ReadJob {
                     for (int i = 0; i < futures.length; i++) {
                         final int partitionId = i;
                         futures[i] = CompletableFuture.runAsync(() -> {
-                            log.info("worker for partitionId %d ready", partitionId);
+                            log.debug("worker for partitionId %d ready", partitionId);
                             try {
                                 while (!queue.isEmpty() || !feeding.isDone()) {
                                     final AnyValue[] work = queue.pollFirst(10, TimeUnit.MILLISECONDS);
@@ -195,11 +194,11 @@ public class TransactionApiJob extends ReadJob {
                                 log.error("queue consumer errored: %s", e.getMessage());
                                 e.printStackTrace();
                             }
-                        }).thenRunAsync(() -> log.info("completed queue worker task (partitionId: %d)", partitionId));
+                        }).thenRunAsync(() -> log.debug("completed queue worker task (partitionId: %d)", partitionId));
                     }
 
                     // And we wait...
-                    log.info("waiting for %d workers to complete...", futures.length);
+                    log.debug("waiting for %d workers to complete...", futures.length);
                     CompletableFuture.allOf(futures)
                             .exceptionally(throwable -> {
                                 log.error("oh no...%s", throwable.getMessage());
