@@ -46,6 +46,7 @@ public class ServerInfoHandler implements ActionHandler {
     protected static Map<String, String> cachedArrowVersion = null;
 
     protected Map<String, String> getJobs() {
+        // TODO: accept a ticket or job id as filter?
         return jobMap.values()
                 .stream()
                 .collect(Collectors.toUnmodifiableMap(
@@ -92,6 +93,7 @@ public class ServerInfoHandler implements ActionHandler {
             Map<String, String> map;
             switch (action.getType().toLowerCase()) {
                 case SERVER_JOBS:
+                    // TODO: support filtering by a ticket
                     map = getJobs();
                     break;
                 case SERVER_VERSION:

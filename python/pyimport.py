@@ -1,22 +1,98 @@
 import pyarrow as pa
 import pyarrow.csv as csv
 
+from collections import namedtuple
 from enum import Enum
 from os import curdir, listdir
 import os.path as ospath
 
+# Default globals
 _DIR = ospath.abspath(curdir)
+_GLOBAL_ID = 'Global'
 
-_NODE_ID = 'ID'
-_START_ID = 'START_ID'
-_END_ID = 'END_ID'
-
+# Types, etc.
 class EntityType(Enum):
-    UNKNOWN = 0
-    NODE = 1
-    REL = 2
+    UNKNOWN = 'UNKNOWN'
+    NODE = 'NODE'
+    REL = 'REL'
 
-def load_dir(path):
+    @classmethod
+    def from_str(cls, s):
+        for _type in EntityType:
+            if _type.value == s:
+                return _type
+        return EntityType.UNKNOWN
+
+class FieldType(Enum):
+    """
+    Type of importable field. See the ops manual:
+    https://neo4j.com/docs/operations-manual/current/tools/neo4j-admin/neo4j-admin-import/#import-tool-header-format-properties
+
+    XXX: Not all types supported.
+    """
+    NODE_ID = 'ID'
+    START_ID = 'START_ID'
+    END_ID = 'END_ID'
+    STRING = 'string'
+    SHORT = 'short'
+    INT = 'int'
+    LONG = 'long'
+    FLOAT = 'float'
+    DOUBLE = 'double'
+    BOOLEAN = 'boolean'
+    BYTE = 'byte'
+
+    @classmethod
+    def from_str(cls, s):
+        for _type in FieldType:
+            if _type.value == s:
+                return _type
+        return FieldType.STRING
+
+Entity = namedtuple('Entity', ['type', 'fields', 'files'],
+                    defaults=[EntityType.UNKNOWN, [], []])
+Field = namedtuple('Field', ['type', 'name', 'id_space'],
+                   defaults=[FieldType.STRING, '', _GLOBAL_ID])
+
+def _include_cols(fields: list[Field]):
+    """
+    Identify which columns to include in CSV parsing. Unmatched columns will
+    be ignored.
+    :param fields: list of Fields
+    :return: list of field names as strings
+    """
+    # TODO
+    return [f.name for f in fields]
+
+def _parse_field(field: str):
+    """
+    Parse the given string representation of a CSV import field.
+
+    :param field: string or string-like field input
+    :return: a new Field
+    """
+    name, _type = str(field).split(':')
+    if _type.contains('(') and _type.endwith(')'):
+        _type, id_space = _type.split('(')[0:-1]
+        return Field(_type, name, id_space)
+    return Field(_type, name)
+
+
+def _parse_header(header: str, delimiter=','):
+    """
+    Parse a bulk-import header, pulling out field names, types, and id spaces.
+
+    Example header:
+        personId:ID(Person),age:int,active:boolean,name,vector:float[]
+    :param header: string or string-like file header to parse
+    :param delimiter: column delimiter (default ',')
+    :return: list of parsed Fields
+    """
+    parts = str(header).split(delimiter)
+    return [_parse_field(f) for f in parts]
+
+
+def load_dir(path: str, delimiter=','):
     """
     Import all CSV's in a given directory path.
 
@@ -39,7 +115,9 @@ def load_dir(path):
         extra = {}
         if target.startswith('node') and target.count('_') == 1:
             extra = { '_labels_': [['Node']] }
-        table, entity_type = load_import_csv(target, basedir=path, extra_cols=extra)
+        table, entity_type = load_import_csv(target, basedir=path,
+                                             delimiter=delimiter,
+                                             extra_cols=extra)
         if entity_type == EntityType.NODE:
             nodes.append(table)
         elif entity_type == EntityType.REL:
@@ -47,14 +125,16 @@ def load_dir(path):
         else:
             print(f'bad import of target {target}')
 
-    # build final master tables. need promotion to NULL or NAN for sparse properties.
+    # Build final master tables. Need promotion to NULL or NAN for sparse
+    # properties.
+    # TODO: promote=True results in data copy, but use this shortcut for now
     node_table = pa.concat_tables(nodes, promote=True)
     rels_table = pa.concat_tables(rels, promote=True)
 
     return node_table, rels_table
 
 
-def load_import_csv(prefix, basedir=_DIR, extra_cols={}):
+def load_import_csv(prefix: str, basedir=_DIR, delimiter=',', extra_cols={}):
     """
     Load all import CSV files with the same 'prefix' (e.g. 'nodes_USER_') from
     the given basedir path.
@@ -75,49 +155,41 @@ def load_import_csv(prefix, basedir=_DIR, extra_cols={}):
             f for f in listdir(basedir)
             if f.startswith(prefix) and not 'header' in f
     ]
-    fields, all_fields = [], []
-    entity_type = EntityType.UNKNOWN
-
     # Look at the header file to determine schema and data type (node vs rels)
-    with open(ospath.join(basedir, f'{prefix}header.csv')) as header:
-        for col in header.readline().rstrip().split(','):
-            name, _type = col.split(':')
-            if _type == _START_ID or _type == _END_ID:
-                entity_type = EntityType.REL
-                all_fields.append(_type)
-                fields.append(_type)
-            elif _type == _NODE_ID:
-                entity_type = EntityType.NODE
-                all_fields.append(_type)
-                fields.append(_type)
-            elif '[]' in _type:
-                # we don't handle arrays yet in PyArrow :(
-                all_fields.append(name)
-            else:
-                all_fields.append(name)
-                fields.append(name)
-
-        if entity_type == EntityType.UNKNOWN:
-            print(f'!!! missing key schema fields: {[_NODE_ID] + list(_REL_TYPES)}')
-            return None
-
+    fields = []
+    with open(ospath.join(basedir, f'{prefix}header.csv')) as header_file:
+        line = header_file.readline().strip()
+        fields = _parse_header(line, delimiter=delimiter)
     print(f'files = {files}\nfields = {fields}\n')
 
-    tables = []
-    for _file in files:
-        path = ospath.join(basedir, _file)
-        print(f'reading {path}...')
-        read_opts = csv.ReadOptions(column_names=all_fields)
-        convert_opts = csv.ConvertOptions(include_columns=fields)
-        stream = csv.open_csv(path, read_options=read_opts, convert_options=convert_opts)
-        table = stream.read_all()
+    entity_type = None
+    for field in fields:
+        if field.type == FieldType.NODE_ID:
+            entity_type = EntityType.NODE
+            break
+        elif field.type in [FieldType.START_ID, FieldType.END_ID]:
+            entity_type = EntityType.REL
+            break
+    entity = Entity(entity_type, fields, files)
 
-        # see if we can discern a label or type
-        parts = _file.split('_')
+    tables = []
+    for filename in entity.files:
+        path = ospath.join(basedir, filename)
+        print(f'reading {path}...')
+        read_opts = csv.ReadOptions(
+            column_names=[f.name for f in entity.fields])
+        convert_opts = csv.ConvertOptions(
+            include_columns=_include_cols(entity.fields))
+        table = csv.read_csv(path, read_options=read_opts,
+                             convert_options=convert_opts)
+
+        # See if we can discern a label or type
+        # TODO: split this out into special handling logic as the labels or
+        #       types might come from different places
+        parts = filename.split('_')
         if len(parts) > 2:
-            name = ''
             value = '_'.join(parts[1:-1])
-            if entity_type == EntityType.NODE:
+            if entity.type == EntityType.NODE:
                 name = '_labels_'
                 value = [value]
             else:
@@ -125,11 +197,11 @@ def load_import_csv(prefix, basedir=_DIR, extra_cols={}):
             col = pa.array([value] * len(table))
             table = table.append_column(name, col)
 
-        # gds csv export doesn't make labels if we use random generator :(
+        # GDS csv export doesn't make labels if we use random generator :(
         for col in extra_cols:
             extra = pa.array(extra_cols[col] * len(table))
             table = table.append_column(col, extra)
         tables.append(table)
 
-    return pa.concat_tables(tables), entity_type
+    return pa.concat_tables(tables), entity
 
