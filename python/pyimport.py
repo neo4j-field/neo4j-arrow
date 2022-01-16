@@ -1,8 +1,9 @@
 import pyarrow as pa
-import pyarrow.csv as csv
+import pyarrow.csv
+from pyarrow.lib import Array, Table
 
-from collections import namedtuple
 from enum import Enum
+from typing import cast, Any, Dict, List, NamedTuple, Tuple, Union
 from os import curdir, listdir
 import os.path as ospath
 
@@ -17,7 +18,7 @@ class EntityType(Enum):
     REL = 'REL'
 
     @classmethod
-    def from_str(cls, s):
+    def from_str(cls, s: str) -> EntityType:
         for _type in EntityType:
             if _type.value == s:
                 return _type
@@ -43,18 +44,23 @@ class FieldType(Enum):
     BYTE = 'byte'
 
     @classmethod
-    def from_str(cls, s):
+    def from_str(cls, s: str) -> FieldType:
         for _type in FieldType:
             if _type.value == s:
                 return _type
         return FieldType.STRING
 
-Entity = namedtuple('Entity', ['type', 'fields', 'files'],
-                    defaults=[EntityType.UNKNOWN, [], []])
-Field = namedtuple('Field', ['type', 'name', 'id_space'],
-                   defaults=[FieldType.STRING, '', _GLOBAL_ID])
+class Entity(NamedTuple):
+    type: EntityType = EntityType.UNKNOWN
+    fields: List[Field] = []
+    files: List[str] = []
 
-def _include_cols(fields: list[Field]):
+class Field(NamedTuple):
+    name: str
+    type: FieldType = FieldType.STRING
+    id_space: str = _GLOBAL_ID
+
+def _include_cols(fields: List[Field]) -> List[str]:
     """
     Identify which columns to include in CSV parsing. Unmatched columns will
     be ignored.
@@ -64,7 +70,7 @@ def _include_cols(fields: list[Field]):
     # TODO
     return [f.name for f in fields]
 
-def _parse_field(field: str):
+def _parse_field(field: str) -> Field:
     """
     Parse the given string representation of a CSV import field.
 
@@ -72,13 +78,13 @@ def _parse_field(field: str):
     :return: a new Field
     """
     name, _type = str(field).split(':')
-    if _type.contains('(') and _type.endwith(')'):
+    if '(' in _type and _type.endswith(')'):
         _type, id_space = _type.split('(')[0:-1]
-        return Field(_type, name, id_space)
-    return Field(_type, name)
+        return Field(name, FieldType.from_str(_type), id_space)
+    return Field(name, FieldType.from_str(_type))
 
 
-def _parse_header(header: str, delimiter=','):
+def _parse_header(header: str, delimiter: str = ',') -> List[Field]:
     """
     Parse a bulk-import header, pulling out field names, types, and id spaces.
 
@@ -92,7 +98,7 @@ def _parse_header(header: str, delimiter=','):
     return [_parse_field(f) for f in parts]
 
 
-def load_dir(path: str, delimiter=','):
+def load_dir(path: str, delimiter: str =',') -> Tuple[Any, Any]:
     """
     Import all CSV's in a given directory path.
 
@@ -115,12 +121,12 @@ def load_dir(path: str, delimiter=','):
         extra = {}
         if target.startswith('node') and target.count('_') == 1:
             extra = { '_labels_': [['Node']] }
-        table, entity_type = load_import_csv(target, basedir=path,
+        table, entity = load_import_csv(target, basedir=path,
                                              delimiter=delimiter,
                                              extra_cols=extra)
-        if entity_type == EntityType.NODE:
+        if entity.type == EntityType.NODE:
             nodes.append(table)
-        elif entity_type == EntityType.REL:
+        elif entity.type == EntityType.REL:
             rels.append(table)
         else:
             print(f'bad import of target {target}')
@@ -134,7 +140,8 @@ def load_dir(path: str, delimiter=','):
     return node_table, rels_table
 
 
-def load_import_csv(prefix: str, basedir=_DIR, delimiter=',', extra_cols={}):
+def load_import_csv(prefix: str, basedir: str = _DIR, delimiter: str = ',',
+                    extra_cols: Dict[Any, Any] = {}) -> Tuple[Table, Entity]:
     """
     Load all import CSV files with the same 'prefix' (e.g. 'nodes_USER_') from
     the given basedir path.
@@ -149,7 +156,7 @@ def load_import_csv(prefix: str, basedir=_DIR, delimiter=',', extra_cols={}):
 
     Returns a tuple of:
         - new PyArrow Table from the CSV data files
-        - EntityType for the table (e.g. Node vs Rel)
+        - Entity for the table (e.g. Node vs Rel)
     """
     files = [
             f for f in listdir(basedir)
@@ -170,22 +177,23 @@ def load_import_csv(prefix: str, basedir=_DIR, delimiter=',', extra_cols={}):
         elif field.type in [FieldType.START_ID, FieldType.END_ID]:
             entity_type = EntityType.REL
             break
-    entity = Entity(entity_type, fields, files)
+    entity = Entity(entity_type or EntityType.UNKNOWN, fields, files)
 
     tables = []
     for filename in entity.files:
         path = ospath.join(basedir, filename)
         print(f'reading {path}...')
-        read_opts = csv.ReadOptions(
+        read_opts = pa.csv.ReadOptions(
             column_names=[f.name for f in entity.fields])
-        convert_opts = csv.ConvertOptions(
+        convert_opts = pa.csv.ConvertOptions(
             include_columns=_include_cols(entity.fields))
-        table = csv.read_csv(path, read_options=read_opts,
+        table = pa.csv.read_csv(path, read_options=read_opts,
                              convert_options=convert_opts)
 
         # See if we can discern a label or type
         # TODO: split this out into special handling logic as the labels or
         #       types might come from different places
+        value: Union[str, List[str]]
         parts = filename.split('_')
         if len(parts) > 2:
             value = '_'.join(parts[1:-1])
@@ -194,13 +202,12 @@ def load_import_csv(prefix: str, basedir=_DIR, delimiter=',', extra_cols={}):
                 value = [value]
             else:
                 name = '_type_'
-            col = pa.array([value] * len(table))
-            table = table.append_column(name, col)
+            table = table.append_column(name, pa.array([value] * len(table)))
 
         # GDS csv export doesn't make labels if we use random generator :(
         for col in extra_cols:
             extra = pa.array(extra_cols[col] * len(table))
-            table = table.append_column(col, extra)
+            table = table.append_column(str(col), extra)
         tables.append(table)
 
     return pa.concat_tables(tables), entity
