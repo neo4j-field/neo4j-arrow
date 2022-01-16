@@ -5,7 +5,8 @@ from collections import abc
 from enum import Enum
 from os import environ as env
 from time import sleep, time
-from typing import cast, Dict, Generator, Iterable, Iterator, List, Tuple, TypeVar, Union
+from typing import cast, Any, Dict, Generator, Iterable, Iterator, List, \
+    Optional, Tuple, TypeVar, Union
 
 import pyarrow as pa
 from pyarrow.lib import ArrowKeyError, RecordBatch, Schema, Table
@@ -50,18 +51,18 @@ def _coerce_ticket(maybe_ticket: Union[bytes, flight.Ticket]) -> flight.Ticket:
     return ticket
 
 
-def _coerce_table(data: Union[dict, RecordBatch, Table]) -> Table:
+def _coerce_table(data: Union[Dict[Any, Any], RecordBatch, Table]) -> Table:
     """
     Coerce a TableLike value into a PyArrow Table.
     :param data: coercible value
     :return: a PyArrow Table
     """
     if type(data) is dict:
-        return Table.from_pydict(cast(dict, data))
+        return Table.from_pydict(data)
     elif type(data) is RecordBatch:
-        return Table.from_batches([cast(RecordBatch, data)])
+        return Table.from_batches([data])
     elif type(data) is Table:
-        return cast(Table, data)
+        return data
     # yolo
     return pa.table(data=data)
 
@@ -115,21 +116,25 @@ class Neo4jArrow:
         """
         return list(self._client.list_flights(None, self._options))
 
-    def info(self) -> dict:
+    def info(self) -> Dict[str, Any]:
         """
         Get info on the Neo4j Arrow server
         :return: metadata describing Neo4j Arrow server (e.g. version)
         """
         result = self._client.do_action((_JOB_INFO, b''), self._options)
-        return json.loads(next(result).body.to_pybytes())
+        obj = json.loads(next(result).body.to_pybytes())
+        if type(obj) is dict:
+            return obj
+        raise RuntimeError("server returned unexpected data format")
 
-    def _submit(self, action) -> flight.Ticket:
+    def _submit(self, action: Union[Tuple[str, bytes],
+                                    flight.Action]) -> flight.Ticket:
         """Attempt to ticket the given action/job"""
         results = self._client.do_action(action, self._options)
         return flight.Ticket.deserialize((next(results).body.to_pybytes()))
 
     def cypher(self, cypher: str, database: str = 'neo4j',
-               params: dict = None) -> flight.Ticket:
+               params: Optional[Dict[str, Any]] = None) -> flight.Ticket:
         """Submit a Cypher job with optional parameters. Returns a ticket."""
         cypher_bytes = cypher.encode('utf8')
         db_bytes = database.encode('utf8')
@@ -150,8 +155,10 @@ class Neo4jArrow:
         return self._submit((_JOB_CYPHER, buffer))
 
     def gds_nodes(self, graph: str, database: str = 'neo4j',
-                  properties: List[str] = None, filters: List[str] = None,
-                  node_id: str = '', extra: dict = None) -> flight.Ticket:
+                  properties: Optional[List[str]] = None,
+                  filters: Optional[List[str]] = None,
+                  node_id: str = '',
+                  extra: Optional[Dict[str, Any]] = None) -> flight.Ticket:
         """Submit a GDS job for streaming Node properties. Returns a ticket."""
         params = {
             'db': database,
@@ -194,9 +201,10 @@ class Neo4jArrow:
         return self._submit((_JOB_GDS_WRITE_RELS, params_bytes))
 
     def gds_relationships(self, graph: str, database: str = 'neo4j',
-                          properties: List[str] = None,
-                          filters: List[str] = None, node_id: str = None,
-                          extra: dict = None) -> flight.Ticket:
+                          properties: Optional[List[str]] = None,
+                          filters: Optional[List[str]] = None,
+                          node_id: Optional[str] = None,
+                          extra: Optional[Dict[str, Any]] = None) -> flight.Ticket:
         """
         Submit a GDS job for retrieving Relationship properties.
         :param graph: name of the GDS graph
@@ -221,8 +229,8 @@ class Neo4jArrow:
         return self._submit((_JOB_GDS_READ, params_bytes))
 
     def khop(self, graph: str, database: str = 'neo4j',
-             node_id: str = None, rel_property: str = '_type_',
-             extra: dict = None) -> pa.flight.Ticket:
+             node_id: Optional[str] = None, rel_property: str = '_type_',
+             extra: Optional[Dict[str, Any]] = None) -> pa.flight.Ticket:
         """
         **Experimental** K-Hop Job support
         :param graph:
@@ -244,17 +252,19 @@ class Neo4jArrow:
         params_bytes = json.dumps(params).encode('utf8')
         return self._submit((_JOB_GDS_READ, params_bytes))
 
-    def status(self, ticket: Union[bytes, flight.Ticket] = None) \
+    def status(self, ticket: Optional[Union[bytes, flight.Ticket]] = None) \
             -> List[Tuple[str, JobStatus]]:
         """
-        Check job status for current jobs or for a specific job (by ticket).
-        :param ticket: a ticket to a Flight
-        :return: JobStatus representing the state of the Flight
+        Inspect the status of server-side Jobs, optionally filtering by a
+        given ticket.
+        :param ticket: Optional Ticket for filtering Jobs
+        :return: list of tuples of Job ID (a string) and Job Status
         """
-        body: bytes = b''
         if ticket:
             body = _coerce_ticket(ticket).serialize()
-        action = (_JOB_STATUS, body)
+            action = (_JOB_STATUS, body)
+        else:
+            action = (_JOB_STATUS, b'')
 
         # TODO: currently returns a single dict of all matching jobs & statuses
         results = self._client.do_action(action, self._options)
@@ -265,13 +275,16 @@ class Neo4jArrow:
     def wait_for_job(self, ticket: Union[bytes, pa.flight.Ticket],
                      status: JobStatus = JobStatus.PRODUCING,
                      must_exist: bool = True,
-                     timeout: int = None) -> bool:
+                     timeout: Optional[int] = None) -> bool:
         """Block until a given job (specified by a ticket) reaches a status."""
         start = time()
-        timeout = timeout or (1 << 25)  # well beyond someon's patience
+        timeout = timeout or (1 << 25)  # well beyond someone's patience
         while time() - start < timeout:
             try:
-                if self.status(ticket) == status:
+                statuses = self.status(ticket)
+                # TODO: when the status api is updated to offer filtering,
+                # revisit this logic
+                if status in [s[1] for s in statuses]:
                     return True
             except ArrowKeyError:
                 if must_exist:
@@ -281,7 +294,7 @@ class Neo4jArrow:
         return False
 
     def stream(self, ticket: Union[bytes, flight.Ticket],
-               timeout: int = None) -> flight.FlightStreamReader:
+               timeout: Optional[int] = None) -> flight.FlightStreamReader:
         """
         Read the stream associated with the given ticket.
         :param ticket:
@@ -293,9 +306,10 @@ class Neo4jArrow:
         return self._client.do_get(ticket, self._options)
 
     def put(self, ticket: Union[bytes, flight.Ticket],
-            data: Union[dict, TableLike, Iterable[TableLike],
+            data: Union[Dict[Any, Any], TableLike, Iterable[TableLike],
                         Iterator[TableLike]],
-            schema: Schema = None, metadata: dict = None) -> Tuple[int, int]:
+            schema: Optional[Schema] = None,
+            metadata: Optional[Dict[Any, Any]] = None) -> Tuple[int, int]:
         """
         Send data to the server for the corresponding Flight
 
@@ -310,8 +324,8 @@ class Neo4jArrow:
         return self.put_stream(ticket, data, metadata)
 
     def put_stream(self, ticket: Union[bytes, flight.Ticket],
-                   data: Union[dict, TableLike],
-                   metadata: dict = None) -> Tuple[int, int]:
+                   data: Union[Dict[Any, Any], TableLike],
+                   metadata: Optional[Dict[Any, Any]] = None) -> Tuple[int, int]:
         """
         Write a stream to the server
 
@@ -344,8 +358,9 @@ class Neo4jArrow:
     def put_stream_batches(self, ticket: flight.Ticket,
                            batches: Union[Iterable[TableLike],
                                           Iterator[TableLike]],
-                           schema: Schema = None,
-                           metadata: dict = None) -> Tuple[int, int]:
+                           schema: Optional[Schema] = None,
+                           metadata: Optional[Dict[Any, Any]] = None) \
+            -> Tuple[int, int]:
         """
         Write a stream using a batch producer.
         :param ticket: ticket for the Flight

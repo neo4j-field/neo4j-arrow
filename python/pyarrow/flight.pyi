@@ -1,12 +1,14 @@
-from typing import Any, Iterator, Generator, List, Tuple, Union
+from typing import Any, Dict, Iterator, Generator, List, Optional, Tuple, \
+    Union
 from pyarrow.lib import Buffer, RecordBatch, Schema, Table
 
 class Action: ...
 
 class FlightCallOptions:
-    def __init__(self, timeout: float = None, write_options: Any = None,
-                 headers: Union[List[Tuple[str, str]],
-                                List[Tuple[bytes, bytes]]] = None) -> None: ...
+    def __init__(self, timeout: Optional[float] = None, write_options: Any = None,
+                 headers: Optional[Union[List[Tuple[str, str]],
+                                         List[Tuple[bytes, bytes]]]] = None) \
+            -> None: ...
 
 class FlightDescriptor:
     @classmethod
@@ -31,8 +33,9 @@ class FlightStreamReader: ...
 class _CRecordBatchWriter:
     def close(self) -> None: ...
     def write(self, table_or_batch: Union[RecordBatch, Table]) -> None: ...
-    def write_table(self, table: Table, max_chunksize: int = None,
-                    kwargs: dict = None) -> None: ...
+    def write_table(self, table: Table,
+                    max_chunksize: Optional[int] = None,
+                    kwargs: Optional[Dict[str, Any]] = None) -> None: ...
 
 class MetadataRecordBatchWriter(_CRecordBatchWriter):
     def write_batch(self, batch: RecordBatch) -> None: ...
@@ -61,32 +64,37 @@ class Ticket:
     def deserialize(cls, serialized: bytes) -> Ticket: ...
 
 class FlightClient:
-    def __init__(self, location: Location, tls_root_certs: bytes = None,
-                 cert_chain: bytes = None, private_key: bytes = None,
-                 override_hostname: str = None, middleware: list = None,
-                 write_size_limit_bytes: int = None,
+    def __init__(self, location: Location,
+                 tls_root_certs: Optional[bytes] = None,
+                 cert_chain: Optional[bytes] = None,
+                 private_key: Optional[bytes] = None,
+                 override_hostname: Optional[str] = None,
+                 middleware: Optional[List[Any]] = None,
+                 write_size_limit_bytes: Optional[int] = None,
                  disable_server_verification: bool = False,
-                 generic_options: list = None) -> None: ...
+                 generic_options: Optional[List[Any]] = None) -> None: ...
 
     # TODO: do_action() supports other types for 'action' arg
     def do_action(self, action: Union[Tuple[str, bytes], Action],
-                  options: FlightCallOptions = None) -> Iterator[Result]: ...
+                  options: Optional[FlightCallOptions] = None) \
+            -> Iterator[Result]: ...
 
     def do_get(self, ticket: Ticket,
-                  options: FlightCallOptions = None) -> FlightStreamReader: ...
+                  options: Optional[FlightCallOptions] = None) \
+            -> FlightStreamReader: ...
 
     def do_put(self, descriptor: FlightDescriptor, schema: Schema,
-                  options: FlightCallOptions = None) \
+                  options:  Optional[FlightCallOptions] = None) \
             -> Tuple[FlightStreamWriter, FlightStreamReader]: ...
 
     def get_flight_info(self, descriptor: FlightDescriptor,
-                  options: FlightCallOptions = None) -> FlightInfo: ...
+                  options: Optional[FlightCallOptions] = None) -> FlightInfo: ...
 
-    def list_actions(self, options: FlightCallOptions = None) \
+    def list_actions(self, options: Optional[FlightCallOptions] = None) \
             -> List[Action]: ...
 
-    def list_flights(self, criteria: bytes = None,
-                     options: FlightCallOptions = None) \
+    def list_flights(self, criteria: Optional[bytes] = None,
+                     options: Optional[FlightCallOptions] = None) \
             -> Generator[FlightInfo, None, None]: ...
 
     def wait_for_available(self, timeout: int = 5) -> None: ...
