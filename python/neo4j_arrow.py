@@ -18,8 +18,9 @@ _JOB_GDS_READ = "gds.read"  # TODO: rename
 _JOB_GDS_WRITE_NODES = "gds.write.nodes"
 _JOB_GDS_WRITE_RELS = "gds.write.relationships"
 _JOB_KHOP = "khop"
-_JOB_STATUS = "info.jobs"
-_JOB_INFO = "info.version"
+_JOB_STATUS = "job.status"
+_JOB_INFO_VERSION = "info.version"
+_JOB_INFO_STATUS = "info.jobs"
 
 _DEFAULT_HOST = env.get('NEO4J_ARROW_HOST', 'localhost')
 _DEFAULT_PORT = int(env.get('NEO4J_ARROW_PORT', '9999'))
@@ -30,11 +31,19 @@ TableLike = TypeVar('TableLike', bound=Union[RecordBatch, Table])
 
 class JobStatus(Enum):
     """Represents the state of a server-side job"""
+    UNKNOWN = "UNKNOWN"
     INITIALIZING = "INITIALIZING"
     PENDING = "PENDING"
     COMPLETE = "COMPLETE"
     ERROR = "ERROR"
     PRODUCING = "PRODUCING"
+
+    @classmethod
+    def from_str(cls, s: str) -> JobStatus:
+        for status in JobStatus:
+            if status.value == s:
+                return status
+        return JobStatus.UNKNOWN
 
 
 def _coerce_ticket(maybe_ticket: Union[bytes, flight.Ticket]) -> flight.Ticket:
@@ -121,7 +130,7 @@ class Neo4jArrow:
         Get info on the Neo4j Arrow server
         :return: metadata describing Neo4j Arrow server (e.g. version)
         """
-        result = self._client.do_action((_JOB_INFO, b''), self._options)
+        result = self._client.do_action((_JOB_INFO_VERSION, b''), self._options)
         obj = json.loads(next(result).body.to_pybytes())
         if type(obj) is dict:
             return obj
@@ -252,28 +261,21 @@ class Neo4jArrow:
         params_bytes = json.dumps(params).encode('utf8')
         return self._submit((_JOB_GDS_READ, params_bytes))
 
-    def status(self, ticket: Optional[Union[bytes, flight.Ticket]] = None) \
-            -> List[Tuple[str, JobStatus]]:
+    def status(self, ticket: Union[bytes, flight.Ticket]) -> JobStatus:
         """
-        Inspect the status of server-side Jobs, optionally filtering by a
-        given ticket.
+        Inspect the status a server-side Job associated with a given Ticket.
         :param ticket: Optional Ticket for filtering Jobs
         :return: list of tuples of Job ID (a string) and Job Status
         """
-        if ticket:
-            body = _coerce_ticket(ticket).serialize()
-            action = (_JOB_STATUS, body)
-        else:
-            action = (_JOB_STATUS, b'')
+        body = _coerce_ticket(ticket).serialize()
+        action = (_JOB_STATUS, body)
 
-        # TODO: currently returns a single dict of all matching jobs & statuses
         results = self._client.do_action(action, self._options)
-        jobs = json.loads(next(results).body.to_pybytes().decode('utf8'))
-
-        return [(key, JobStatus(jobs[key])) for key in jobs]
+        status = next(results).body.to_pybytes().decode('utf8')
+        return JobStatus.from_str(status)
 
     def wait_for_job(self, ticket: Union[bytes, pa.flight.Ticket],
-                     status: JobStatus = JobStatus.PRODUCING,
+                     desired: JobStatus = JobStatus.PRODUCING,
                      must_exist: bool = True,
                      timeout: Optional[int] = None) -> bool:
         """Block until a given job (specified by a ticket) reaches a status."""
@@ -281,10 +283,8 @@ class Neo4jArrow:
         timeout = timeout or (1 << 25)  # well beyond someone's patience
         while time() - start < timeout:
             try:
-                statuses = self.status(ticket)
-                # TODO: when the status api is updated to offer filtering,
-                # revisit this logic
-                if status in [s[1] for s in statuses]:
+                current = self.status(ticket)
+                if current == desired:
                     return True
             except ArrowKeyError:
                 if must_exist:

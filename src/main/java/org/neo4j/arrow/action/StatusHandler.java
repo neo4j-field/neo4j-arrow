@@ -17,7 +17,7 @@ import java.util.List;
 public class StatusHandler implements ActionHandler {
     private static final Logger logger = LoggerFactory.getLogger(StatusHandler.class);
 
-    public static final String STATUS_ACTION = "jobStatus";
+    public static final String STATUS_ACTION = "job.status";
 
     @Override
     public List<String> actionTypes() {
