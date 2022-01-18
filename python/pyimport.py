@@ -11,12 +11,6 @@ import os.path as ospath
 _DIR = ospath.abspath(curdir)
 _GLOBAL_ID = 'Global'
 
-# Types, etc.
-
-
-class EntityType(Enum):
-    ...
-
 
 class EntityType(Enum):
     UNKNOWN = 'UNKNOWN'
@@ -24,15 +18,11 @@ class EntityType(Enum):
     REL = 'REL'
 
     @classmethod
-    def from_str(cls, s: str) -> EntityType:
+    def from_str(cls, s: str) -> 'EntityType':
         for _type in EntityType:
             if _type.value == s:
                 return _type
         return EntityType.UNKNOWN
-
-
-class FieldType(Enum):
-    ...
 
 
 class FieldType(Enum):
@@ -55,7 +45,7 @@ class FieldType(Enum):
     BYTE = 'byte'
 
     @classmethod
-    def from_str(cls, s: str) -> FieldType:
+    def from_str(cls, s: str) -> 'FieldType':
         for _type in FieldType:
             if _type.value == s:
                 return _type
@@ -95,8 +85,8 @@ def _parse_field(field: str) -> Field:
     name, _type = str(field).split(':')
     if '(' in _type and _type.endswith(')'):
         _type, id_space = _type.split('(')[0:-1]
-        return Field(name, FieldType.from_str(_type), id_space)
-    return Field(name, FieldType.from_str(_type))
+        return Field(name or _type, FieldType.from_str(_type), id_space)
+    return Field(name or _type, FieldType.from_str(_type))
 
 
 def _parse_header(header: str, delimiter: str = ',') -> List[Field]:
@@ -202,8 +192,8 @@ def load_import_csv(prefix: str, basedir: str = _DIR, delimiter: str = ',',
             column_names=[f.name for f in entity.fields])
         convert_opts = pa.csv.ConvertOptions(
             include_columns=_include_cols(entity.fields))
-        table = pa.csv.read_csv(path, read_options=read_opts,
-                                convert_options=convert_opts)
+        table = pa.csv.open_csv(path, read_options=read_opts,
+                                convert_options=convert_opts).read_all()
 
         # See if we can discern a label or type
         # TODO: split this out into special handling logic as the labels or

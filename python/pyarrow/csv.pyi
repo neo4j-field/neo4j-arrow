@@ -1,7 +1,10 @@
 from typing import Any, AnyStr, Dict, IO, List, Optional, Union
-from pyarrow.lib import MemoryPool, Schema, Table
+from pyarrow.lib import MemoryPool, RecordBatch, Schema, Table
 
-class CSVStreamingReader(): ...
+class CSVStreamingReader():
+    def read_all(self) -> Table: ...
+    def read_next_batch(self) -> RecordBatch: ...
+    schema: Schema
 
 class ConvertOptions():
     def __init__(self, check_utf8: bool = True,

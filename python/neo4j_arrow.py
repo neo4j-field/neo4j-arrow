@@ -31,10 +31,6 @@ TableLike = TypeVar('TableLike', bound=Union[RecordBatch, Table])
 
 
 class JobStatus(Enum):
-    ...  # stupid hack because of typing in from_str
-
-
-class JobStatus(Enum):
     """Represents the state of a server-side job"""
     UNKNOWN = "UNKNOWN"
     INITIALIZING = "INITIALIZING"
@@ -44,7 +40,7 @@ class JobStatus(Enum):
     PRODUCING = "PRODUCING"
 
     @classmethod
-    def from_str(cls, s: str) -> JobStatus:
+    def from_str(cls, s: str) -> 'JobStatus':
         for status in JobStatus:
             if status.value == s:
                 return status
