@@ -12,7 +12,12 @@ _DIR = ospath.abspath(curdir)
 _GLOBAL_ID = 'Global'
 
 # Types, etc.
-class EntityType(Enum): ...
+
+
+class EntityType(Enum):
+    ...
+
+
 class EntityType(Enum):
     UNKNOWN = 'UNKNOWN'
     NODE = 'NODE'
@@ -25,7 +30,11 @@ class EntityType(Enum):
                 return _type
         return EntityType.UNKNOWN
 
-class FieldType(Enum): ...
+
+class FieldType(Enum):
+    ...
+
+
 class FieldType(Enum):
     """
     Type of importable field. See the ops manual:
@@ -52,15 +61,18 @@ class FieldType(Enum):
                 return _type
         return FieldType.STRING
 
+
 class Field(NamedTuple):
     name: str
     type: FieldType = FieldType.STRING
     id_space: str = _GLOBAL_ID
 
+
 class Entity(NamedTuple):
     type: EntityType = EntityType.UNKNOWN
     fields: List[Field] = []
     files: List[str] = []
+
 
 def _include_cols(fields: List[Field]) -> List[str]:
     """
@@ -71,6 +83,7 @@ def _include_cols(fields: List[Field]) -> List[str]:
     """
     # TODO
     return [f.name for f in fields]
+
 
 def _parse_field(field: str) -> Field:
     """
@@ -100,7 +113,7 @@ def _parse_header(header: str, delimiter: str = ',') -> List[Field]:
     return [_parse_field(f) for f in parts]
 
 
-def load_dir(path: str, delimiter: str =',') -> Tuple[Any, Any]:
+def load_dir(path: str, delimiter: str = ',') -> Tuple[Any, Any]:
     """
     Import all CSV's in a given directory path.
 
@@ -108,7 +121,7 @@ def load_dir(path: str, delimiter: str =',') -> Tuple[Any, Any]:
     """
     root = ospath.expanduser(path)
     print(f'Loading from {root}')
-    
+
     targets = set()
     for f in listdir(root):
         # assumption is we have files like: '(nodes|relationships)_(type?)_N.csv'
@@ -122,10 +135,10 @@ def load_dir(path: str, delimiter: str =',') -> Tuple[Any, Any]:
         # we may have a missing label...use a generic label
         extra = {}
         if target.startswith('node') and target.count('_') == 1:
-            extra = { '_labels_': [['Node']] }
+            extra = {'_labels_': [['Node']]}
         table, entity = load_import_csv(target, basedir=path,
-                                             delimiter=delimiter,
-                                             extra_cols=extra)
+                                        delimiter=delimiter,
+                                        extra_cols=extra)
         if entity.type == EntityType.NODE:
             nodes.append(table)
         elif entity.type == EntityType.REL:
@@ -150,7 +163,7 @@ def load_import_csv(prefix: str, basedir: str = _DIR, delimiter: str = ',',
 
     Additional constant values can be added via the extra_cols allowing for
     adding things like node labels when such data is missing from the import.
-    
+
     For example: 
         - To add node labels: { '_labels_': ['User'] }
         - To add relationship types: { '_type_': 'FOLLOWS' }
@@ -161,8 +174,8 @@ def load_import_csv(prefix: str, basedir: str = _DIR, delimiter: str = ',',
         - Entity for the table (e.g. Node vs Rel)
     """
     files = [
-            f for f in listdir(basedir)
-            if f.startswith(prefix) and not 'header' in f
+        f for f in listdir(basedir)
+        if f.startswith(prefix) and not 'header' in f
     ]
     # Look at the header file to determine schema and data type (node vs rels)
     fields = []
@@ -190,7 +203,7 @@ def load_import_csv(prefix: str, basedir: str = _DIR, delimiter: str = ',',
         convert_opts = pa.csv.ConvertOptions(
             include_columns=_include_cols(entity.fields))
         table = pa.csv.read_csv(path, read_options=read_opts,
-                             convert_options=convert_opts)
+                                convert_options=convert_opts)
 
         # See if we can discern a label or type
         # TODO: split this out into special handling logic as the labels or
@@ -213,4 +226,3 @@ def load_import_csv(prefix: str, basedir: str = _DIR, delimiter: str = ',',
         tables.append(table)
 
     return pa.concat_tables(tables), entity
-

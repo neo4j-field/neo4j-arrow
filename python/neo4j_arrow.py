@@ -29,7 +29,11 @@ pa.enable_signal_handlers(True)
 
 TableLike = TypeVar('TableLike', bound=Union[RecordBatch, Table])
 
-class JobStatus(Enum): ...  # stupid hack because of typing in from_str
+
+class JobStatus(Enum):
+    ...  # stupid hack because of typing in from_str
+
+
 class JobStatus(Enum):
     """Represents the state of a server-side job"""
     UNKNOWN = "UNKNOWN"
@@ -131,7 +135,8 @@ class Neo4jArrow:
         Get info on the Neo4j Arrow server
         :return: metadata describing Neo4j Arrow server (e.g. version)
         """
-        result = self._client.do_action((_JOB_INFO_VERSION, b''), self._options)
+        result = self._client.do_action(
+            (_JOB_INFO_VERSION, b''), self._options)
         obj = json.loads(next(result).body.to_pybytes())
         if type(obj) is dict:
             return obj
@@ -343,7 +348,8 @@ class Neo4jArrow:
             table = table.replace_schema_metadata(schema.metadata)
 
         try:
-            descriptor = flight.FlightDescriptor.for_command(ticket.serialize())
+            descriptor = flight.FlightDescriptor.for_command(
+                ticket.serialize())
             writer, _ = self._client.do_put(descriptor, table.schema,
                                             self._options)
             # TODO: configurable or auto-chosen chunksize
