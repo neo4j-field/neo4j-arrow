@@ -40,6 +40,8 @@ Simply run: `$ ./gradlew plugin:shadowJar`
 You should end up with a Neo4j plugin jar in `./plugin/build/libs/`
 that you can drop into a Neo4j system.
 
+> Given the plugin is the heart and soul of current development, I have plans
+> to redesign the build system to make it the default project and target.
 
 ## Plugin Operation 🔌
 
@@ -93,6 +95,11 @@ vectors being created. Scalars generally outperform List-based vectors
 for multiple reasons: total buffer size and cpu instructions required
 to read/write a value.
 
+As of v3.something, some jobs let you override the partition and batch size
+dynamically by adding extra parameters to the job message. It's experimental,
+so you'll need to look at the Python wrapper code (`neo4j_arrow.py`) to see
+what works so far.
+
 
 ## The `neo4j-arrow` Protocol/Lifecycle 🗣️
 
@@ -108,11 +115,16 @@ The general lifecycle looks like:
    system, optionally using TLS.
 2. Submit a valid `neo4j-arrow` *Job* to the service. Current jobs
    include:
-   - Cypher Read jobs (`cypherRead`)
+   - Cypher Read jobs (`cypher.read`)
    - GDS Read jobs (`gds.read`) with ability to specify nodes or
      relationships
    - GDS Write Jobs (`gds.write.nodes` & `gds.write.relationships`)
      for creating GDS graphs from Arrow vectors/tables
+   - KHop Jobs (`khop`) (see [KHOP.md](./KHOP.md) for details)
+   - Bulk Neo4j database import (`import.bulk`) support
+   - Job Status reporting (`job.status`)
+   - Server version inspection (`info.version`)
+   - System-wide job status inspection (`info.jobs`)
 3. Take the given *ticket* returned by the server for the *Job* and
    either request a readable stream or submit a stream via a "put"
    operation.
