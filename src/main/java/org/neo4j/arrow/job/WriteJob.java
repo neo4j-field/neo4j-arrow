@@ -40,12 +40,12 @@ public abstract class WriteJob extends Job {
     }
 
     public void onStreamComplete(Schema schema) {
-        logger.info("stream completed");
+        logger.debug("stream completed");
         streamComplete.complete(null);
     }
 
     public void onSchema(Schema schema) {
-        logger.info("received schema");
+        logger.debug("received schema");
         this.schema.complete(schema);
     }
 

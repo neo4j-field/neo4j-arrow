@@ -29,9 +29,9 @@ import java.util.concurrent.Future;
 public class CypherActionHandler implements ActionHandler {
 
     /** A reading Cypher transaction */
-    public static final String CYPHER_READ_ACTION = "cypherRead";
+    public static final String CYPHER_READ_ACTION = "cypher.read";
     /** A writing Cypher transaction */
-    public static final String CYPHER_WRITE_ACTION = "cypherWrite";
+    public static final String CYPHER_WRITE_ACTION = "cypher.write";
 
     private static final List<String> supportedActions = List.of(CYPHER_READ_ACTION, CYPHER_WRITE_ACTION);
     private static final Logger logger = LoggerFactory.getLogger(CypherActionHandler.class);

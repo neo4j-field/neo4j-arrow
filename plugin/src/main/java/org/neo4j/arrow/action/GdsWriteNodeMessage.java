@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.neo4j.arrow.Neo4jDefaults;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -18,11 +19,11 @@ public class GdsWriteNodeMessage implements Message {
     public static final String JSON_KEY_DATABASE_NAME = "db";
     public static final String JSON_KEY_GRAPH_NAME = "graph";
     // TODO: "type" is pretty vague...needs a better name
-    public static final String JSON_KEY_NODE_ID_FIELD = "idField";
-    public static final String DEFAULT_NODE_ID_FIELD = "_node_id_";
+    public static final String JSON_KEY_NODE_ID_FIELD = "id_field";
+    public static final String DEFAULT_NODE_ID_FIELD = Neo4jDefaults.ID_FIELD;
 
-    public static final String JSON_KEY_LABELS_FIELD = "labelsField";
-    public static final String DEFAULT_LABELS_FIELD = "_labels_";
+    public static final String JSON_KEY_LABELS_FIELD = "labels_field";
+    public static final String DEFAULT_LABELS_FIELD = Neo4jDefaults.LABELS_FIELD;
 
     /** Name of the Neo4j Database where our Graph lives. Optional. Defaults to "neo4j" */
     private final String dbName;

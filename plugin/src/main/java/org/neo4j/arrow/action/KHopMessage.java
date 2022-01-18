@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.neo4j.arrow.Neo4jDefaults;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,8 +17,8 @@ public class KHopMessage implements Message {
     public static final String JSON_KEY_DATABASE_NAME = "db";
     public static final String JSON_KEY_GRAPH_NAME = "graph";
     public static final String JSON_KEY_K = "k";
-    public static final String JSON_KEY_REL_PROPERTY = "relProperty";
-    public static final String JSON_KEY_NODE_ID_PROPERTY = "node_id";
+    public static final String JSON_KEY_REL_PROPERTY = "rel_property"; // XXX is this correct/used?
+    public static final String JSON_KEY_NODE_ID_PROPERTY = Neo4jDefaults.ID_FIELD;
 
     private final String dbName;
     private final String graph;
@@ -78,7 +79,13 @@ public class KHopMessage implements Message {
         final String dbName = params.getOrDefault(JSON_KEY_DATABASE_NAME, "neo4j").toString();
         final String graph = params.getOrDefault(JSON_KEY_GRAPH_NAME, "random").toString();
         final String nodeIdProperty = params.getOrDefault(JSON_KEY_NODE_ID_PROPERTY, "").toString();
+
+        /*
+            XXX note that this property name ('_type_') is the trickery used to describe the direction of the
+            relationship and NOT the Relationship Type!!!
+         */
         final String relProperty = params.getOrDefault(JSON_KEY_REL_PROPERTY, "_type_").toString();
+
         final Integer k = (Integer) params.getOrDefault(JSON_KEY_K, 2);
 
         return new KHopMessage(dbName, graph, nodeIdProperty, k, relProperty);

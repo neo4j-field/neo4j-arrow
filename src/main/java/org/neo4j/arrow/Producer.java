@@ -84,7 +84,7 @@ public class Producer implements FlightProducer, AutoCloseable {
      */
     @Override
     public void getStream(CallContext context, Ticket ticket, ServerStreamListener listener) {
-        logger.info("getStream called: context={}, ticket={}", context, ticket.getBytes());
+        logger.debug("getStream called: context={}, ticket={}", context, ticket.getBytes());
 
         final Job rawJob = jobMap.get(ticket);
         if (rawJob == null) {
@@ -551,7 +551,7 @@ public class Producer implements FlightProducer, AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        logger.info("closing producer...");
+        logger.debug("closing producer...");
         for (Job job : jobMap.values()) {
             job.cancel(true);
             try {

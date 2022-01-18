@@ -1,5 +1,5 @@
-from typing import Any, Dict, Iterator, Generator, List, Optional, Tuple, \
-    Union
+from typing import Any, Dict, Iterable, Iterator, Generator, List, Optional, \
+    Tuple, Union
 from pyarrow.lib import Buffer, RecordBatch, Schema, Table
 
 class Action: ...
@@ -28,7 +28,15 @@ class FlightInfo:
     total_records: int
 
 class FlightMetadataReader: ...
-class FlightStreamReader: ...
+
+class FlightStreamChunk:
+    data: RecordBatch
+    app_metadata: Union[None, Any]
+
+class FlightStreamReader(Iterable[FlightStreamChunk]):
+    def __iter__(self) -> Iterator[FlightStreamChunk]: ...
+    def read_chunk(self) -> FlightStreamChunk: ...
+    schema: Schema
 
 class _CRecordBatchWriter:
     def close(self) -> None: ...

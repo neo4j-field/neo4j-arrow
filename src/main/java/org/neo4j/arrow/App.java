@@ -8,7 +8,7 @@ import org.apache.arrow.flight.auth2.CallHeaderAuthenticator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.neo4j.arrow.action.ActionHandler;
-import org.neo4j.arrow.auth.HorribleBasicAuthValidator;
+import org.neo4j.arrow.action.auth.HorribleBasicAuthValidator;
 
 import java.io.File;
 import java.io.IOException;

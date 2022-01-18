@@ -120,7 +120,7 @@ cores. (One can navigate the GIL for IO-bound things like networking, disk,
 etc., but anything creating/destroying Python objects needs to hold the GIL
 to do so.)
 
-Given the following program, [direct.py](examples/direct.py):
+Given the following program, [direct.py](speed/direct.py):
 
 ```python
 #!/usr/bin/env python

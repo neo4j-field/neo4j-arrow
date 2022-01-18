@@ -19,7 +19,6 @@ import java.util.stream.Collectors;
  *     primitives. This dramatically increases the efficiency and performance of Apache Arrow. As
  *     such, we use as many Java arrays as we can in lieu of boxed types in {@link List}s.
  * </p>
- * <p>TODO: Currently no label support :-(</p>
  */
 public class GdsNodeRecord extends GdsRecord {
     /** Represents the underlying node id */
@@ -27,8 +26,8 @@ public class GdsNodeRecord extends GdsRecord {
     private final Value labels;
 
     // THESE SHOULD MATCH THE DEFAULTS IN neo4j_arrow.py!!!!
-    public static final String NODE_ID_FIELD = "_node_id_";
-    public static final String LABELS_FIELD = "_labels_";
+    public static final String NODE_ID_FIELD = Neo4jDefaults.ID_FIELD;
+    public static final String LABELS_FIELD = Neo4jDefaults.LABELS_FIELD;
 
     protected GdsNodeRecord(long nodeId, Set<NodeLabel> labels, String[] keys, Value[] values, Function<Long, Long> nodeIdResolver) {
         super(keys, values);

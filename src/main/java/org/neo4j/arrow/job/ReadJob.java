@@ -37,7 +37,7 @@ public abstract class ReadJob extends Job {
     }
 
     protected void onFirstRecord(RowBasedRecord record) {
-        logger.info("First record received {}", record);
+        logger.debug("First record received {}", record);
         firstRecord.complete(record);
         setStatus(Status.PENDING);
     }

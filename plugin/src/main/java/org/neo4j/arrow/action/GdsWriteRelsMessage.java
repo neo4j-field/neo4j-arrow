@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.neo4j.arrow.Neo4jDefaults;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,14 +18,14 @@ public class GdsWriteRelsMessage implements Message {
     public static final String JSON_KEY_DATABASE_NAME = "db";
     public static final String JSON_KEY_GRAPH_NAME = "graph";
 
-    public static final String JSON_KEY_SOURCE_FIELD = "sourceField";
-    public static final String DEFAULT_SOURCE_FIELD = "_source_id_";
+    public static final String JSON_KEY_SOURCE_FIELD = "source_field";
+    public static final String DEFAULT_SOURCE_FIELD = Neo4jDefaults.SOURCE_FIELD;
 
-    public static final String JSON_KEY_TARGET_FIELD = "targetField";
-    public static final String DEFAULT_TARGET_FIELD = "_target_id_";
+    public static final String JSON_KEY_TARGET_FIELD = "target_field";
+    public static final String DEFAULT_TARGET_FIELD = Neo4jDefaults.TARGET_FIELD;
 
-    public static final String JSON_KEY_TYPE_FIELD = "typeField";
-    public static final String DEFAULT_TYPE_FIELD = "_type_";
+    public static final String JSON_KEY_TYPE_FIELD = "type_field";
+    public static final String DEFAULT_TYPE_FIELD = Neo4jDefaults.TYPE_FIELD;
 
     /** Name of the Neo4j Database where our Graph lives. Optional. Defaults to "neo4j" */
     private final String dbName;

@@ -8,7 +8,9 @@
 
 ## tl;dr: neo4j-arrow in a nutshell 🥜
 
-This project aims to step outside of traditional ways of integrating with Neo4j and expose things like the in-memory GDS graph projection via high-performance Arrow Flight APIs for streaming nodes, relationships, and their properties.
+This project aims to step outside of traditional ways of integrating with Neo4j
+and expose things like the in-memory GDS graph projection via high-performance
+Arrow Flight APIs for streaming nodes, relationships, and their properties.
 
 `neo4j-arrow` has been shown to:
 * ⏩ Move data out of Neo4j **20x faster** than the Neo4j Java Driver
@@ -47,7 +49,7 @@ your own jars from source.
 
 The `neo4j_arrow.py` PyArrow client requires **Python 3** and
 **PyArrow 6.0.0**. (It may still work with v5.0.0, but I'm developing on
-v6.0.0.)
+v6.0.x.)
 
 Any other Arrow Flight clients should use `v6.0.0` of Arrow/Arrow Flight if
 possible.
@@ -98,7 +100,7 @@ to read/write a value.
 read/write operations to Neo4j. While you can implement the protocol
 yourself using an Arrow/Arrow Flight client implementation in any
 language, a helpful wrapper using *PyArrow* is provided in
-[./neo4j_arrow.py](src/main/neo4j_arrow/neo4j_arrow.py).
+[python/neo4j_arrow.py](./python/neo4j_arrow.py).
 
 The general lifecycle looks like:
 
@@ -124,8 +126,7 @@ Assuming you've using `neo4j_arrow.py`, a simple GDS read operation to
 request and stream computed node embeddings (for example) looks like:
 
 ```python
-
-from src.main.neo4j_arrow import neo4j_arrow as na
+import neo4j_arrow as na
 
 # using the neo4j user and 'password' as the password
 client = na.Neo4jArrow('neo4j', 'password', ('neo4-host', 9999))
@@ -146,9 +147,12 @@ df = table.to_pandas()
 A few *IPython notebooks* are provided that demonstrate more complex
 usage of `neo4j-arrow` via PyArrow:
 
-1. [Basic usage](examples/PyArrow%20Demo.ipynb) and lifecycle
+1. [Basic usage](examples/PyArrow%20Demo.ipynb) and lifecycle.
 2. [Live migration](examples/live_migration_demo.ipynb) of a graph between
-  disparate Neo4j instances
+  disparate Neo4j instances.
+3. [Bulk import of a new Database](examples/BulkImport.ipynb) showing how to
+  bootstrap a new Neo4j database remotely using `neo4j-arrow` and PyArrow or
+  Pandas compatible data sources.
 
 Some code examples:
 
@@ -174,8 +178,8 @@ areas still requiring some development cycles or help.
     high_.
   * What, you don't like numbers? :-)
 - Error handling and cleanup for failed/incomplete jobs needs work.
-- Batch sizes are not dynamically configurable or chosen. Ideally they
-  would be determined based on schema and host hardware.
+- Batch sizes are not dynamically chosen. Ideally they would be determined
+  based on schema and host hardware.
   * As we develop and utilize `neo4j-arrow` a best practice should be
     baked in, but we're not there yet.
 - Cannot currently _write_ to the database via Cypher jobs.
@@ -192,4 +196,4 @@ areas still requiring some development cycles or help.
 Like other `neo4j-labs` and `neo4j-contrib` projects, this project is
 provided under the terms of the [Apache 2.0](./LICENSE) license.
 
-All files and code are copyright 2021, Neo4j, Inc.
+All files and code are copyright 2022, Neo4j, Inc.

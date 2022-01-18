@@ -9,9 +9,9 @@ import java.util.stream.Collectors;
 
 public class SubGraphRecord implements RowBasedRecord {
 
-    public final static String KEY_ORIGIN_ID = "_origin_id_";
-    public final static String KEY_SOURCE_IDS = "_source_ids_";
-    public final static String KEY_TARGET_IDS = "_target_ids_";
+    public final static String KEY_ORIGIN_ID = Neo4jDefaults.ID_FIELD;
+    public final static String KEY_SOURCE_IDS = Neo4jDefaults.SOURCE_FIELD;
+    public final static String KEY_TARGET_IDS = Neo4jDefaults.TARGET_FIELD;
 
     private final String[] keys = {
             KEY_ORIGIN_ID,

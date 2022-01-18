@@ -288,14 +288,14 @@ public class GdsReadJob extends ReadJob {
         final String[] keys = msg.getProperties().toArray(new String[0]);
         var triples = relTypes.stream()
                 .flatMap(relType -> {
-                    logger.info("assembling triples for type {}", relType);
+                    logger.debug("assembling triples for type {}", relType);
                     // Filtering for certain properties
                     if (msg.getProperties() != GdsMessage.ANY_PROPERTIES) {
                         return Arrays.stream(keys)
                                 .filter(key -> store.hasRelationshipProperty(relType, key))
                                 .map(key -> Triple.of(relType, key, store.getGraph(relType, Optional.of(key))));
                     } else {
-                        logger.info("using all property keys for {}", relType);
+                        logger.debug("using all property keys for {}", relType);
                         if (store.relationshipPropertyKeys(relType).isEmpty()) {
                             return Stream.of(Triple.of(relType, null, store.getGraph(relType, Optional.empty())));
                         } else {
@@ -306,7 +306,7 @@ public class GdsReadJob extends ReadJob {
                 })
                 .peek(triple -> logger.debug("constructed triple {}", triple))
                 .toArray(Triple[]::new);
-        logger.info(String.format("assembled %,d triples", triples.length));
+        logger.debug(String.format("assembled %,d triples", triples.length));
 
         if (baseGraph.nodeCount() == 0)
             throw CallStatus.NOT_FOUND.withDescription("no matching node ids for GDS job").toRuntimeException();
@@ -403,7 +403,7 @@ public class GdsReadJob extends ReadJob {
                 logger.info(" key {}/{}: {} -> {}", i, keys.length - 1, keys[i], propertiesArray[i].valueType());
 
             final BiConsumer<RowBasedRecord, Integer> consumer = futureConsumer.join();
-            logger.info("acquired consumer");
+            logger.debug("acquired consumer");
 
             // Blast off!
             // TODO: GDS lets us batch access to lists of nodes...future opportunity?
