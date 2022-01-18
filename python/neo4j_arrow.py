@@ -29,6 +29,7 @@ pa.enable_signal_handlers(True)
 
 TableLike = TypeVar('TableLike', bound=Union[RecordBatch, Table])
 
+class JobStatus(Enum): ...  # stupid hack because of typing in from_str
 class JobStatus(Enum):
     """Represents the state of a server-side job"""
     UNKNOWN = "UNKNOWN"

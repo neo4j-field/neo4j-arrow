@@ -12,6 +12,7 @@ _DIR = ospath.abspath(curdir)
 _GLOBAL_ID = 'Global'
 
 # Types, etc.
+class EntityType(Enum): ...
 class EntityType(Enum):
     UNKNOWN = 'UNKNOWN'
     NODE = 'NODE'
@@ -24,6 +25,7 @@ class EntityType(Enum):
                 return _type
         return EntityType.UNKNOWN
 
+class FieldType(Enum): ...
 class FieldType(Enum):
     """
     Type of importable field. See the ops manual:
@@ -50,15 +52,15 @@ class FieldType(Enum):
                 return _type
         return FieldType.STRING
 
-class Entity(NamedTuple):
-    type: EntityType = EntityType.UNKNOWN
-    fields: List[Field] = []
-    files: List[str] = []
-
 class Field(NamedTuple):
     name: str
     type: FieldType = FieldType.STRING
     id_space: str = _GLOBAL_ID
+
+class Entity(NamedTuple):
+    type: EntityType = EntityType.UNKNOWN
+    fields: List[Field] = []
+    files: List[str] = []
 
 def _include_cols(fields: List[Field]) -> List[str]:
     """
