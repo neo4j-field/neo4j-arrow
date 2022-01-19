@@ -3,7 +3,7 @@ import pyarrow.csv
 from pyarrow.lib import Array, Table
 
 from enum import Enum
-from typing import cast, Any, Dict, List, NamedTuple, Tuple, Union
+from typing import cast, Any, Dict, List, NamedTuple, Tuple, Union, Optional
 from os import curdir, listdir
 import os.path as ospath
 
@@ -103,21 +103,31 @@ def _parse_header(header: str, delimiter: str = ',') -> List[Field]:
     return [_parse_field(f) for f in parts]
 
 
-def load_dir(path: str, delimiter: str = ',') -> Tuple[Any, Any]:
+def load_dir(path: str, delimiter: str = ',',
+             filters: Optional[List[str]] = None) -> Tuple[Any, Any]:
     """
-    Import all CSV's in a given directory path.
+    Import all CSVs in a given directory path.
 
-    Returns a tuple of lists of node tables and lists of relationship tables.
+    :param path: path to the directory
+    :param delimiter: seperator used in the CSV file
+    :param filters: patterns for including files in the directory, defaults to
+    ['.csv', '.csv.gz']
+    :return: tuple of lists of Node Tables and lists of Relationship Tables
     """
+    if filters is None:
+        filters = ['.csv', '.csv.gz']
+
     root = ospath.expanduser(path)
     print(f'Loading from {root}')
 
     targets = set()
     for f in listdir(root):
-        # assumption is we have files like: '(nodes|relationships)_(type?)_N.csv'
-        # we want to find a representation for the unique entities
-        front_part = '_'.join(f.split('_')[0:-1]) + '_'
-        targets.add(front_part)
+        if len([True for ending in filters if f.endswith(ending)]) > 0:
+            # Assumption is we have files like:
+            #   '(nodes|relationships)_(type?)_N.csv'
+            # We want to find a representation for the unique entities.
+            front_part = '_'.join(f.split('_')[0:-1]) + '_'
+            targets.add(front_part)
 
     print(f'import targets: {targets}')
     nodes, rels = [], []
