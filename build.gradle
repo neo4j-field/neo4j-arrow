@@ -7,7 +7,7 @@ plugins {
 }
 
 group 'org.neo4j'
-version '4.0-SNAPSHOT'
+version '4.0'
 
 repositories {
     mavenCentral()
@@ -17,9 +17,9 @@ project.ext {
     arrowFlightGrpc = 'org.apache.arrow:flight-grpc:6.0.1'
     arrowCompression = 'org.apache.arrow:arrow-compression:6.0.1'
     neo4j = [
-        driverVersion: '4.4.1',
-        serverVersion: '4.4.0',
-        gdsVersion: '1.8.0',
+        driverVersion: '4.4.2',
+        serverVersion: '4.4.3',
+        gdsVersion: '1.8.2',
     ]
     jupiterVersion = '5.7.0'
     sl4jVersion = '1.7.31'
