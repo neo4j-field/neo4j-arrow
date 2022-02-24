@@ -63,7 +63,7 @@ public class SubGraphRecord implements RowBasedRecord {
 
     @Override
     public Value get(String field) {
-        switch (field.toLowerCase()) {
+        switch (field) {
             case KEY_ORIGIN_ID:  return get(0);
             case KEY_SOURCE_IDS: return get(1);
             case KEY_TARGET_IDS: return get(2);
