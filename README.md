@@ -1,3 +1,17 @@
+# ⚠️ ATTENTION! ⚠️
+**This project is no longer active and is not maintained or supported!**
+
+"But, Why!?", you may ask...
+
+BECAUSE PARTS OF IT ARE NOW IN THE PRODUCT! 🥳✨
+
+Please see the [Apache Arrow](https://neo4j.com/docs/graph-data-science/current/installation/installation-apache-arrow/)
+installation instructions in the Neo4j GDS documentation. 🚀
+
+
+> This repo will stay accessible as an archive for historical purposes. 
+
+---
 # neo4j-arrow 🏹 -- Graph Data Science Workflows _Accelerated_
 
 > “When you want to do something, do it right away. Do it when you can.
